@@ -13,9 +13,26 @@ Build full-stack Databricks applications using APX framework (FastAPI + React).
 
 ## Prerequisites Check
 
-1. Verify APX MCP available: `mcp-cli tools | grep apx`
+Option A)
+Repository configured for use with APX.
+1.. Verify APX MCP available: `mcp-cli tools | grep apx`
 2. Verify shadcn MCP available: `mcp-cli tools | grep shadcn`
 3. Confirm APX project (check `pyproject.toml`)
+
+Option B)
+Install APX
+1. Verify uv available or prompt for install. On Mac, suggest: `brew install uv`.
+2. Verify bun available or prompt for install. On Mac, suggest: 
+```
+brew tap oven-sh/bun
+brew install bun
+```
+3. Verify git available or prompt for install.
+4. Run APX setup commands:
+```
+uvx --from git+https://github.com/databricks-solutions/apx.git apx init
+```
+
 
 ## Workflow Overview
 
@@ -130,7 +147,28 @@ Manually verify in browser:
 - Mutations work (update, delete)
 - Loading states work (skeletons)
 
-## Phase 5: Documentation
+## Phase 5: Deployment & Monitoring
+
+### Deploy to Databricks
+
+Use DABs to deploy your APX application to Databricks. See the `dabs-writer` skill for complete deployment guidance.
+
+### Monitor Application Logs
+
+**View deployed app logs:**
+```bash
+databricks apps logs <app-name> --profile <profile-name>
+```
+
+**Key patterns to look for:**
+- ✅ `Deployment successful` - App deployed correctly
+- ✅ `App started successfully` - Application is running
+- ❌ `Error:` - Check stack traces for issues
+- 📝 Check both `[SYSTEM]` (deployment) and `[APP]` (application output) logs
+
+**First step when troubleshooting deployed apps: Check the logs!**
+
+## Phase 6: Documentation
 
 Create two markdown files:
 
@@ -176,6 +214,7 @@ Create two markdown files:
 
 ## Common Issues
 
+**Deployed app not working**: First check logs with `databricks apps logs <app-name>` to see deployment and runtime errors
 **Python type errors**: Use explicit casting for dict access, check Optional fields
 **TypeScript errors**: Wait for OpenAPI regen, verify hook names match operation_ids
 **OpenAPI not updating**: Check watcher status with `apx dev status`, restart if needed

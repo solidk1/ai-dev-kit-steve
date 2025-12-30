@@ -6,7 +6,7 @@ Build Python-based Databricks applications using frameworks like Dash, Streamlit
 
 **Invoke when user requests**:
 - "Dash app" or "Dash application"
-- "Streamlit app" (coming soon)
+- "Streamlit app" or "Streamlit application"
 - "Python web app" for Databricks
 - Building data visualization or dashboard apps
 - Order management, analytics dashboard, etc.
@@ -17,12 +17,42 @@ Build Python-based Databricks applications using frameworks like Dash, Streamlit
 
 Ask user which framework to use if not specified:
 - **Dash** - Rich interactive dashboards, Bootstrap components, Plotly charts
-- **Streamlit** - Rapid prototyping, simple syntax, data science focus (coming soon)
+- **Streamlit** - Rapid prototyping, simple syntax, data science focus, automatic reactivity
 - **Flask** - Lightweight, flexible, custom web apps (coming soon)
+
+### Dash vs Streamlit Comparison
+
+| Aspect | Dash | Streamlit |
+|--------|------|-----------|
+| **Development Speed** | Moderate (more boilerplate) | Fast (script-based) |
+| **Learning Curve** | Steeper (callbacks, components) | Gentle (Pythonic, intuitive) |
+| **Layout Control** | High (Bootstrap grid, custom CSS) | Medium (columns, containers) |
+| **Styling** | Extensive (Bootstrap themes, CSS) | Limited (custom CSS via markdown) |
+| **Callbacks** | Explicit (Input/Output decorators) | Automatic (reruns on interaction) |
+| **State Management** | Manual (via callbacks) | Built-in (st.session_state) |
+| **Performance** | Better for complex interactions | Slower (full page reruns) |
+| **Best For** | Production dashboards, BI tools | Prototypes, data science demos |
+| **Multi-page Apps** | Better routing support | Simpler but less flexible |
+| **Data Science Fit** | Good (requires more setup) | Excellent (notebook-like) |
+| **Code Complexity** | ~600 lines for full app | ~400 lines for full app |
+
+**Choose Dash when:**
+- Building production-grade business intelligence dashboards
+- Need precise control over layout and styling
+- Require complex callback chains and interactions
+- Want Bootstrap components and themes
+- Building for non-technical business users
+
+**Choose Streamlit when:**
+- Rapid prototyping and POCs
+- Data science team building internal tools
+- Simple data exploration and visualization
+- ML model demos and experiments
+- Prefer notebook-like development workflow
 
 For framework-specific details, see:
 - **[dash.md](dash.md)** - Complete Dash implementation guide
-- **streamlit.md** - Streamlit patterns (coming soon)
+- **[streamlit.md](streamlit.md)** - Complete Streamlit implementation guide
 - **flask.md** - Flask patterns (coming soon)
 
 ## Prerequisites Check
@@ -43,12 +73,40 @@ app-directory/
 ├── models.py              # Pydantic data models
 ├── backend_mock.py        # Mock backend with sample data
 ├── backend_real.py        # Real Databricks backend
-├── {framework}_app.py     # Main application (dash_app.py, etc.)
+├── {framework}_app.py     # Main application (dash_app.py, streamlit_app.py, etc.)
 ├── setup_database.py      # Database initialization
 ├── requirements.txt       # Python dependencies
-├── .env.{app}            # Environment configuration
+├── app.yaml              # Databricks Apps configuration
+├── .env                  # Environment configuration
 └── README.md             # Documentation
 ```
+
+### Framework-Specific Requirements
+
+**Dash (dash_app.py):**
+```txt
+dash>=2.14.0
+dash-bootstrap-components>=1.5.0
+pandas>=2.0.0
+plotly>=5.17.0
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+databricks-sdk>=0.12.0
+databricks-sql-connector>=3.0.0
+```
+
+**Streamlit (streamlit_app.py):**
+```txt
+streamlit>=1.28.0
+pandas>=2.0.0
+plotly>=5.17.0
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+databricks-sdk>=0.12.0
+databricks-sql-connector>=3.0.0
+```
+
+**Key Difference:** Dash requires `dash-bootstrap-components`, Streamlit doesn't need any additional UI libraries.
 
 ## Workflow Overview
 
@@ -423,12 +481,30 @@ class FilterCriteria(BaseModel):
 
 ## Troubleshooting
 
+**First Step: Check Application Logs**
+```bash
+# Always check logs first when troubleshooting
+databricks apps logs <app-name> --profile <profile-name>
+
+# Examples:
+databricks apps logs order-management-dash-dev -p DEFAULT
+databricks apps logs order-management-streamlit-dev -p DEFAULT
+```
+
+Logs reveal:
+- Deployment errors and stack traces
+- Backend connection status (look for "✅ Initialized real backend")
+- Missing dependencies or import errors
+- SQL connection failures
+- App startup issues
+
 **Connection Issues**
 - Verify Databricks CLI profile is configured: `databricks auth profiles`
 - Check `DATABRICKS_WAREHOUSE_ID` exists and is accessible
 - Ensure warehouse is running: `databricks warehouses get <warehouse-id>`
 - Verify network connectivity to workspace
 - For service principal: Check permissions on warehouse and catalog
+- **Check logs for connection errors:** `databricks apps logs <app-name>`
 
 **Data Type Errors**
 - Use Decimal for monetary values
@@ -462,10 +538,12 @@ Example: "Would you like to deploy using Databricks CLI or Databricks Asset Bund
 **Steps:**
 
 1. **Create app.yaml**
+
+**For Dash apps:**
 ```yaml
 command:
   - "python"
-  - "{framework}_app.py"  # e.g., dash_app.py
+  - "dash_app.py"
 
 env:
   - name: USE_MOCK_BACKEND
@@ -481,6 +559,30 @@ env:
   - name: DEBUG
     value: "false"
 ```
+
+**For Streamlit apps:**
+```yaml
+command:
+  - "streamlit"
+  - "run"
+  - "streamlit_app.py"
+  - "--server.port"
+  - "8080"
+  - "--server.address"
+  - "0.0.0.0"
+
+env:
+  - name: USE_MOCK_BACKEND
+    value: "false"
+  - name: DATABRICKS_WAREHOUSE_ID
+    value: "your-warehouse-id"
+  - name: DATABRICKS_CATALOG
+    value: "main"
+  - name: DATABRICKS_SCHEMA
+    value: "app_schema"
+```
+
+**Note:** Streamlit uses `streamlit run` command, while Dash uses `python`. Streamlit doesn't need `DATABRICKS_APP_PORT` env var as it's specified in the command.
 
 2. **Initialize database schema**
 ```bash
@@ -661,10 +763,36 @@ databricks bundle run <resource_key> -t prod
    - Configure service principal permissions
    - Grant warehouse access
 
-3. **Set up monitoring**
-   - View app logs: `databricks apps logs <app-name>`
-   - Monitor warehouse usage
-   - Track app performance
+3. **Set up monitoring and view logs**
+
+   **View application logs:**
+   ```bash
+   # View logs for your deployed app
+   databricks apps logs <app-name> --profile <profile-name>
+
+   # Examples:
+   databricks apps logs order-management-dash-dev --profile DEFAULT
+   databricks apps logs order-management-streamlit-dev --profile DEFAULT
+   ```
+
+   **What logs show:**
+   - `[SYSTEM]` - Deployment status, file updates, dependency installation
+   - `[APP]` - Application output (print statements, framework messages)
+   - Backend initialization messages
+   - Connection status to Unity Catalog
+   - Error messages and stack traces
+
+   **Useful for debugging:**
+   - ✅ Verify real backend connection: Look for "✅ Initialized real backend: main.schema"
+   - ✅ Check dependency installation: "Requirements installed successfully"
+   - ✅ Confirm app start: "App started successfully"
+   - ✅ Diagnose connection errors: SQL connection failures
+   - ✅ Track deployments: Each deployment has unique ID
+
+   **Additional monitoring:**
+   - Monitor warehouse usage in Databricks SQL
+   - Track app performance and response times
+   - Set up alerts for app failures
 
 4. **Documentation**
    - Update README with deployment URL
@@ -674,6 +802,6 @@ databricks bundle run <resource_key> -t prod
 ## Reference Materials
 
 For framework-specific implementation details:
-- **[dash.md](dash.md)** - Complete Dash implementation guide
-- **streamlit.md** - Streamlit patterns (coming soon)
+- **[dash.md](dash.md)** - Complete Dash implementation guide with Bootstrap components
+- **[streamlit.md](streamlit.md)** - Complete Streamlit implementation guide with caching patterns
 - **flask.md** - Flask patterns (coming soon)

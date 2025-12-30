@@ -244,6 +244,32 @@ databricks bundle run pipeline_name -t prod  # Run in specific environment
 databricks bundle run app_resource_key -t dev    # Start/deploy the app
 ```
 
+### Monitoring & Logs
+
+**View application logs (for Apps resources):**
+```bash
+# View logs for deployed apps
+databricks apps logs <app-name> --profile <profile-name>
+
+# Examples:
+databricks apps logs my-dash-app-dev -p DEFAULT
+databricks apps logs my-streamlit-app-prod -p DEFAULT
+```
+
+**What logs show:**
+- `[SYSTEM]` - Deployment progress, file updates, dependency installation
+- `[APP]` - Application output (print statements, errors)
+- Backend connection status
+- Deployment IDs and timestamps
+- Stack traces for errors
+
+**Key log patterns to look for:**
+- ✅ `Deployment successful` - Confirms deployment completed
+- ✅ `App started successfully` - App is running
+- ✅ `Initialized real backend` - Backend connected to Unity Catalog
+- ❌ `Error:` - Look for error messages and stack traces
+- 📝 `Requirements installed` - Dependencies loaded correctly
+
 ### Cleanup
 ```bash
 databricks bundle destroy -t dev
@@ -256,6 +282,8 @@ databricks bundle destroy -t prod --auto-approve
 
 | Issue | Solution |
 |-------|----------|
+| **App deployment fails** | Check logs: `databricks apps logs <app-name>` for error details |
+| **App not connecting to Unity Catalog** | Check logs for backend connection errors; verify warehouse ID and permissions |
 | **Wrong permission level** | Dashboards: CAN_READ/RUN/EDIT/MANAGE; Jobs: CAN_VIEW/MANAGE_RUN/MANAGE |
 | **Path resolution fails** | Use `../src/` in resources/*.yml, `./src/` in databricks.yml |
 | **Catalog doesn't exist** | Create catalog first or update variable |
@@ -265,6 +293,7 @@ databricks bundle destroy -t prod --auto-approve
 | **App not starting after deploy** | Apps require `databricks bundle run <resource_key>` to start |
 | **App env vars not working** | Environment variables go in `app.yaml` (source dir), not databricks.yml |
 | **Wrong app source path** | Use `../` from resources/ dir if source is in project root |
+| **Debugging any app issue** | First step: `databricks apps logs <app-name>` to see what went wrong |
 
 ## Key Principles
 
