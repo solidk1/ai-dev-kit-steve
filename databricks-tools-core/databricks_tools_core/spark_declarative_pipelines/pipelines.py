@@ -16,9 +16,77 @@ from databricks.sdk.service.pipelines import (
     PipelineEvent,
     GetUpdateResponse,
     UpdateInfoState,
+    PipelineCluster,
+    EventLogSpec,
+    Notifications,
+    RestartWindow,
+    PipelineDeployment,
+    Filters,
+    PipelinesEnvironment,
+    IngestionGatewayPipelineDefinition,
+    IngestionPipelineDefinition,
+    PipelineTrigger,
+    RunAs,
 )
 
 from ..auth import get_workspace_client
+
+
+# Fields that are not valid SDK parameters and should be filtered out
+_INVALID_SDK_FIELDS = {"pipeline_type"}
+
+# Fields that need conversion from dict to SDK objects
+_COMPLEX_FIELD_CONVERTERS = {
+    "libraries": lambda items: [PipelineLibrary.from_dict(item) for item in items] if items else None,
+    "clusters": lambda items: [PipelineCluster.from_dict(item) for item in items] if items else None,
+    "event_log": lambda item: EventLogSpec.from_dict(item) if item else None,
+    "notifications": lambda items: [Notifications.from_dict(item) for item in items] if items else None,
+    "restart_window": lambda item: RestartWindow.from_dict(item) if item else None,
+    "deployment": lambda item: PipelineDeployment.from_dict(item) if item else None,
+    "filters": lambda item: Filters.from_dict(item) if item else None,
+    "environment": lambda item: PipelinesEnvironment.from_dict(item) if item else None,
+    "gateway_definition": lambda item: IngestionGatewayPipelineDefinition.from_dict(item) if item else None,
+    "ingestion_definition": lambda item: IngestionPipelineDefinition.from_dict(item) if item else None,
+    "trigger": lambda item: PipelineTrigger.from_dict(item) if item else None,
+    "run_as": lambda item: RunAs.from_dict(item) if item else None,
+}
+
+
+def _convert_extra_settings(extra_settings: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Convert extra_settings dict to SDK-compatible kwargs.
+
+    - Filters out invalid fields (e.g., pipeline_type)
+    - Converts nested dicts to SDK objects (e.g., clusters, event_log)
+    - Passes simple types directly
+
+    Args:
+        extra_settings: Raw dict from user (e.g., from Databricks UI JSON export)
+
+    Returns:
+        Dict with SDK-compatible values
+    """
+    result = {}
+
+    for key, value in extra_settings.items():
+        # Skip invalid fields
+        if key in _INVALID_SDK_FIELDS:
+            continue
+
+        # Skip None values
+        if value is None:
+            continue
+
+        # Convert complex fields
+        if key in _COMPLEX_FIELD_CONVERTERS:
+            converted = _COMPLEX_FIELD_CONVERTERS[key](value)
+            if converted is not None:
+                result[key] = converted
+        else:
+            # Pass simple types directly (strings, bools, dicts like configuration/tags)
+            result[key] = value
+
+    return result
 
 
 # Terminal states - pipeline update has finished (success or failure)
@@ -151,9 +219,10 @@ def create_pipeline(
     catalog: str,
     schema: str,
     workspace_file_paths: List[str],
+    extra_settings: Optional[Dict[str, Any]] = None,
 ) -> CreatePipelineResponse:
     """
-    Create a new Spark Declarative Pipeline (Unity Catalog, serverless).
+    Create a new Spark Declarative Pipeline (Unity Catalog, serverless by default).
 
     Args:
         name: Pipeline name
@@ -161,6 +230,12 @@ def create_pipeline(
         catalog: Unity Catalog name
         schema: Schema name for output tables
         workspace_file_paths: List of workspace file paths (raw .sql or .py files)
+        extra_settings: Optional dict with additional pipeline settings. These are passed
+            directly to the Databricks SDK pipelines.create() call. Explicit parameters
+            (name, root_path, catalog, schema, workspace_file_paths) take precedence.
+            Supports all SDK options: clusters, continuous, development, photon, edition,
+            channel, event_log, configuration, notifications, tags, etc.
+            Note: If 'id' is provided in extra_settings, use update_pipeline instead.
 
     Returns:
         CreatePipelineResponse with pipeline_id
@@ -171,15 +246,28 @@ def create_pipeline(
     w = get_workspace_client()
     libraries = _build_libraries(workspace_file_paths)
 
-    return w.pipelines.create(
-        name=name,
-        root_path=root_path,
-        catalog=catalog,
-        schema=schema,
-        libraries=libraries,
-        continuous=False,
-        serverless=True,
-    )
+    # Start with converted extra_settings as base
+    kwargs: Dict[str, Any] = {}
+    if extra_settings:
+        kwargs = _convert_extra_settings(extra_settings)
+
+    # Explicit parameters always take precedence
+    kwargs["name"] = name
+    kwargs["root_path"] = root_path
+    kwargs["catalog"] = catalog
+    kwargs["schema"] = schema
+    kwargs["libraries"] = libraries
+
+    # Set defaults only if not provided in extra_settings
+    if "continuous" not in kwargs:
+        kwargs["continuous"] = False
+    if "serverless" not in kwargs:
+        kwargs["serverless"] = True
+
+    # Remove 'id' if present - create should not have an id
+    kwargs.pop("id", None)
+
+    return w.pipelines.create(**kwargs)
 
 
 def get_pipeline(pipeline_id: str) -> GetPipelineResponse:
@@ -203,6 +291,7 @@ def update_pipeline(
     catalog: Optional[str] = None,
     schema: Optional[str] = None,
     workspace_file_paths: Optional[List[str]] = None,
+    extra_settings: Optional[Dict[str, Any]] = None,
 ) -> None:
     """
     Update pipeline configuration.
@@ -214,11 +303,23 @@ def update_pipeline(
         catalog: New catalog name
         schema: New schema name
         workspace_file_paths: New list of file paths (raw .sql or .py files)
+        extra_settings: Optional dict with additional pipeline settings. These are passed
+            directly to the Databricks SDK pipelines.update() call. Explicit parameters
+            take precedence over values in extra_settings.
+            Supports all SDK options: clusters, continuous, development, photon, edition,
+            channel, event_log, configuration, notifications, tags, etc.
     """
     w = get_workspace_client()
 
-    kwargs: Dict[str, Any] = {"pipeline_id": pipeline_id}
+    # Start with converted extra_settings as base
+    kwargs: Dict[str, Any] = {}
+    if extra_settings:
+        kwargs = _convert_extra_settings(extra_settings)
 
+    # pipeline_id is required and always set
+    kwargs["pipeline_id"] = pipeline_id
+
+    # Explicit parameters take precedence (only if provided)
     if name:
         kwargs["name"] = name
     if root_path:
@@ -229,6 +330,10 @@ def update_pipeline(
         kwargs["schema"] = schema
     if workspace_file_paths:
         kwargs["libraries"] = _build_libraries(workspace_file_paths)
+
+    # Ensure id in kwargs matches pipeline_id (SDK uses both)
+    if "id" in kwargs and kwargs["id"] != pipeline_id:
+        kwargs["id"] = pipeline_id
 
     w.pipelines.update(**kwargs)
 
@@ -408,17 +513,18 @@ def create_or_update_pipeline(
     wait_for_completion: bool = False,
     full_refresh: bool = True,
     timeout: int = 1800,
+    extra_settings: Optional[Dict[str, Any]] = None,
 ) -> PipelineRunResult:
     """
     Create a new pipeline or update an existing one with the same name.
 
     This is the main entry point for pipeline management. It:
-    1. Searches for an existing pipeline with the same name
+    1. Searches for an existing pipeline with the same name (or uses 'id' from extra_settings)
     2. Creates a new pipeline or updates the existing one
     3. Optionally starts a pipeline run
     4. Optionally waits for the run to complete
 
-    Uses Unity Catalog and serverless compute.
+    Uses Unity Catalog and serverless compute by default.
 
     Args:
         name: Pipeline name (used for lookup and creation)
@@ -430,6 +536,11 @@ def create_or_update_pipeline(
         wait_for_completion: If True, wait for the run to complete (requires start_run=True)
         full_refresh: If True, perform full refresh when starting
         timeout: Maximum wait time in seconds (default: 30 minutes)
+        extra_settings: Optional dict with additional pipeline settings. Supports all SDK
+            options: clusters, continuous, development, photon, edition, channel, event_log,
+            configuration, notifications, tags, serverless, etc.
+            If 'id' is provided, the pipeline will be updated instead of created.
+            Explicit parameters (name, root_path, catalog, schema) take precedence.
 
     Returns:
         PipelineRunResult with detailed status including:
@@ -442,8 +553,15 @@ def create_or_update_pipeline(
         - errors: List of detailed errors if failed
         - message: Human-readable status message
     """
-    # Step 1: Check if pipeline exists
-    existing_pipeline_id = find_pipeline_by_name(name)
+    # Step 1: Check if pipeline exists (by name or by id in extra_settings)
+    existing_pipeline_id = None
+
+    # If extra_settings contains an 'id', use it for update
+    if extra_settings and extra_settings.get("id"):
+        existing_pipeline_id = extra_settings["id"]
+    else:
+        existing_pipeline_id = find_pipeline_by_name(name)
+
     created = existing_pipeline_id is None
 
     # Step 2: Create or update
@@ -455,6 +573,7 @@ def create_or_update_pipeline(
                 catalog=catalog,
                 schema=schema,
                 workspace_file_paths=workspace_file_paths,
+                extra_settings=extra_settings,
             )
             pipeline_id = response.pipeline_id
         else:
@@ -466,6 +585,7 @@ def create_or_update_pipeline(
                 catalog=catalog,
                 schema=schema,
                 workspace_file_paths=workspace_file_paths,
+                extra_settings=extra_settings,
             )
     except Exception as e:
         # Return detailed error for LLM consumption

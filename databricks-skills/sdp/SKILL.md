@@ -64,7 +64,7 @@ upload_folder(
 ### Step 3: Create/Update and Run Pipeline
 
 Use **`create_or_update_pipeline`** - the main entry point. It:
-1. Searches for an existing pipeline with the same name
+1. Searches for an existing pipeline with the same name (or uses `id` from `extra_settings`)
 2. Creates a new pipeline or updates the existing one
 3. Optionally starts a pipeline run
 4. Optionally waits for completion and returns detailed results
@@ -290,6 +290,424 @@ pipeline_name/
 | **SCD2 schema errors** | Let SDP infer START_AT/END_AT columns |
 
 **For detailed errors**, the `result["message"]` from `create_or_update_pipeline` includes suggested next steps. Use `get_pipeline_events(pipeline_id=...)` for full stack traces.
+
+---
+
+## Advanced Pipeline Configuration (`extra_settings`)
+
+By default, pipelines are created with serverless compute and Unity Catalog. Use the `extra_settings` parameter to customize pipeline behavior for advanced use cases.
+
+### When to Use `extra_settings`
+
+- **Non-serverless compute**: Use dedicated clusters with instance pools
+- **Development mode**: Faster iteration with relaxed validation
+- **Continuous pipelines**: Real-time streaming instead of triggered runs
+- **Custom compute**: Photon, specific editions, cluster configurations
+- **Event logging**: Custom event log table location
+- **Pipeline metadata**: Tags, configuration variables
+
+### `extra_settings` Parameter Reference
+
+#### Top-Level Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `serverless` | bool | `true` | Use serverless compute. Set `false` for dedicated clusters. |
+| `continuous` | bool | `false` | `true` = always running (real-time), `false` = triggered runs |
+| `development` | bool | `false` | Development mode: faster startup, relaxed validation, no retries |
+| `photon` | bool | `false` | Enable Photon vectorized query engine |
+| `edition` | str | `"CORE"` | `"CORE"`, `"PRO"`, or `"ADVANCED"`. Advanced required for CDC. |
+| `channel` | str | `"CURRENT"` | `"CURRENT"` (stable) or `"PREVIEW"` (latest features) |
+| `clusters` | list | `[]` | Cluster configs (required if `serverless=false`) |
+| `configuration` | dict | `{}` | Spark config key-value pairs (all values must be strings) |
+| `tags` | dict | `{}` | Pipeline metadata tags (max 25 tags) |
+| `event_log` | dict | auto | Custom event log table location |
+| `notifications` | list | `[]` | Email/webhook alerts on pipeline events |
+| `id` | str | - | Force update of specific pipeline ID |
+| `allow_duplicate_names` | bool | `false` | Allow multiple pipelines with same name |
+| `budget_policy_id` | str | - | Budget policy ID for cost tracking |
+| `storage` | str | - | DBFS root directory for checkpoints/tables (legacy, use Unity Catalog instead) |
+| `target` | str | - | **Deprecated**: Use `schema` parameter instead |
+| `dry_run` | bool | `false` | Validate pipeline without creating (create only) |
+| `run_as` | dict | - | Run pipeline as specific user/service principal |
+| `restart_window` | dict | - | Maintenance window for continuous pipeline restarts |
+| `filters` | dict | - | Include/exclude specific paths from pipeline |
+| `trigger` | dict | - | **Deprecated**: Use `continuous` instead |
+| `deployment` | dict | - | Deployment method (BUNDLE or DEFAULT) |
+| `environment` | dict | - | Python pip dependencies for serverless |
+| `gateway_definition` | dict | - | CDC gateway pipeline configuration |
+| `ingestion_definition` | dict | - | Managed ingestion settings (Salesforce, Workday, etc.) |
+| `usage_policy_id` | str | - | Usage policy ID |
+
+#### `clusters` Array - Cluster Configuration
+
+Each cluster object supports these fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `label` | str | **Required**. `"default"` for main cluster, `"maintenance"` for maintenance tasks |
+| `num_workers` | int | Fixed number of workers (use this OR autoscale, not both) |
+| `autoscale` | dict | `{"min_workers": 1, "max_workers": 4, "mode": "ENHANCED"}` |
+| `node_type_id` | str | Instance type, e.g., `"i3.xlarge"`, `"Standard_DS3_v2"` |
+| `driver_node_type_id` | str | Driver instance type (defaults to node_type_id) |
+| `instance_pool_id` | str | Use instances from this pool (faster startup) |
+| `driver_instance_pool_id` | str | Pool for driver node |
+| `spark_conf` | dict | Spark configuration for this cluster |
+| `spark_env_vars` | dict | Environment variables |
+| `custom_tags` | dict | Tags applied to cloud resources |
+| `init_scripts` | list | Init script locations |
+| `aws_attributes` | dict | AWS-specific: `{"availability": "SPOT", "zone_id": "us-west-2a"}` |
+| `azure_attributes` | dict | Azure-specific: `{"availability": "SPOT_AZURE"}` |
+| `gcp_attributes` | dict | GCP-specific settings |
+
+**Autoscale modes**: `"LEGACY"` or `"ENHANCED"` (recommended, optimizes for DLT workloads)
+
+#### `event_log` Object - Custom Event Log Location
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `catalog` | str | Unity Catalog name for event log table |
+| `schema` | str | Schema name for event log table |
+| `name` | str | Table name for event logs |
+
+#### `notifications` Array - Alert Configuration
+
+Each notification object:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `email_recipients` | list | List of email addresses |
+| `alerts` | list | Events to alert on: `"on-update-success"`, `"on-update-failure"`, `"on-update-fatal-failure"`, `"on-flow-failure"` |
+
+#### `configuration` Dict - Spark/Pipeline Config
+
+Common configuration keys (all values must be strings):
+
+| Key | Description |
+|-----|-------------|
+| `spark.sql.shuffle.partitions` | Number of shuffle partitions (`"auto"` recommended) |
+| `pipelines.numRetries` | Number of retries on transient failures |
+| `pipelines.trigger.interval` | Trigger interval for continuous pipelines, e.g., `"1 hour"` |
+| `spark.databricks.delta.preview.enabled` | Enable Delta preview features (`"true"`) |
+
+#### `run_as` Object - Pipeline Execution Identity
+
+Specify which user or service principal runs the pipeline:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `user_name` | str | Email of workspace user (can only set to your own email) |
+| `service_principal_name` | str | Application ID of service principal (requires servicePrincipal/user role) |
+
+**Note**: Only one of `user_name` or `service_principal_name` can be set.
+
+#### `restart_window` Object - Continuous Pipeline Restart Schedule
+
+For continuous pipelines, define when restarts can occur:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `start_hour` | int | **Required**. Hour (0-23) when 5-hour restart window begins |
+| `days_of_week` | list | Days allowed: `"MONDAY"`, `"TUESDAY"`, etc. (default: all days) |
+| `time_zone_id` | str | Timezone, e.g., `"America/Los_Angeles"` (default: UTC) |
+
+#### `filters` Object - Path Filtering
+
+Include or exclude specific paths from the pipeline:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `include` | list | List of paths to include |
+| `exclude` | list | List of paths to exclude |
+
+#### `environment` Object - Python Dependencies (Serverless)
+
+Install pip dependencies for serverless pipelines:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `dependencies` | list | List of pip requirements (e.g., `["pandas==2.0.0", "requests"]`) |
+
+#### `deployment` Object - Deployment Method
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `kind` | str | `"BUNDLE"` (Databricks Asset Bundles) or `"DEFAULT"` |
+| `metadata_file_path` | str | Path to deployment metadata file |
+
+#### Edition Comparison
+
+| Feature | CORE | PRO | ADVANCED |
+|---------|------|-----|----------|
+| Streaming tables | Yes | Yes | Yes |
+| Materialized views | Yes | Yes | Yes |
+| Expectations (data quality) | Yes | Yes | Yes |
+| Change Data Capture (CDC) | No | No | Yes |
+| SCD Type 1/2 | No | No | Yes |
+
+### Example: Development Mode Pipeline
+
+```python
+result = create_or_update_pipeline(
+    name="my_dev_pipeline",
+    root_path="/Workspace/Users/user@example.com/my_pipeline",
+    catalog="dev_catalog",
+    schema="dev_schema",
+    workspace_file_paths=[...],
+    start_run=True,
+    extra_settings={
+        "development": True,  # Faster iteration
+        "tags": {"environment": "development", "owner": "data-team"}
+    }
+)
+```
+
+### Example: Non-Serverless with Dedicated Cluster
+
+```python
+result = create_or_update_pipeline(
+    name="prod_pipeline",
+    root_path="/Workspace/Users/user@example.com/my_pipeline",
+    catalog="prod_catalog",
+    schema="prod_schema",
+    workspace_file_paths=[...],
+    extra_settings={
+        "serverless": False,
+        "clusters": [{
+            "label": "default",
+            "num_workers": 4,
+            "node_type_id": "i3.xlarge",
+            "custom_tags": {"cost_center": "analytics"}
+        }],
+        "photon": True,
+        "edition": "ADVANCED"
+    }
+)
+```
+
+### Example: Continuous Streaming Pipeline
+
+```python
+result = create_or_update_pipeline(
+    name="realtime_pipeline",
+    root_path="/Workspace/Users/user@example.com/my_pipeline",
+    catalog="streaming_catalog",
+    schema="realtime",
+    workspace_file_paths=[...],
+    extra_settings={
+        "continuous": True,  # Always running, processes data as it arrives
+        "configuration": {
+            "spark.sql.shuffle.partitions": "auto"
+        }
+    }
+)
+```
+
+### Example: Using Instance Pool
+
+```python
+result = create_or_update_pipeline(
+    name="pool_pipeline",
+    root_path="/Workspace/Users/user@example.com/my_pipeline",
+    catalog="my_catalog",
+    schema="my_schema",
+    workspace_file_paths=[...],
+    extra_settings={
+        "serverless": False,
+        "clusters": [{
+            "label": "default",
+            "instance_pool_id": "0727-104344-hauls13-pool-xyz",
+            "num_workers": 2,
+            "custom_tags": {"project": "analytics"}
+        }]
+    }
+)
+```
+
+### Example: Custom Event Log Location
+
+```python
+result = create_or_update_pipeline(
+    name="audited_pipeline",
+    root_path="/Workspace/Users/user@example.com/my_pipeline",
+    catalog="my_catalog",
+    schema="my_schema",
+    workspace_file_paths=[...],
+    extra_settings={
+        "event_log": {
+            "catalog": "audit_catalog",
+            "schema": "pipeline_logs",
+            "name": "my_pipeline_events"
+        }
+    }
+)
+```
+
+### Example: Pipeline with Email Notifications
+
+```python
+result = create_or_update_pipeline(
+    name="monitored_pipeline",
+    root_path="/Workspace/Users/user@example.com/my_pipeline",
+    catalog="my_catalog",
+    schema="my_schema",
+    workspace_file_paths=[...],
+    extra_settings={
+        "notifications": [{
+            "email_recipients": ["team@example.com", "oncall@example.com"],
+            "alerts": ["on-update-failure", "on-update-fatal-failure", "on-flow-failure"]
+        }]
+    }
+)
+```
+
+### Example: Production Pipeline with Autoscaling
+
+```python
+result = create_or_update_pipeline(
+    name="prod_autoscale_pipeline",
+    root_path="/Workspace/Users/user@example.com/my_pipeline",
+    catalog="prod_catalog",
+    schema="prod_schema",
+    workspace_file_paths=[...],
+    extra_settings={
+        "serverless": False,
+        "development": False,
+        "photon": True,
+        "edition": "ADVANCED",
+        "clusters": [{
+            "label": "default",
+            "autoscale": {
+                "min_workers": 2,
+                "max_workers": 8,
+                "mode": "ENHANCED"
+            },
+            "node_type_id": "i3.xlarge",
+            "spark_conf": {
+                "spark.sql.adaptive.enabled": "true"
+            },
+            "custom_tags": {"environment": "production"}
+        }],
+        "notifications": [{
+            "email_recipients": ["data-team@example.com"],
+            "alerts": ["on-update-failure"]
+        }]
+    }
+)
+```
+
+### Example: Run as Service Principal
+
+```python
+result = create_or_update_pipeline(
+    name="scheduled_pipeline",
+    root_path="/Workspace/Users/user@example.com/my_pipeline",
+    catalog="my_catalog",
+    schema="my_schema",
+    workspace_file_paths=[...],
+    extra_settings={
+        "run_as": {
+            "service_principal_name": "00000000-0000-0000-0000-000000000000"
+        }
+    }
+)
+```
+
+### Example: Continuous Pipeline with Restart Window
+
+```python
+result = create_or_update_pipeline(
+    name="realtime_pipeline",
+    root_path="/Workspace/Users/user@example.com/my_pipeline",
+    catalog="my_catalog",
+    schema="my_schema",
+    workspace_file_paths=[...],
+    extra_settings={
+        "continuous": True,
+        "restart_window": {
+            "start_hour": 2,  # 2 AM
+            "days_of_week": ["SATURDAY", "SUNDAY"],
+            "time_zone_id": "America/Los_Angeles"
+        }
+    }
+)
+```
+
+### Example: Serverless with Python Dependencies
+
+```python
+result = create_or_update_pipeline(
+    name="ml_pipeline",
+    root_path="/Workspace/Users/user@example.com/my_pipeline",
+    catalog="my_catalog",
+    schema="my_schema",
+    workspace_file_paths=[...],
+    extra_settings={
+        "serverless": True,
+        "environment": {
+            "dependencies": [
+                "scikit-learn==1.3.0",
+                "pandas>=2.0.0",
+                "requests"
+            ]
+        }
+    }
+)
+```
+
+### Example: Update Existing Pipeline by ID
+
+If you have a pipeline ID from the Databricks UI, you can force an update:
+
+```python
+result = create_or_update_pipeline(
+    name="my_pipeline",
+    root_path="/Workspace/Users/user@example.com/my_pipeline",
+    catalog="my_catalog",
+    schema="my_schema",
+    workspace_file_paths=[...],
+    extra_settings={
+        "id": "554f4497-4807-4182-bff0-ffac4bb4f0ce"  # Forces update of this pipeline
+    }
+)
+```
+
+### Full JSON Export from Databricks UI
+
+You can copy pipeline settings from the Databricks UI (Pipeline Settings > JSON) and pass them directly. Invalid fields like `pipeline_type` are automatically filtered:
+
+```python
+# JSON from Databricks UI
+ui_settings = {
+    "id": "554f4497-4807-4182-bff0-ffac4bb4f0ce",
+    "pipeline_type": "WORKSPACE",  # Automatically filtered out
+    "continuous": False,
+    "development": True,
+    "photon": False,
+    "edition": "ADVANCED",
+    "channel": "CURRENT",
+    "clusters": [{
+        "label": "default",
+        "num_workers": 1,
+        "instance_pool_id": "0727-104344-pool-xyz"
+    }],
+    "configuration": {
+        "catalog": "main",
+        "schema": "my_schema"
+    }
+}
+
+result = create_or_update_pipeline(
+    name="my_pipeline",
+    root_path="/Workspace/...",
+    catalog="main",
+    schema="my_schema",
+    workspace_file_paths=[...],
+    extra_settings=ui_settings  # Pass the whole dict
+)
+```
+
+**Note**: Explicit parameters (`name`, `root_path`, `catalog`, `schema`, `workspace_file_paths`) always take precedence over values in `extra_settings`.
 
 ---
 

@@ -24,9 +24,10 @@ def create_pipeline(
     catalog: str,
     schema: str,
     workspace_file_paths: List[str],
+    extra_settings: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
-    Create a new Spark Declarative Pipeline (Unity Catalog, serverless).
+    Create a new Spark Declarative Pipeline (Unity Catalog, serverless by default).
 
     Args:
         name: Pipeline name
@@ -34,6 +35,9 @@ def create_pipeline(
         catalog: Unity Catalog name
         schema: Schema name for output tables
         workspace_file_paths: List of workspace file paths (raw .sql or .py files)
+        extra_settings: Optional dict with additional pipeline settings (clusters,
+            continuous, development, photon, edition, channel, event_log, configuration,
+            notifications, tags, serverless, etc.). Explicit parameters take precedence.
 
     Returns:
         Dictionary with pipeline_id of the created pipeline.
@@ -44,6 +48,7 @@ def create_pipeline(
         catalog=catalog,
         schema=schema,
         workspace_file_paths=workspace_file_paths,
+        extra_settings=extra_settings,
     )
     return {"pipeline_id": result.pipeline_id}
 
@@ -71,6 +76,7 @@ def update_pipeline(
     catalog: Optional[str] = None,
     schema: Optional[str] = None,
     workspace_file_paths: Optional[List[str]] = None,
+    extra_settings: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, str]:
     """
     Update pipeline configuration.
@@ -82,6 +88,9 @@ def update_pipeline(
         catalog: New catalog name
         schema: New schema name
         workspace_file_paths: New list of file paths (raw .sql or .py files)
+        extra_settings: Optional dict with additional pipeline settings (clusters,
+            continuous, development, photon, edition, channel, event_log, configuration,
+            notifications, tags, serverless, etc.). Explicit parameters take precedence.
 
     Returns:
         Dictionary with status message.
@@ -93,6 +102,7 @@ def update_pipeline(
         catalog=catalog,
         schema=schema,
         workspace_file_paths=workspace_file_paths,
+        extra_settings=extra_settings,
     )
     return {"status": "updated"}
 
@@ -206,17 +216,18 @@ def create_or_update_pipeline(
     wait_for_completion: bool = False,
     full_refresh: bool = True,
     timeout: int = 1800,
+    extra_settings: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Create a new pipeline or update an existing one with the same name.
 
     This is the main tool for pipeline management. It:
-    1. Searches for an existing pipeline with the same name
+    1. Searches for an existing pipeline with the same name (or uses 'id' from extra_settings)
     2. Creates a new pipeline or updates the existing one
     3. Optionally starts a pipeline run with full refresh
     4. Optionally waits for the run to complete and returns detailed results
 
-    Uses Unity Catalog and serverless compute.
+    Uses Unity Catalog and serverless compute by default.
 
     Args:
         name: Pipeline name (used for lookup and creation)
@@ -228,6 +239,11 @@ def create_or_update_pipeline(
         wait_for_completion: If True, wait for run to complete (default: False)
         full_refresh: If True, perform full refresh when starting (default: True)
         timeout: Maximum wait time in seconds (default: 1800 = 30 minutes)
+        extra_settings: Optional dict with additional pipeline settings. Supports all SDK
+            options: clusters, continuous, development, photon, edition, channel, event_log,
+            configuration, notifications, tags, serverless, etc.
+            If 'id' is provided, the pipeline will be updated instead of created.
+            Explicit parameters (name, root_path, catalog, schema) take precedence.
 
     Returns:
         Dictionary with detailed status:
@@ -254,6 +270,16 @@ def create_or_update_pipeline(
             start_run=True,
             wait_for_completion=True
         )
+
+        # Create with custom settings (non-serverless, development mode)
+        create_or_update_pipeline(
+            name="my_pipeline", ...,
+            extra_settings={
+                "serverless": False,
+                "development": True,
+                "clusters": [{"label": "default", "num_workers": 2}]
+            }
+        )
     """
     result = _create_or_update_pipeline(
         name=name,
@@ -265,6 +291,7 @@ def create_or_update_pipeline(
         wait_for_completion=wait_for_completion,
         full_refresh=full_refresh,
         timeout=timeout,
+        extra_settings=extra_settings,
     )
     return result.to_dict()
 
