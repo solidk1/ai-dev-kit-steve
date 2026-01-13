@@ -412,8 +412,11 @@ interface CoverageItem {
   skills: CoverageStatus;
   mcpFunctions: CoverageStatus;
   tested: CoverageStatus;
+  functionalInApp?: CoverageStatus;
   owner?: string;
   testLink?: string;
+  date?: string;
+  comments?: string;
 }
 
 interface CoverageSection {
@@ -425,7 +428,7 @@ const coverageSections: CoverageSection[] = [
   {
     title: 'Ingestion / ETL',
     items: [
-      { product: 'Lakeflow Spark Declarative Pipelines', skills: 'done', mcpFunctions: 'done', tested: 'in-progress', owner: '' },
+      { product: 'Lakeflow Spark Declarative Pipelines', skills: 'done', mcpFunctions: 'done', tested: 'done', functionalInApp: 'in-progress', owner: 'Cal Reynolds', date: 'Jan 13', comments: 'Tested with State Street example. Successful locally in deploying pipelines of python, sql and modifiable varieties (SCP, Iceberg, Clustering). \n\nNeeds claude-agent-sdk bug to be fixed to work with app' },
       { product: 'Lakeflow Jobs', skills: 'not-started', mcpFunctions: 'not-started', tested: 'not-started', owner: '' },
       { product: 'Synthetic Data Generation', skills: 'done', mcpFunctions: 'done', tested: 'done', owner: '' },
       { product: 'Unstructured Data Generation', skills: 'in-progress', mcpFunctions: 'in-progress', tested: 'not-started', owner: 'Quentin' },
@@ -493,11 +496,14 @@ function ToolsSkillsSection() {
         <table className="w-full">
           <thead>
             <tr className="bg-[var(--color-bg-secondary)] border-b border-[var(--color-border)]">
-              <th className="text-left px-4 py-3 text-sm font-semibold text-[var(--color-text-heading)]">Product</th>
-              <th className="text-center px-4 py-3 text-sm font-semibold text-[var(--color-text-heading)]">Skills</th>
-              <th className="text-center px-4 py-3 text-sm font-semibold text-[var(--color-text-heading)]">MCP Functions</th>
-              <th className="text-center px-4 py-3 text-sm font-semibold text-[var(--color-text-heading)]">Tested</th>
-              <th className="text-left px-4 py-3 text-sm font-semibold text-[var(--color-text-heading)]">Owner</th>
+              <th className="text-left px-6 py-4 text-sm font-semibold text-[var(--color-text-heading)]">Product</th>
+              <th className="text-center px-6 py-4 text-sm font-semibold text-[var(--color-text-heading)]">Skills</th>
+              <th className="text-center px-6 py-4 text-sm font-semibold text-[var(--color-text-heading)]">MCP Functions</th>
+              <th className="text-center px-6 py-4 text-sm font-semibold text-[var(--color-text-heading)]">Tested on Local Terminal</th>
+              <th className="text-center px-6 py-4 text-sm font-semibold text-[var(--color-text-heading)]">Functional in App</th>
+              <th className="text-left px-6 py-4 text-sm font-semibold text-[var(--color-text-heading)]">Owner</th>
+              <th className="text-left px-6 py-4 text-sm font-semibold text-[var(--color-text-heading)]">Date</th>
+              <th className="text-left px-6 py-4 text-sm font-semibold text-[var(--color-text-heading)]">Comments</th>
             </tr>
           </thead>
           <tbody>
@@ -505,7 +511,7 @@ function ToolsSkillsSection() {
               <React.Fragment key={section.title}>
                 {/* Section Header */}
                 <tr className="bg-[var(--color-accent-primary)]/10 border-b border-[var(--color-border)]">
-                  <td colSpan={5} className="px-4 py-2 text-sm font-semibold text-[var(--color-accent-primary)]">
+                  <td colSpan={8} className="px-6 py-3 text-sm font-semibold text-[var(--color-accent-primary)]">
                     {section.title}
                   </td>
                 </tr>
@@ -515,11 +521,14 @@ function ToolsSkillsSection() {
                     key={item.product}
                     className={`border-b border-[var(--color-border)] last:border-b-0 ${idx % 2 === 0 ? 'bg-[var(--color-background)]' : 'bg-[var(--color-bg-secondary)]/50'}`}
                   >
-                    <td className="px-4 py-3 pl-6 text-sm text-[var(--color-text-primary)]">{item.product}</td>
-                    <td className="px-4 py-3 text-center"><StatusBadge status={item.skills} /></td>
-                    <td className="px-4 py-3 text-center"><StatusBadge status={item.mcpFunctions} /></td>
-                    <td className="px-4 py-3 text-center"><StatusBadge status={item.tested} /></td>
-                    <td className="px-4 py-3 text-sm text-[var(--color-text-muted)]">{item.owner || '-'}</td>
+                    <td className="px-6 py-4 text-sm text-[var(--color-text-primary)]">{item.product}</td>
+                    <td className="px-6 py-4 text-center"><StatusBadge status={item.skills} /></td>
+                    <td className="px-6 py-4 text-center"><StatusBadge status={item.mcpFunctions} /></td>
+                    <td className="px-6 py-4 text-center"><StatusBadge status={item.tested} /></td>
+                    <td className="px-6 py-4 text-center">{item.functionalInApp ? <StatusBadge status={item.functionalInApp} /> : '-'}</td>
+                    <td className="px-6 py-4 text-sm text-[var(--color-text-muted)]">{item.owner || '-'}</td>
+                    <td className="px-6 py-4 text-sm text-[var(--color-text-muted)]">{item.date || '-'}</td>
+                    <td className="px-6 py-4 text-sm text-[var(--color-text-muted)] whitespace-pre-line max-w-md">{item.comments || '-'}</td>
                   </tr>
                 ))}
               </React.Fragment>
@@ -940,7 +949,7 @@ export default function DocPage() {
 
         {/* Content Area */}
         <main className="flex-1 overflow-y-auto">
-          <div className="max-w-4xl mx-auto px-8 py-8">
+          <div className="max-w-7xl mx-auto px-8 py-8">
             {renderSection()}
           </div>
         </main>
