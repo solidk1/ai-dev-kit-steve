@@ -134,6 +134,7 @@ async def stream_agent_response(
       resume=session_id,  # Resume from previous session if provided
       mcp_servers={'databricks': databricks_server},  # In-process SDK tools
       system_prompt=system_prompt,  # Databricks-focused system prompt
+      setting_sources=["user", "project"],  # Load Skills from filesystem
     )
 
     # Workaround for SDK bug: use async generator for prompt when using MCP servers

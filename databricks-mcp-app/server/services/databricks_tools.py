@@ -75,14 +75,18 @@ def _make_wrapper(name: str, description: str, schema: dict, fn):
 
     @tool(name, description, schema)
     async def wrapper(args: dict[str, Any]) -> dict[str, Any]:
+        import sys
+        print(f'[MCP TOOL] {name} called with args: {args}', file=sys.stderr, flush=True)
         logger.info(f'[MCP] Tool {name} called with args: {args}')
         try:
             # FastMCP tools are sync - run in thread pool
-            logger.info(f'[MCP] Running {name} in thread pool...')
+            print(f'[MCP TOOL] Running {name} in thread pool...', file=sys.stderr, flush=True)
             result = await asyncio.to_thread(fn, **args)
-            logger.info(f'[MCP] Tool {name} completed: {result}')
-            return {'content': [{'type': 'text', 'text': json.dumps(result, default=str)}]}
+            result_str = json.dumps(result, default=str)
+            print(f'[MCP TOOL] {name} completed, result length: {len(result_str)}', file=sys.stderr, flush=True)
+            return {'content': [{'type': 'text', 'text': result_str}]}
         except Exception as e:
+            print(f'[MCP TOOL] {name} FAILED: {e}', file=sys.stderr, flush=True)
             logger.exception(f'[MCP] Tool {name} failed: {e}')
             return {'content': [{'type': 'text', 'text': f'Error: {e}'}], 'is_error': True}
 
