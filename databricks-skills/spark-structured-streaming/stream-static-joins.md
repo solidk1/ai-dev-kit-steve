@@ -459,6 +459,58 @@ enriched.writeStream \
 - [ ] Idempotent writes configured (txnVersion/txnAppId)
 - [ ] Performance metrics tracked (input rate, batch duration)
 
+## Expert Tips
+
+### Delta Version Checking
+
+Delta tables automatically refresh each microbatch by checking the latest version:
+
+```python
+# Each microbatch:
+# 1. Spark checks Delta table version
+# 2. Reads latest version if changed
+# 3. Uses cached version if unchanged
+# 4. No manual refresh needed
+
+# This is why Delta tables work better than Parquet for dimensions
+# Parquet: Read once at startup (truly static)
+# Delta: Version checked each microbatch (semi-static)
+```
+
+### Broadcast Join Verification
+
+Always verify broadcast joins in production:
+
+```python
+# Check query plan
+enriched.explain(extended=True)
+
+# Look for:
+# - BroadcastHashJoin ✅ (fast, no shuffle)
+# - SortMergeJoin ⚠️ (slower, requires shuffle)
+
+# If seeing SortMergeJoin:
+# 1. Reduce dimension size (select columns, filter rows)
+# 2. Increase broadcast threshold
+# 3. Force broadcast hint
+```
+
+### Dimension Table Optimization
+
+Optimize dimension tables for streaming joins:
+
+```python
+# 1. Use Z-order or liquid clustering on join key
+spark.sql("""
+    OPTIMIZE device_dimensions
+    ZORDER BY (device_id)
+""")
+
+# 2. Keep dimension tables small (< 100MB ideal)
+# 3. Use Delta for automatic version checking
+# 4. Partition by frequently filtered columns
+```
+
 ## Related Skills
 
 - `stream-stream-joins` - Join two streaming sources with state management

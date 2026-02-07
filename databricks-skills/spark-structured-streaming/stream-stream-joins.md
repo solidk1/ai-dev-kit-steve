@@ -512,6 +512,74 @@ for stream in spark.streams.active:
 - [ ] Time zones normalized across streams
 - [ ] Performance metrics tracked (input rate, state size, watermark lag)
 
+## Expert Tips
+
+### Event Time vs Processing Time
+
+Always use event time for stream-stream joins:
+
+```python
+# ✅ CORRECT: Event time (deterministic)
+.withWatermark("event_time", "10 minutes")
+
+# ❌ WRONG: Processing time (non-deterministic)
+# Processing time varies based on system load
+# Results are not reproducible
+```
+
+### Watermark Semantics Deep Dive
+
+Understanding watermark behavior:
+
+```python
+# Watermark = max_event_time - delay_threshold
+# Example: max_event_time = 10:15, delay = 10 min
+# Watermark = 10:05
+
+# Events with timestamp < 10:05 are "too late"
+# - Inner join: May still match if other side hasn't expired
+# - Outer join: Dropped from outer side after watermark passes
+
+# Effective watermark = max(left_watermark, right_watermark)
+```
+
+### State Store Backend Selection
+
+Choose the right state store backend:
+
+```python
+# Default: In-memory (fast but limited)
+# Use for: Small state (< 10GB), low cardinality keys
+
+# RocksDB: Disk-backed (slower but scalable)
+spark.conf.set(
+    "spark.sql.streaming.stateStore.providerClass",
+    "com.databricks.sql.streaming.state.RocksDBStateProvider"
+)
+# Use for: Large state (> 10GB), high cardinality keys
+
+# Monitor state size to decide when to switch
+```
+
+### Join Condition Best Practices
+
+Always include explicit time bounds:
+
+```python
+# ❌ BAD: Unbounded (state grows forever)
+expr("s1.key = s2.key AND s2.ts >= s1.ts")
+
+# ✅ GOOD: Bounded (state bounded by watermark)
+expr("""
+    s1.key = s2.key AND
+    s2.ts >= s1.ts - interval 5 minutes AND
+    s2.ts <= s1.ts + interval 10 minutes
+""")
+
+# Why? Bounded ranges allow state cleanup
+# Unbounded ranges cause state to grow indefinitely
+```
+
 ## Related Skills
 
 - `stream-static-joins` - Enrich streams with Delta dimension tables
