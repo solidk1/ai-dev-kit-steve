@@ -1,11 +1,11 @@
 ---
-name: write-multiple-tables
-description: Write a single Spark stream to multiple Delta tables using ForEachBatch. Use when fanning out streaming data to multiple sinks, implementing medallion architecture (bronze/silver/gold), conditional routing, CDC patterns, or creating materialized views from a single stream.
+name: multi-sink-writes
+description: Write a single Spark stream to multiple Delta tables or Kafka topics using ForEachBatch. Use when fanning out streaming data to multiple sinks, implementing medallion architecture (bronze/silver/gold), conditional routing, CDC patterns, or creating materialized views from a single stream.
 ---
 
-# Write to Multiple Tables
+# Multi-Sink Writes
 
-Write a single streaming source to multiple Delta tables efficiently using ForEachBatch. Read once, write many - avoiding reprocessing the source multiple times.
+Write a single streaming source to multiple Delta tables or Kafka topics efficiently using ForEachBatch. Read once, write many - avoiding reprocessing the source multiple times.
 
 ## Quick Start
 
@@ -123,7 +123,6 @@ def medallion_architecture(batch_df, batch_id):
         .saveAsTable("gold.category_metrics")
     )
 
-# Single stream, multiple outputs
 stream.writeStream \
     .foreachBatch(medallion_architecture) \
     .trigger(processingTime="30 seconds") \
@@ -171,11 +170,6 @@ def route_by_type(batch_df, batch_id):
             .option("txnAppId", "router_reviews")
             .saveAsTable("reviews")
         )
-
-stream.writeStream \
-    .foreachBatch(route_by_type) \
-    .option("checkpointLocation", "/checkpoints/routing") \
-    .start()
 ```
 
 ### Pattern 3: Parallel Fan-Out
@@ -218,126 +212,21 @@ def parallel_write(batch_df, batch_id):
             for table_name, filter_expr in tables
         }
         
+        errors = []
         for future in as_completed(futures):
             table_name = futures[future]
             try:
-                result = future.result()
-                print(result)
+                future.result()
             except Exception as e:
-                print(f"Error writing {table_name}: {e}")
-                raise  # Fail batch if any write fails
+                errors.append((table_name, str(e)))
     
-    # Release cache
     batch_df.unpersist()
-
-stream.writeStream \
-    .foreachBatch(parallel_write) \
-    .option("checkpointLocation", "/checkpoints/parallel") \
-    .start()
+    
+    if errors:
+        raise Exception(f"Write failures: {errors}")
 ```
 
-### Pattern 4: Transactional Multi-Table Writes
-
-Ensure atomicity across multiple tables using transaction IDs:
-
-```python
-def transactional_write(batch_df, batch_id):
-    """Ensure atomicity across multiple tables using transaction IDs"""
-    
-    # Use batch_id as transaction version
-    txn_version = batch_id
-    app_id = "multi_sink_stream"
-    
-    # Table 1
-    (batch_df.write
-        .format("delta")
-        .option("txnVersion", txn_version)
-        .option("txnAppId", f"{app_id}_table1")
-        .mode("append")
-        .saveAsTable("table1")
-    )
-    
-    # Table 2
-    (batch_df.write
-        .format("delta")
-        .option("txnVersion", txn_version)
-        .option("txnAppId", f"{app_id}_table2")
-        .mode("append")
-        .saveAsTable("table2")
-    )
-    
-    # Table 3
-    (batch_df.write
-        .format("delta")
-        .option("txnVersion", txn_version)
-        .option("txnAppId", f"{app_id}_table3")
-        .mode("append")
-        .saveAsTable("table3")
-    )
-    
-    # If one fails, Spark will retry the entire batch
-    # Delta's idempotent writes ensure no duplicates
-
-stream.writeStream \
-    .foreachBatch(transactional_write) \
-    .option("checkpointLocation", "/checkpoints/transactional") \
-    .start()
-```
-
-### Pattern 5: CDC Multi-Target Pattern
-
-Apply CDC changes to both current state table and audit log:
-
-```python
-from delta.tables import DeltaTable
-from pyspark.sql.functions import current_timestamp, lit
-
-def cdc_multi_target_apply(batch_df, batch_id):
-    """Apply CDC changes to both current state table and audit log"""
-    
-    # Split by operation type
-    deletes = batch_df.filter(col("_op") == "DELETE")
-    upserts = batch_df.filter(col("_op").isin(["INSERT", "UPDATE"]))
-    
-    # Target 1: Current state table with MERGE
-    target_table = DeltaTable.forName(spark, "silver.customers")
-    
-    if upserts.count() > 0:
-        (target_table.alias("target")
-            .merge(upserts.alias("source"), "target.customer_id = source.customer_id")
-            .whenMatchedUpdateAll()
-            .whenNotMatchedInsertAll()
-            .execute()
-        )
-    
-    if deletes.count() > 0:
-        (target_table.alias("target")
-            .merge(deletes.alias("source"), "target.customer_id = source.customer_id")
-            .whenMatchedDelete()
-            .execute()
-        )
-    
-    # Target 2: Audit log (append all changes)
-    audit_df = (batch_df
-        .withColumn("_processed_at", current_timestamp())
-        .withColumn("_batch_id", lit(batch_id))
-    )
-    
-    (audit_df.write
-        .format("delta")
-        .mode("append")
-        .option("txnVersion", batch_id)
-        .option("txnAppId", "cdc_audit")
-        .saveAsTable("audit.customer_changes")
-    )
-
-stream.writeStream \
-    .foreachBatch(cdc_multi_target_apply) \
-    .option("checkpointLocation", "/checkpoints/cdc") \
-    .start()
-```
-
-### Pattern 6: Materialized Views
+### Pattern 4: Materialized Views
 
 Create multiple derived views from the same stream:
 
@@ -388,19 +277,14 @@ def create_materialized_views(batch_df, batch_id):
         .option("txnAppId", "views_sessions")
         .save("/delta/views/sessions")
     )
-
-stream.writeStream \
-    .foreachBatch(create_materialized_views) \
-    .option("checkpointLocation", "/checkpoints/views") \
-    .start()
 ```
 
-### Pattern 7: Error Handling with Dead Letter Queue
+### Pattern 5: Error Handling with Dead Letter Queue
 
 Route invalid records to DLQ:
 
 ```python
-from pyspark.sql.functions import when
+from pyspark.sql.functions import when, lit
 
 def write_with_dlq(batch_df, batch_id):
     """Write valid records to target, invalid to dead letter queue"""
@@ -440,11 +324,6 @@ def write_with_dlq(batch_df, batch_id):
             .mode("append")
             .saveAsTable("errors.dead_letter_queue")
         )
-
-stream.writeStream \
-    .foreachBatch(write_with_dlq) \
-    .option("checkpointLocation", "/checkpoints/dlq") \
-    .start()
 ```
 
 ## Performance Optimization
@@ -479,6 +358,8 @@ from concurrent.futures import ThreadPoolExecutor
 def parallel_write(batch_df, batch_id):
     """Write to independent tables in parallel"""
     
+    batch_df.cache()
+    
     def write_table(table_name, df):
         df.write.format("delta").mode("append").saveAsTable(table_name)
     
@@ -487,6 +368,8 @@ def parallel_write(batch_df, batch_id):
         executor.submit(write_table, "table1", batch_df)
         executor.submit(write_table, "table2", batch_df.filter(...))
         executor.submit(write_table, "table3", batch_df.filter(...))
+    
+    batch_df.unpersist()
 ```
 
 ## Common Issues
@@ -526,48 +409,6 @@ def inefficient_write(df, batch_id):
     df.groupBy(...).agg(...).write.save("/delta/table3")  # Move to stream!
 ```
 
-### Monitor Each Sink
-
-```python
-import time
-
-def monitored_multi_write(df, batch_id):
-    start = time.time()
-    
-    # Write 1
-    t1_start = time.time()
-    df.write.save("/delta/table1")
-    print(f"Table1: {time.time() - t1_start:.2f}s, rows: {df.count()}")
-    
-    # Write 2
-    t2_start = time.time()
-    df2 = df.filter(...)
-    df2.write.save("/delta/table2")
-    print(f"Table2: {time.time() - t2_start:.2f}s, rows: {df2.count()}")
-    
-    print(f"Total batch time: {time.time() - start:.2f}s")
-```
-
-### Handle Schema Evolution
-
-```python
-def schema_aware_write(df, batch_id):
-    """Handle schemas that may evolve over time"""
-    try:
-        (df.write
-            .format("delta")
-            .option("mergeSchema", "true")
-            .option("txnVersion", batch_id)
-            .mode("append")
-            .save("/delta/table")
-        )
-    except AnalysisException as e:
-        # Log schema mismatch for investigation
-        print(f"Schema error in batch {batch_id}: {e}")
-        # Write to fallback location
-        df.write.json(f"/fallback/batch_{batch_id}")
-```
-
 ## Production Checklist
 
 - [ ] One checkpoint per multi-sink stream
@@ -577,11 +418,10 @@ def schema_aware_write(df, batch_id):
 - [ ] Error handling and DLQ configured
 - [ ] Schema evolution handled
 - [ ] Performance monitoring per sink
-- [ ] Checkpoint location is unique and persistent
 
 ## Related Skills
 
-- `merge-multiple-tables-parallel` - Parallel MERGE operations
-- `kafka-to-delta` - Kafka ingestion patterns
+- `merge-operations` - Parallel MERGE operations
+- `kafka-streaming` - Kafka ingestion patterns
 - `stream-static-joins` - Enrichment before multi-sink writes
 - `checkpoint-best-practices` - Checkpoint configuration
