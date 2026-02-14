@@ -138,10 +138,7 @@ Claude now has both:
 
 | Tool | Description |
 |------|-------------|
-| `create_or_update_ka` | Create or update a Knowledge Assistant with document sources |
-| `get_ka` | Get KA details by tile ID |
-| `find_ka_by_name` | Find KA by name, returns tile ID |
-| `delete_ka` | Delete a Knowledge Assistant |
+| `manage_ka` | Manage Knowledge Assistants (create/update, get, find by name, delete) |
 
 ### Genie Spaces
 
@@ -152,14 +149,11 @@ Claude now has both:
 | `find_genie_by_name` | Find Genie Space by name, returns space ID |
 | `delete_genie` | Delete a Genie Space |
 
-### Multi-Agent Supervisor (MAS)
+### Supervisor Agent (MAS)
 
 | Tool | Description |
 |------|-------------|
-| `create_or_update_mas` | Create or update a Multi-Agent Supervisor |
-| `get_mas` | Get MAS details by tile ID |
-| `find_mas_by_name` | Find MAS by name, returns tile ID |
-| `delete_mas` | Delete a Multi-Agent Supervisor |
+| `manage_mas` | Manage Supervisor Agents (create/update, get, find by name, delete) |
 
 ### AI/BI Dashboards
 
