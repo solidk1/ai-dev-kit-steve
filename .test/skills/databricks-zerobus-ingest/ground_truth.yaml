@@ -1,9 +1,9 @@
 metadata:
-  skill_name: zerobus-ingest
+  skill_name: databricks-zerobus-ingest
   version: 0.1.0
   created_at: '2026-02-12T15:16:19.824336'
 test_cases:
-- id: zerobus-ingest_001
+- id: databricks-zerobus-ingest_001
   inputs:
     prompt: Build a simple Python producer that ingests JSON records into a Delta
       table using Zerobus
@@ -36,7 +36,7 @@ test_cases:
   metadata:
     category: happy_path
     difficulty: easy
-- id: zerobus-ingest_002
+- id: databricks-zerobus-ingest_002
   inputs:
     prompt: How do I set up authentication and find the server endpoint for Zerobus
       Ingest?
@@ -63,7 +63,7 @@ test_cases:
   metadata:
     category: setup
     difficulty: easy
-- id: zerobus-ingest_003
+- id: databricks-zerobus-ingest_003
   inputs:
     prompt: Create an async Python Zerobus producer with Protobuf serialization
   outputs:
@@ -91,7 +91,7 @@ test_cases:
   metadata:
     category: happy_path
     difficulty: medium
-- id: zerobus-ingest_004
+- id: databricks-zerobus-ingest_004
   inputs:
     prompt: Generate a Protobuf schema from a Unity Catalog table for Zerobus ingestion
   outputs:
@@ -117,7 +117,7 @@ test_cases:
   metadata:
     category: happy_path
     difficulty: medium
-- id: zerobus-ingest_005
+- id: databricks-zerobus-ingest_005
   inputs:
     prompt: Implement retry and reconnection logic for a Zerobus producer
   outputs:
@@ -141,7 +141,7 @@ test_cases:
   metadata:
     category: error_handling
     difficulty: hard
-- id: zerobus-ingest_006
+- id: databricks-zerobus-ingest_006
   inputs:
     prompt: Build a Zerobus Ingest client in Go that sends JSON records
   outputs:
@@ -165,7 +165,7 @@ test_cases:
   metadata:
     category: multi_language
     difficulty: medium
-- id: zerobus-ingest_007
+- id: databricks-zerobus-ingest_007
   inputs:
     prompt: What are the limits and constraints of Zerobus Ingest?
   outputs:

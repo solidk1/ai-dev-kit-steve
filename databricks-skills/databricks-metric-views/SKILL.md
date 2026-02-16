@@ -1,5 +1,5 @@
 ---
-name: metric-views
+name: databricks-metric-views
 description: "Unity Catalog metric views: define, create, query, and manage governed business metrics in YAML. Use when building standardized KPIs, revenue metrics, order analytics, or any reusable business metrics that need consistent definitions across teams and tools."
 ---
 

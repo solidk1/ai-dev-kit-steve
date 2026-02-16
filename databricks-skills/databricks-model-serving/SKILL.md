@@ -1,5 +1,5 @@
 ---
-name: model-serving
+name: databricks-model-serving
 description: "Deploy and query Databricks Model Serving endpoints. Use when (1) deploying MLflow models or AI agents to endpoints, (2) creating ChatAgent/ResponsesAgent agents, (3) integrating UC Functions or Vector Search tools, (4) querying deployed endpoints, (5) checking endpoint status. Covers classical ML models, custom pyfunc, and GenAI agents."
 ---
 
@@ -222,6 +222,14 @@ Available helper methods:
 - `self.create_function_call_output_item(call_id, output)` - tool results
 
 ---
+
+## Related Skills
+
+- **[databricks-agent-bricks](../databricks-agent-bricks/SKILL.md)** - Pre-built agent tiles that deploy to model-serving endpoints
+- **[databricks-vector-search](../databricks-vector-search/SKILL.md)** - Create vector indexes used as retriever tools in agents
+- **[databricks-genie](../databricks-genie/SKILL.md)** - Genie Spaces can serve as agents in multi-agent setups
+- **[mlflow-evaluation](../mlflow-evaluation/SKILL.md)** - Evaluate model and agent quality before deployment
+- **[databricks-jobs](../databricks-jobs/SKILL.md)** - Job-based async deployment used for agent endpoints
 
 ## Resources
 

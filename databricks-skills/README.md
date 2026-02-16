@@ -35,9 +35,9 @@ cp -r ai-dev-kit/databricks-skills/databricks-agent-bricks .claude/skills/
 ### 🤖 AI & Agents
 - **databricks-agent-bricks** - Knowledge Assistants, Genie Spaces, Supervisor Agents
 - **databricks-genie** - Genie Spaces: create, curate, and query via Conversation API
-- **model-serving** - Deploy MLflow models and AI agents to endpoints
+- **databricks-model-serving** - Deploy MLflow models and AI agents to endpoints
 - **unstructured-pdf-generation** - Generate synthetic PDFs for RAG
-- **vector-search** - Vector similarity search for RAG and semantic search
+- **databricks-vector-search** - Vector similarity search for RAG and semantic search
 
 ### 📊 MLflow (from [mlflow/skills](https://github.com/mlflow/skills))
 - **agent-evaluation** - End-to-end agent evaluation workflow

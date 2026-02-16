@@ -307,6 +307,14 @@ databricks bundle destroy -t prod --auto-approve
 4. **Groups**: Use `"users"` for all workspace users
 5. **Job permissions**: Verify custom groups exist; can't modify "admins"
 
+## Related Skills
+
+- **[spark-declarative-pipelines](../spark-declarative-pipelines/SKILL.md)** - pipeline definitions referenced by DABs
+- **[databricks-app-apx](../databricks-app-apx/SKILL.md)** - app deployment via DABs
+- **[databricks-app-python](../databricks-app-python/SKILL.md)** - Python app deployment via DABs
+- **[databricks-config](../databricks-config/SKILL.md)** - profile and authentication setup for CLI/SDK
+- **[databricks-jobs](../databricks-jobs/SKILL.md)** - job orchestration managed through bundles
+
 ## Resources
 
 - [Databricks Asset Bundles Documentation](https://docs.databricks.com/dev-tools/bundles/)

@@ -1,5 +1,5 @@
 ---
-name: vector-search
+name: databricks-vector-search
 description: "Patterns for Databricks Vector Search: create endpoints and indexes, query with filters, manage embeddings. Use when building RAG applications, semantic search, or similarity matching. Covers both storage-optimized and standard endpoints."
 ---
 
@@ -347,3 +347,11 @@ The following MCP tools are available for managing Vector Search infrastructure.
 - **Delta Sync recommended** - Easier than Direct Access for most scenarios
 - **Hybrid search** - Available for both Delta Sync and Direct Access indexes
 - **Management vs runtime** - MCP tools above handle lifecycle management; for agent tool-calling at runtime, use the Databricks managed Vector Search MCP server
+
+## Related Skills
+
+- **[databricks-model-serving](../databricks-model-serving/SKILL.md)** - Deploy agents that use VectorSearchRetrieverTool
+- **[databricks-agent-bricks](../databricks-agent-bricks/SKILL.md)** - Knowledge Assistants use RAG over indexed documents
+- **[unstructured-pdf-generation](../unstructured-pdf-generation/SKILL.md)** - Generate documents to index in Vector Search
+- **[databricks-unity-catalog](../databricks-unity-catalog/SKILL.md)** - Manage the catalogs and tables that back Delta Sync indexes
+- **[spark-declarative-pipelines](../spark-declarative-pipelines/SKILL.md)** - Build Delta tables used as Vector Search sources

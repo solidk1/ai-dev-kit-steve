@@ -1,6 +1,23 @@
 #!/bin/bash
 # Post-install setup for databricks-ai-dev-kit plugin
 # Creates virtual environment and installs MCP server dependencies
+# ============================================================
+# SECURITY NOTE: This script runs automatically on plugin load
+#
+# What it does:
+#   1. Creates .venv/ with Python 3.11 (if not present)
+#   2. Installs databricks-tools-core (local package)
+#   3. Installs databricks-mcp-server (local package)
+#   4. Verifies MCP server import works
+#
+# What it does NOT do:
+#   - Collect or transmit credentials
+#   - Modify files outside the plugin directory
+#   - Run with elevated privileges
+#   - Access your Databricks workspace (until you authenticate)
+#
+# Source: https://github.com/databricks-solutions/ai-dev-kit
+# ============================================================
 
 set -e
 

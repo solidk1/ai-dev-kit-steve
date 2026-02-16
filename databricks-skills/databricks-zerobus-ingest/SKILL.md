@@ -1,5 +1,5 @@
 ---
-name: zerobus-ingest
+name: databricks-zerobus-ingest
 description: "Build Zerobus Ingest clients for near real-time data ingestion into Databricks Delta tables via gRPC. Use when creating producers that write directly to Unity Catalog tables without a message bus, working with the Zerobus Ingest SDK in Python/Java/Go/TypeScript/Rust, generating Protobuf schemas from UC tables, or implementing stream-based ingestion with ACK handling and retry logic."
 ---
 
@@ -212,6 +212,14 @@ The timestamp generation must use microseconds for Databricks.
 | **Table not found** | Ensure table is a managed Delta table in a supported region with correct three-part name. |
 
 ---
+
+## Related Skills
+
+- **[databricks-python-sdk](../databricks-python-sdk/SKILL.md)** - General SDK patterns and WorkspaceClient for table/schema management
+- **[spark-declarative-pipelines](../spark-declarative-pipelines/SKILL.md)** - Downstream pipeline processing of ingested data
+- **[databricks-unity-catalog](../databricks-unity-catalog/SKILL.md)** - Managing catalogs, schemas, and tables that Zerobus writes to
+- **[synthetic-data-generation](../synthetic-data-generation/SKILL.md)** - Generate test data to feed into Zerobus producers
+- **[databricks-config](../databricks-config/SKILL.md)** - Profile and authentication setup
 
 ## Resources
 

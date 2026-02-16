@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "databricks": {
-      "command": "../.venv/bin/python",
-      "args": ["../databricks-mcp-server/run_server.py"]
-    }
-  }
-}

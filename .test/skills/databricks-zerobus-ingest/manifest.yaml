@@ -1,4 +1,4 @@
-skill_name: zerobus-ingest
+skill_name: databricks-zerobus-ingest
 description: Test cases for Zerobus Ingest skill - gRPC-based data ingestion into Delta tables
 triggers:
 - zerobus
@@ -36,7 +36,7 @@ scorers:
     - Read
     banned_tools: []
     expected_files:
-    - databricks-skills/zerobus-ingest/SKILL.md
+    - databricks-skills/databricks-zerobus-ingest/SKILL.md
 quality_gates:
   syntax_valid: 1.0
   pattern_adherence: 0.9
