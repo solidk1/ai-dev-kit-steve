@@ -1,5 +1,5 @@
 ---
-name: spark-declarative-pipelines
+name: databricks-spark-declarative-pipelines
 description: "Creates, configures, and updates Databricks Lakeflow Spark Declarative Pipelines (SDP/LDP) using serverless compute. Handles streaming tables, materialized views, CDC, SCD Type 2, and Auto Loader ingestion patterns. Use when building data pipelines, working with Delta Live Tables, ingesting streaming data, implementing change data capture, or when the user mentions SDP, LDP, DLT, Lakeflow pipelines, streaming tables, or bronze/silver/gold medallion architectures."
 ---
 
@@ -573,5 +573,5 @@ For advanced configuration options (development mode, continuous pipelines, cust
 
 - **[databricks-jobs](../databricks-jobs/SKILL.md)** - for orchestrating and scheduling pipeline runs
 - **[databricks-asset-bundles](../databricks-asset-bundles/SKILL.md)** - for multi-environment deployment of pipeline projects
-- **[synthetic-data-generation](../synthetic-data-generation/SKILL.md)** - for generating test data to feed into pipelines
+- **[databricks-synthetic-data-generation](../databricks-synthetic-data-generation/SKILL.md)** - for generating test data to feed into pipelines
 - **[databricks-unity-catalog](../databricks-unity-catalog/SKILL.md)** - for catalog/schema/volume management and governance

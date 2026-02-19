@@ -228,7 +228,7 @@ Available helper methods:
 - **[databricks-agent-bricks](../databricks-agent-bricks/SKILL.md)** - Pre-built agent tiles that deploy to model-serving endpoints
 - **[databricks-vector-search](../databricks-vector-search/SKILL.md)** - Create vector indexes used as retriever tools in agents
 - **[databricks-genie](../databricks-genie/SKILL.md)** - Genie Spaces can serve as agents in multi-agent setups
-- **[mlflow-evaluation](../mlflow-evaluation/SKILL.md)** - Evaluate model and agent quality before deployment
+- **[databricks-mlflow-evaluation](../databricks-mlflow-evaluation/SKILL.md)** - Evaluate model and agent quality before deployment
 - **[databricks-jobs](../databricks-jobs/SKILL.md)** - Job-based async deployment used for agent endpoints
 
 ## Resources

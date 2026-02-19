@@ -919,5 +919,5 @@ print(result["url"])
 ## Related Skills
 
 - **[databricks-unity-catalog](../databricks-unity-catalog/SKILL.md)** - for querying the underlying data and system tables
-- **[spark-declarative-pipelines](../spark-declarative-pipelines/SKILL.md)** - for building the data pipelines that feed dashboards
+- **[databricks-spark-declarative-pipelines](../databricks-spark-declarative-pipelines/SKILL.md)** - for building the data pipelines that feed dashboards
 - **[databricks-jobs](../databricks-jobs/SKILL.md)** - for scheduling dashboard data refreshes
