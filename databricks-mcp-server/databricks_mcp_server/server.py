@@ -21,6 +21,7 @@ from .middleware import TimeoutHandlingMiddleware
 # Windows fixes — must run BEFORE FastMCP init and tool registration
 # ---------------------------------------------------------------------------
 
+
 def _patch_subprocess_stdin():
     """Monkey-patch subprocess so stdin defaults to DEVNULL on Windows.
 
