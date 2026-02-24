@@ -123,16 +123,10 @@ Claude now has both:
 
 | Tool | Description |
 |------|-------------|
-| `create_pipeline` | Create a new SDP pipeline |
-| `get_pipeline` | Get pipeline details and configuration |
-| `update_pipeline` | Update pipeline configuration |
-| `delete_pipeline` | Delete a pipeline |
-| `start_update` | Start pipeline run or dry-run validation |
-| `get_update` | Get update status (QUEUED, RUNNING, COMPLETED, FAILED) |
-| `stop_pipeline` | Stop a running pipeline |
-| `get_pipeline_events` | Get error messages for debugging |
 | `create_or_update_pipeline` | Create or update pipeline by name (auto-detects existing) |
-| `find_pipeline_by_name` | Find pipeline by name, returns pipeline ID |
+| `get_pipeline` | Get pipeline details by ID or name; enriched with latest update status and events. Omit args to list all. |
+| `delete_pipeline` | Delete a pipeline |
+| `run_pipeline` | Start, stop, or wait for pipeline runs |
 
 ### Knowledge Assistants (KA)
 
@@ -145,9 +139,9 @@ Claude now has both:
 | Tool | Description |
 |------|-------------|
 | `create_or_update_genie` | Create or update a Genie Space for SQL-based data exploration |
-| `get_genie` | Get Genie Space details by space ID |
-| `find_genie_by_name` | Find Genie Space by name, returns space ID |
+| `get_genie` | Get Genie Space details by ID, or list all spaces (omit space_id) |
 | `delete_genie` | Delete a Genie Space |
+| `ask_genie` | Ask a question or follow-up (pass `conversation_id`) to a Genie Space |
 
 ### Supervisor Agent (MAS)
 
@@ -160,11 +154,9 @@ Claude now has both:
 | Tool | Description |
 |------|-------------|
 | `create_or_update_dashboard` | Create or update an AI/BI dashboard from JSON content |
-| `get_dashboard` | Get dashboard details by ID |
-| `list_dashboards` | List all dashboards in the workspace |
-| `trash_dashboard` | Move a dashboard to trash |
-| `publish_dashboard` | Publish a dashboard to make it accessible |
-| `unpublish_dashboard` | Unpublish a dashboard |
+| `get_dashboard` | Get dashboard details by ID, or list all dashboards (omit dashboard_id) |
+| `delete_dashboard` | Move a dashboard to trash |
+| `publish_dashboard` | Publish or unpublish a dashboard (`publish=True/False`) |
 
 ### Model Serving
 
