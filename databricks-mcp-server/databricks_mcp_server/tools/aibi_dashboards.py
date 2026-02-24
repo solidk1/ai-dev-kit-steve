@@ -226,7 +226,7 @@ def get_dashboard(
 
 @mcp.tool
 def delete_dashboard(dashboard_id: str) -> Dict[str, str]:
-    """Delete an AI/BI dashboard (moves to trash).
+    """Soft-delete an AI/BI dashboard by moving it to trash.
 
     Args:
         dashboard_id: Dashboard ID to delete

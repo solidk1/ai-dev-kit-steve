@@ -48,6 +48,10 @@ def create_or_update_pipeline(
     catalog: str,
     schema: str,
     workspace_file_paths: List[str],
+    start_run: bool = False,
+    wait_for_completion: bool = False,
+    full_refresh: bool = True,
+    timeout: int = 1800,
     extra_settings: Dict[str, Any] = None,
 ) -> Dict[str, Any]:
     """
@@ -56,8 +60,10 @@ def create_or_update_pipeline(
     This is the main tool for pipeline resource management. It:
     1. Searches for an existing pipeline with the same name (or uses 'id' from extra_settings)
     2. Creates a new pipeline or updates the existing one
+    3. Optionally starts a run and waits for completion
 
-    Use run_pipeline() separately to start, stop, or monitor pipeline runs.
+    For more granular run control (stop, selective refresh, validate-only),
+    use run_pipeline() separately.
 
     Uses Unity Catalog and serverless compute by default.
 
@@ -67,6 +73,10 @@ def create_or_update_pipeline(
         catalog: Unity Catalog name for output tables
         schema: Schema name for output tables
         workspace_file_paths: List of workspace file paths (raw .sql or .py files)
+        start_run: If True, start a pipeline run after create/update (default: False)
+        wait_for_completion: If True and start_run=True, wait for the run to finish (default: False)
+        full_refresh: If True, performs full refresh when starting (default: True)
+        timeout: Maximum wait time in seconds when wait_for_completion=True (default: 1800)
         extra_settings: Optional dict with additional pipeline settings. Supports all SDK
             options: clusters, continuous, development, photon, edition, channel, event_log,
             configuration, notifications, tags, serverless, etc.
@@ -89,6 +99,10 @@ def create_or_update_pipeline(
         ...     schema="my_schema",
         ...     workspace_file_paths=["/Workspace/project/pipeline.py"]
         ... )
+        >>> create_or_update_pipeline(
+        ...     name="my_pipeline", ...,
+        ...     start_run=True, wait_for_completion=True
+        ... )
     """
     # Auto-inject default tags into extra_settings; user tags take precedence
     extra_settings = extra_settings or {}
@@ -101,8 +115,10 @@ def create_or_update_pipeline(
         catalog=catalog,
         schema=schema,
         workspace_file_paths=workspace_file_paths,
-        start_run=False,
-        wait_for_completion=False,
+        start_run=start_run,
+        wait_for_completion=wait_for_completion,
+        full_refresh=full_refresh,
+        timeout=timeout,
         extra_settings=extra_settings,
     )
 

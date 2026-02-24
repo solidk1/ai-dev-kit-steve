@@ -334,7 +334,7 @@ The following MCP tools are available for managing Vector Search infrastructure.
 | Tool | Description |
 |------|-------------|
 | `query_vs_index` | Query index with text, vector, or hybrid search (for testing) |
-| `manage_vs_data` | Upsert, delete, or scan index data (operation: "upsert", "delete", or "scan") |
+| `manage_vs_data` | Upsert, delete, scan, or sync index data (operation: "upsert", "delete", "scan", or "sync") |
 
 ## Notes
 

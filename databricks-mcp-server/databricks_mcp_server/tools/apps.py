@@ -7,7 +7,7 @@ Provides 3 workflow-oriented tools following the Lakebase pattern:
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from databricks_tools_core.apps.apps import (
     create_app as _create_app,

@@ -1,10 +1,10 @@
 """Vector Search tools - Manage endpoints, indexes, and query vector data.
 
-Provides 7 workflow-oriented tools following the Lakebase pattern:
+Provides 8 workflow-oriented tools following the Lakebase pattern:
 - create_or_update for idempotent resource management
 - get doubling as list when no name/id provided
 - explicit delete
-- query as hot-path, manage_vs_data for maintenance ops
+- query as hot-path, manage_vs_data for maintenance ops (upsert/delete/scan/sync)
 """
 
 import json
@@ -70,7 +70,8 @@ def create_or_update_vs_endpoint(
     endpoint_type: str = "STANDARD",
 ) -> Dict[str, Any]:
     """
-    Create a Vector Search endpoint, or return existing if it already exists.
+    Idempotent create for Vector Search endpoints. Returns existing if one
+    with the same name already exists (endpoints are immutable after creation).
 
     Endpoints are compute resources that host vector search indexes.
     Creation is asynchronous -- use get_vs_endpoint() to check status.
@@ -167,9 +168,9 @@ def create_or_update_vs_index(
     direct_access_index_spec: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
-    Create a Vector Search index, or return existing if it already exists.
-
-    Triggers an initial sync after creating a DELTA_SYNC index.
+    Idempotent create for Vector Search indexes. Returns existing if one
+    with the same name already exists. Triggers an initial sync after
+    creating a new DELTA_SYNC index.
 
     For DELTA_SYNC indexes (auto-sync from Delta table):
       - Managed embeddings: provide embedding_source_columns with model endpoint
@@ -248,16 +249,17 @@ def get_vs_index(
     endpoint_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Get Vector Search index details, or list indexes on an endpoint.
+    Get Vector Search index details, or list indexes.
 
-    Pass index_name to get one index's details (enriched with sync status).
-    Pass only endpoint_name to list all indexes on that endpoint.
+    Pass index_name to get one index's details. Pass only endpoint_name
+    to list indexes on that endpoint. Omit both to list all indexes
+    across all endpoints.
 
     Args:
         index_name: Fully qualified index name (catalog.schema.index_name).
             If provided, returns detailed index info.
-        endpoint_name: Endpoint name. If index_name is omitted, lists all
-            indexes on this endpoint.
+        endpoint_name: Endpoint name. If index_name is omitted, lists
+            indexes on this endpoint. If both omitted, lists all.
 
     Returns:
         Single index dict (if index_name provided) or {"indexes": [...]}.
@@ -267,6 +269,8 @@ def get_vs_index(
         {"name": "catalog.schema.docs_index", "state": "ONLINE", ...}
         >>> get_vs_index(endpoint_name="my-endpoint")
         {"indexes": [{"name": "catalog.schema.docs_index", ...}]}
+        >>> get_vs_index()
+        {"indexes": [...all indexes across all endpoints...]}
     """
     if index_name:
         return _get_vs_index(index_name=index_name)
@@ -274,7 +278,17 @@ def get_vs_index(
     if endpoint_name:
         return {"indexes": _list_vs_indexes(endpoint_name=endpoint_name)}
 
-    return {"error": "Provide index_name to get details, or endpoint_name to list indexes."}
+    # List all indexes across all endpoints
+    all_indexes = []
+    endpoints = _list_vs_endpoints()
+    for ep in endpoints:
+        ep_name = ep.get("name") if isinstance(ep, dict) else getattr(ep, "name", None)
+        if ep_name:
+            try:
+                all_indexes.extend(_list_vs_indexes(endpoint_name=ep_name))
+            except Exception:
+                pass
+    return {"indexes": all_indexes}
 
 
 # ============================================================================
@@ -381,20 +395,20 @@ def manage_vs_data(
     num_results: int = 100,
 ) -> Dict[str, Any]:
     """
-    Manage data in a Vector Search index: upsert, delete, or scan entries.
+    Manage data in a Vector Search index: upsert, delete, scan, or sync.
 
-    Operations:
-    - "upsert": Insert or update records in a Direct Access index (requires inputs_json)
-    - "delete": Remove records from a Direct Access index (requires primary_keys)
-    - "scan": Retrieve index entries for debugging/export (uses num_results)
+    Required parameters per operation:
+    - "upsert": inputs_json (JSON string of records with primary key + embedding columns)
+    - "delete": primary_keys (list of primary key values to remove)
+    - "scan": num_results (optional, defaults to 100)
+    - "sync": no extra params (triggers re-sync for TRIGGERED pipeline DELTA_SYNC indexes)
 
     Args:
         index_name: Fully qualified index name (catalog.schema.index_name)
-        operation: One of "upsert", "delete", or "scan"
-        inputs_json: JSON string of records to upsert. Each record must include
-            the primary key and embedding vector columns. Required for "upsert".
+        operation: One of "upsert", "delete", "scan", or "sync"
+        inputs_json: Records to upsert. REQUIRED for "upsert", ignored otherwise.
             Example: '[{"id": "1", "text": "hello", "embedding": [0.1, 0.2, ...]}]'
-        primary_keys: List of primary key values to delete. Required for "delete".
+        primary_keys: Primary key values to delete. REQUIRED for "delete", ignored otherwise.
         num_results: Maximum entries to return for "scan" (default: 100)
 
     Returns:
@@ -408,6 +422,8 @@ def manage_vs_data(
         {"name": "catalog.schema.idx", "status": "SUCCESS", "num_deleted": 2}
         >>> manage_vs_data("catalog.schema.idx", "scan", num_results=10)
         {"columns": [...], "data": [...], "num_results": 10}
+        >>> manage_vs_data("catalog.schema.idx", "sync")
+        {"index_name": "catalog.schema.idx", "status": "sync_triggered"}
     """
     op = operation.lower()
 
@@ -427,5 +443,9 @@ def manage_vs_data(
     elif op == "scan":
         return _scan_vs_index(index_name=index_name, num_results=num_results)
 
+    elif op == "sync":
+        _sync_vs_index(index_name=index_name)
+        return {"index_name": index_name, "status": "sync_triggered"}
+
     else:
-        return {"error": f"Invalid operation '{operation}'. Use 'upsert', 'delete', or 'scan'."}
+        return {"error": f"Invalid operation '{operation}'. Use 'upsert', 'delete', 'scan', or 'sync'."}

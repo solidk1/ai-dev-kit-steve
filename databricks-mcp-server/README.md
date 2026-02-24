@@ -155,7 +155,7 @@ Claude now has both:
 |------|-------------|
 | `create_or_update_dashboard` | Create or update an AI/BI dashboard from JSON content |
 | `get_dashboard` | Get dashboard details by ID, or list all dashboards (omit dashboard_id) |
-| `delete_dashboard` | Move a dashboard to trash |
+| `delete_dashboard` | Soft-delete a dashboard (moves to trash) |
 | `publish_dashboard` | Publish or unpublish a dashboard (`publish=True/False`) |
 
 ### Model Serving
