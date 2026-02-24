@@ -167,25 +167,37 @@ def create_or_update_genie(
 @mcp.tool
 def get_genie(
     space_id: Optional[str] = None,
+    name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Get Genie Space details by ID, or list all spaces.
+    Get Genie Space details by ID or name, or list all spaces.
 
-    Pass a space_id to get one space's details including sample questions.
-    Omit space_id to list all accessible spaces.
+    Pass a space_id or name to get one space's details including sample questions.
+    Omit both to list all accessible spaces.
 
     Args:
-        space_id: The Genie space ID. If omitted, lists all spaces.
+        space_id: The Genie space ID. Takes precedence over name.
+        name: Display name of the Genie Space. Used to look up space_id if space_id not provided.
 
     Returns:
-        Single space dict (if space_id provided) or {"spaces": [...]}.
+        Single space dict (if space_id/name provided) or {"spaces": [...]}.
 
     Example:
         >>> get_genie("abc123...")
         {"space_id": "abc123...", "display_name": "Sales Analytics", ...}
+        >>> get_genie(name="Sales Analytics")
+        {"space_id": "abc123...", "display_name": "Sales Analytics", ...}
         >>> get_genie()
         {"spaces": [{"space_id": "abc123...", "title": "Sales Analytics", ...}]}
     """
+    # Resolve name to space_id if needed
+    if not space_id and name:
+        manager = _get_manager()
+        found = manager.genie_find_by_name(name)
+        if not found:
+            return {"error": f"Genie space '{name}' not found."}
+        space_id = found.space_id
+
     if space_id:
         manager = _get_manager()
         result = manager.genie_get(space_id)
