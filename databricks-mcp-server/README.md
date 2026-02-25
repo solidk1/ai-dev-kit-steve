@@ -139,9 +139,9 @@ Claude now has both:
 | Tool | Description |
 |------|-------------|
 | `create_or_update_genie` | Create or update a Genie Space for SQL-based data exploration |
-| `get_genie` | Get Genie Space details by ID, or list all spaces (omit space_id) |
+| `get_genie` | Get Genie Space details by space ID |
+| `find_genie_by_name` | Find Genie Space by name, returns space ID |
 | `delete_genie` | Delete a Genie Space |
-| `ask_genie` | Ask a question or follow-up (pass `conversation_id`) to a Genie Space |
 
 ### Supervisor Agent (MAS)
 

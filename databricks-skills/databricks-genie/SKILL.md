@@ -25,15 +25,17 @@ Use this skill when:
 
 | Tool | Purpose |
 |------|---------|
+| `list_genie` | List all Genie Spaces accessible to you |
 | `create_or_update_genie` | Create or update a Genie Space |
-| `get_genie` | Get Genie Space details by ID, or list all spaces (omit space_id) |
+| `get_genie` | Get Genie Space details |
 | `delete_genie` | Delete a Genie Space |
 
 ### Conversation API
 
 | Tool | Purpose |
 |------|---------|
-| `ask_genie` | Ask a question (new conversation) or follow-up (pass `conversation_id`) |
+| `ask_genie` | Ask a question to a Genie Space, get SQL + results |
+| `ask_genie_followup` | Ask follow-up question in existing conversation |
 
 ### Supporting Tools
 

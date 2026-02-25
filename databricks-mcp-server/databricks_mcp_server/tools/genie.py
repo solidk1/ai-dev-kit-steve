@@ -1,17 +1,11 @@
-"""Genie tools - Create, manage, and query Databricks Genie Spaces.
-
-Provides 4 workflow-oriented tools following the Lakebase pattern:
-- create_or_update_genie: idempotent space management (already exists)
-- get_genie: get details by ID, or list all
-- delete_genie: delete by ID
-- ask_genie: new questions and follow-ups in a single tool
-"""
+"""Genie tools - Create, manage, and query Databricks Genie Spaces."""
 
 from datetime import timedelta
 from typing import Any, Dict, List, Optional
 
 from databricks_tools_core.agent_bricks import AgentBricksManager
 from databricks_tools_core.auth import get_workspace_client
+from databricks_tools_core.identity import with_description_footer
 
 from ..manifest import register_deleter
 from ..server import mcp
@@ -36,8 +30,44 @@ register_deleter("genie_space", _delete_genie_resource)
 
 
 # ============================================================================
-# Tool 1: create_or_update_genie
+# Genie Space Management Tools
 # ============================================================================
+
+
+@mcp.tool
+def list_genie() -> List[Dict[str, Any]]:
+    """
+    List all Genie Spaces accessible to the current user.
+
+    Returns:
+        List of Genie Space summaries, each containing:
+        - space_id: The Genie space ID
+        - title: The space title/name
+        - description: The description (if set)
+
+    Example:
+        >>> list_genie()
+        [
+            {"space_id": "abc123...", "title": "Sales Analytics", "description": "..."},
+            {"space_id": "def456...", "title": "HR Metrics", "description": "..."}
+        ]
+    """
+    try:
+        w = get_workspace_client()
+        response = w.genie.list_spaces()
+        result = []
+        if response.spaces:
+            for space in response.spaces:
+                result.append(
+                    {
+                        "space_id": space.space_id,
+                        "title": space.title or "",
+                        "description": space.description or "",
+                    }
+                )
+        return result
+    except Exception as e:
+        return [{"error": str(e)}]
 
 
 @mcp.tool
@@ -82,6 +112,7 @@ def create_or_update_genie(
         ... )
         {"space_id": "abc123...", "display_name": "Sales Analytics", "operation": "created", ...}
     """
+    description = with_description_footer(description)
     manager = _get_manager()
 
     # Auto-detect warehouse if not provided
@@ -159,87 +190,45 @@ def create_or_update_genie(
     return response
 
 
-# ============================================================================
-# Tool 2: get_genie
-# ============================================================================
-
-
 @mcp.tool
-def get_genie(
-    space_id: Optional[str] = None,
-    name: Optional[str] = None,
-) -> Dict[str, Any]:
+def get_genie(space_id: str) -> Dict[str, Any]:
     """
-    Get Genie Space details by ID or name, or list all spaces.
-
-    Pass a space_id or name to get one space's details including sample questions.
-    Omit both to list all accessible spaces.
+    Get a Genie Space by ID.
 
     Args:
-        space_id: The Genie space ID. Takes precedence over name.
-        name: Display name of the Genie Space. Used to look up space_id if space_id not provided.
+        space_id: The Genie space ID
 
     Returns:
-        Single space dict (if space_id/name provided) or {"spaces": [...]}.
+        Dictionary with Genie space details including:
+        - space_id: The space ID
+        - display_name: The display name
+        - description: The description
+        - warehouse_id: The SQL warehouse ID
+        - table_identifiers: List of configured tables
+        - sample_questions: List of sample questions
 
     Example:
         >>> get_genie("abc123...")
         {"space_id": "abc123...", "display_name": "Sales Analytics", ...}
-        >>> get_genie(name="Sales Analytics")
-        {"space_id": "abc123...", "display_name": "Sales Analytics", ...}
-        >>> get_genie()
-        {"spaces": [{"space_id": "abc123...", "title": "Sales Analytics", ...}]}
     """
-    # Resolve name to space_id if needed
-    if not space_id and name:
-        manager = _get_manager()
-        found = manager.genie_find_by_name(name)
-        if not found:
-            return {"error": f"Genie space '{name}' not found."}
-        space_id = found.space_id
+    manager = _get_manager()
+    result = manager.genie_get(space_id)
 
-    if space_id:
-        manager = _get_manager()
-        result = manager.genie_get(space_id)
+    if not result:
+        return {"error": f"Genie space {space_id} not found"}
 
-        if not result:
-            return {"error": f"Genie space {space_id} not found"}
+    # Get sample questions
+    questions_response = manager.genie_list_questions(space_id, question_type="SAMPLE_QUESTION")
+    sample_questions = [q.get("question_text", "") for q in questions_response.get("curated_questions", [])]
 
-        # Get sample questions
-        questions_response = manager.genie_list_questions(space_id, question_type="SAMPLE_QUESTION")
-        sample_questions = [q.get("question_text", "") for q in questions_response.get("curated_questions", [])]
-
-        return {
-            "space_id": result.get("space_id", space_id),
-            "display_name": result.get("display_name", ""),
-            "description": result.get("description", ""),
-            "warehouse_id": result.get("warehouse_id", ""),
-            "table_identifiers": result.get("table_identifiers", []),
-            "sample_questions": sample_questions,
-        }
-
-    # List all spaces
-    try:
-        w = get_workspace_client()
-        response = w.genie.list_spaces()
-        spaces = []
-        if response.spaces:
-            for space in response.spaces:
-                spaces.append(
-                    {
-                        "space_id": space.space_id,
-                        "title": space.title or "",
-                        "description": space.description or "",
-                    }
-                )
-        return {"spaces": spaces}
-    except Exception as e:
-        return {"error": str(e)}
-
-
-# ============================================================================
-# Tool 3: delete_genie
-# ============================================================================
+    return {
+        "space_id": result.get("space_id", space_id),
+        "display_name": result.get("display_name", ""),
+        "description": result.get("description", ""),
+        "warehouse_id": result.get("warehouse_id", ""),
+        "table_identifiers": result.get("table_identifiers", []),
+        "sample_questions": sample_questions,
+    }
 
 
 @mcp.tool
@@ -274,7 +263,7 @@ def delete_genie(space_id: str) -> Dict[str, Any]:
 
 
 # ============================================================================
-# Tool 4: ask_genie
+# Genie Conversation API Tools
 # ============================================================================
 
 
@@ -282,20 +271,17 @@ def delete_genie(space_id: str) -> Dict[str, Any]:
 def ask_genie(
     space_id: str,
     question: str,
-    conversation_id: Optional[str] = None,
     timeout_seconds: int = 120,
 ) -> Dict[str, Any]:
     """
-    Ask a question to a Genie Space and get the answer.
+    Ask a natural language question to a Genie Space and get the answer.
 
-    Starts a new conversation, or continues an existing one if
-    conversation_id is provided (for follow-up questions).
+    This tool sends a question to a Genie Space, which generates SQL,
+    executes it, and returns the results.
 
     Args:
         space_id: The Genie Space ID to query
         question: The natural language question to ask
-        conversation_id: Optional conversation ID from a previous response
-            for follow-up questions. If omitted, starts a new conversation.
         timeout_seconds: Maximum time to wait for response (default 120)
 
     Returns:
@@ -313,48 +299,81 @@ def ask_genie(
         - error: Error message (if failed)
 
     Example:
-        >>> ask_genie("abc123", "What were total sales last month?")
-        {"question": "...", "status": "COMPLETED", "sql": "SELECT ...", ...}
-        >>> ask_genie("abc123", "Break that down by region",
-        ...     conversation_id="conv-456")
-        {"question": "...", "conversation_id": "conv-456", ...}
+        >>> ask_genie(space_id="abc123", question="What were total sales last month?")
+        {"question": "...", "status": "COMPLETED", "sql": "SELECT ...", "data": [[125430.50]], ...}
     """
     try:
         w = get_workspace_client()
-
-        if conversation_id:
-            result = w.genie.create_message_and_wait(
-                space_id=space_id,
-                conversation_id=conversation_id,
-                content=question,
-                timeout=timedelta(seconds=timeout_seconds),
-            )
-        else:
-            result = w.genie.start_conversation_and_wait(
-                space_id=space_id,
-                content=question,
-                timeout=timedelta(seconds=timeout_seconds),
-            )
-
+        result = w.genie.start_conversation_and_wait(
+            space_id=space_id,
+            content=question,
+            timeout=timedelta(seconds=timeout_seconds),
+        )
         return _format_genie_response(question, result, space_id)
     except TimeoutError:
-        response: Dict[str, Any] = {
+        return {
             "question": question,
             "status": "TIMEOUT",
             "error": f"Genie response timed out after {timeout_seconds}s",
         }
-        if conversation_id:
-            response["conversation_id"] = conversation_id
-        return response
     except Exception as e:
-        response = {
+        return {
             "question": question,
             "status": "ERROR",
             "error": str(e),
         }
-        if conversation_id:
-            response["conversation_id"] = conversation_id
-        return response
+
+
+@mcp.tool
+def ask_genie_followup(
+    space_id: str,
+    conversation_id: str,
+    question: str,
+    timeout_seconds: int = 120,
+) -> Dict[str, Any]:
+    """
+    Ask a follow-up question in an existing Genie conversation.
+
+    Use this to ask follow-up questions that reference the previous context.
+    For example, after asking "What were total sales?", you could follow up
+    with "Break that down by region" without repeating the context.
+
+    Args:
+        space_id: The Genie Space ID
+        conversation_id: The conversation_id from a previous ask_genie response
+        question: The follow-up question
+        timeout_seconds: Maximum time to wait for response (default 120)
+
+    Returns:
+        Same format as ask_genie
+
+    Example:
+        >>> result = ask_genie(space_id, "What were total sales last month?")
+        >>> ask_genie_followup(space_id, result["conversation_id"], "Break that down by region")
+    """
+    try:
+        w = get_workspace_client()
+        result = w.genie.create_message_and_wait(
+            space_id=space_id,
+            conversation_id=conversation_id,
+            content=question,
+            timeout=timedelta(seconds=timeout_seconds),
+        )
+        return _format_genie_response(question, result, space_id)
+    except TimeoutError:
+        return {
+            "question": question,
+            "conversation_id": conversation_id,
+            "status": "TIMEOUT",
+            "error": f"Genie response timed out after {timeout_seconds}s",
+        }
+    except Exception as e:
+        return {
+            "question": question,
+            "conversation_id": conversation_id,
+            "status": "ERROR",
+            "error": str(e),
+        }
 
 
 # ============================================================================
@@ -363,12 +382,18 @@ def ask_genie(
 
 
 def _format_genie_response(question: str, genie_message: Any, space_id: str) -> Dict[str, Any]:
-    """Format a Genie SDK response into a clean dictionary."""
-    result: Dict[str, Any] = {
+    """Format a Genie SDK response into a clean dictionary.
+
+    Args:
+        question: The original question asked
+        genie_message: The GenieMessage object from the SDK
+        space_id: The Genie Space ID (needed to fetch query results)
+    """
+    result = {
         "question": question,
         "conversation_id": genie_message.conversation_id,
         "message_id": genie_message.id,
-        "status": (str(genie_message.status.value) if genie_message.status else "UNKNOWN"),
+        "status": str(genie_message.status.value) if genie_message.status else "UNKNOWN",
     }
 
     # Extract data from attachments
@@ -395,11 +420,14 @@ def _format_genie_response(question: str, genie_message: Any, space_id: str) -> 
                         )
                         if data_result.statement_response:
                             sr = data_result.statement_response
+                            # Get columns
                             if sr.manifest and sr.manifest.schema and sr.manifest.schema.columns:
                                 result["columns"] = [c.name for c in sr.manifest.schema.columns]
+                            # Get data
                             if sr.result and sr.result.data_array:
                                 result["data"] = sr.result.data_array
                     except Exception:
+                        # If data fetch fails, continue without it
                         pass
 
             # Text attachment (explanation)
