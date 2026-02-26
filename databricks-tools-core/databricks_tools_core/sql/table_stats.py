@@ -102,6 +102,7 @@ def get_table_details(
     table_names = table_names or []
     has_patterns = any(_has_glob_pattern(name) for name in table_names)
     needs_listing = len(table_names) == 0 or has_patterns
+    failed_tables: List[DataSourceInfo] = []
 
     if needs_listing:
         # List all tables first
@@ -134,10 +135,14 @@ def get_table_details(
                 )
             except Exception as e:
                 logger.warning(f"Failed to fetch metadata for {catalog}.{schema}.{name}: {e}")
-                # Fall back to minimal info so stats collection can still proceed
-                tables_to_fetch.append({"name": name, "updated_at": None, "comment": None})
+                failed_tables.append(
+                    DataSourceInfo(
+                        name=f"{catalog}.{schema}.{name}",
+                        error=f"Failed to fetch table metadata: {e}",
+                    )
+                )
 
-    if not tables_to_fetch:
+    if not tables_to_fetch and not failed_tables:
         return TableSchemaResult(catalog=catalog, schema_name=schema, tables=[])
 
     # Determine whether to collect stats
@@ -151,6 +156,10 @@ def get_table_details(
         tables=tables_to_fetch,
         collect_stats=collect_stats,
     )
+
+    # Append any tables that failed metadata lookup with their error info
+    if failed_tables:
+        table_infos.extend(failed_tables)
 
     # Build result
     result = TableSchemaResult(
