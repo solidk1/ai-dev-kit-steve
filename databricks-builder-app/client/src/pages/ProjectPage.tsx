@@ -391,7 +391,7 @@ export default function ProjectPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(true);
-  const [isStreaming, setIsStreaming] = useState(false);
+  const [streamingConvIds, setStreamingConvIds] = useState<string[]>([]);
   const [streamingText, setStreamingText] = useState('');
   const [activityItems, setActivityItems] = useState<ActivityItem[]>([]);
   const [todos, setTodos] = useState<TodoItem[]>([]);
@@ -414,10 +414,21 @@ export default function ProjectPage() {
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
-  const reconnectAttemptedRef = useRef<string | null>(null); // Track which conversation we've checked
-  const streamingToolsRef = useRef<string[]>([]); // Accumulate tools during current streaming response
-  const streamingConversationIdRef = useRef<string | null>(null); // Which conversation owns the current stream
+  const reconnectAttemptedRef = useRef<string | null>(null);
+  const currentConvIdRef = useRef<string | undefined>(undefined);
+  // Per-conversation streaming data (supports concurrent streams)
+  const allStreamsRef = useRef<Record<string, {
+    fullText: string;
+    activityItems: ActivityItem[];
+    todos: TodoItem[];
+    tools: string[];
+    executionId: string | null;
+    abortController: AbortController | null;
+    isReconnecting: boolean;
+  }>>({});
+
+  // Keep currentConvIdRef in sync with state
+  useEffect(() => { currentConvIdRef.current = currentConversation?.id; }, [currentConversation?.id]);
 
   // Load project and conversations
   useEffect(() => {
@@ -488,7 +499,7 @@ export default function ProjectPage() {
 
   // Check for active execution when conversation loads and reconnect if needed
   useEffect(() => {
-    if (!projectId || !currentConversation?.id || isLoading || isStreaming) return;
+    if (!projectId || !currentConversation?.id || isLoading || allStreamsRef.current[currentConversation.id]) return;
 
     // Skip if we've already checked this conversation
     if (reconnectAttemptedRef.current === currentConversation.id) return;
@@ -500,26 +511,37 @@ export default function ProjectPage() {
 
         if (active && active.status === 'running') {
           console.log('[RECONNECT] Found active execution:', active.id);
+          const reconConvId = currentConversation.id;
+          const controller = new AbortController();
+          allStreamsRef.current[reconConvId] = {
+            fullText: '',
+            activityItems: [],
+            todos: [],
+            tools: [],
+            executionId: active.id,
+            abortController: controller,
+            isReconnecting: true,
+          };
+          setStreamingConvIds(prev => [...prev, reconConvId]);
           setIsReconnecting(true);
-          setIsStreaming(true);
           setActiveExecutionId(active.id);
-
-          // Create abort controller for reconnection
-          abortControllerRef.current = new AbortController();
 
           let fullText = '';
 
           await reconnectToExecution({
             executionId: active.id,
             storedEvents: active.events,
-            signal: abortControllerRef.current.signal,
+            signal: controller.signal,
             onEvent: (event) => {
               const type = event.type as string;
+              const stream = allStreamsRef.current[reconConvId];
+              const isForeground = currentConvIdRef.current === reconConvId;
 
               if (type === 'text_delta') {
                 const text = event.text as string;
                 fullText += text;
-                setStreamingText(fullText);
+                if (stream) stream.fullText = fullText;
+                if (isForeground) setStreamingText(fullText);
               } else if (type === 'text') {
                 const text = event.text as string;
                 if (text) {
@@ -527,35 +549,38 @@ export default function ProjectPage() {
                     fullText += '\n\n';
                   }
                   fullText += text;
-                  setStreamingText(fullText);
+                  if (stream) stream.fullText = fullText;
+                  if (isForeground) setStreamingText(fullText);
                 }
               } else if (type === 'tool_use') {
-                setActivityItems((prev) => [
-                  ...prev,
-                  {
-                    id: event.tool_id as string,
-                    type: 'tool_use',
-                    content: '',
-                    toolName: event.tool_name as string,
-                    toolInput: event.tool_input as Record<string, unknown>,
-                    timestamp: Date.now(),
-                  },
-                ]);
+                const newItem: ActivityItem = {
+                  id: event.tool_id as string,
+                  type: 'tool_use',
+                  content: '',
+                  toolName: event.tool_name as string,
+                  toolInput: event.tool_input as Record<string, unknown>,
+                  timestamp: Date.now(),
+                };
+                if (stream) {
+                  stream.activityItems = [...stream.activityItems, newItem];
+                  stream.tools = [...stream.tools, event.tool_name as string];
+                }
+                if (isForeground) setActivityItems(prev => [...prev, newItem]);
               } else if (type === 'tool_result') {
-                setActivityItems((prev) => [
-                  ...prev,
-                  {
-                    id: `result-${event.tool_use_id}`,
-                    type: 'tool_result',
-                    content: typeof event.content === 'string' ? event.content : JSON.stringify(event.content),
-                    isError: event.is_error as boolean,
-                    timestamp: Date.now(),
-                  },
-                ]);
+                const newItem: ActivityItem = {
+                  id: `result-${event.tool_use_id}`,
+                  type: 'tool_result',
+                  content: typeof event.content === 'string' ? event.content : JSON.stringify(event.content),
+                  isError: event.is_error as boolean,
+                  timestamp: Date.now(),
+                };
+                if (stream) stream.activityItems = [...stream.activityItems, newItem];
+                if (isForeground) setActivityItems(prev => [...prev, newItem]);
               } else if (type === 'todos') {
                 const todoItems = event.todos as TodoItem[];
                 if (todoItems) {
-                  setTodos(todoItems);
+                  if (stream) stream.todos = todoItems;
+                  if (isForeground) setTodos(todoItems);
                 }
               } else if (type === 'error') {
                 toast.error(event.error as string, { duration: 8000 });
@@ -566,16 +591,20 @@ export default function ProjectPage() {
               toast.error('Failed to reconnect to execution');
             },
             onDone: async () => {
-              // Reload conversation to get the final messages from DB
-              const conv = await fetchConversation(projectId, currentConversation.id);
-              setCurrentConversation(conv);
-              setMessages(conv.messages || []);
-              setStreamingText('');
-              setIsStreaming(false);
-              setIsReconnecting(false);
-              setActiveExecutionId(null);
-              setActivityItems([]);
-              setTodos([]);
+              delete allStreamsRef.current[reconConvId];
+              setStreamingConvIds(prev => prev.filter(id => id !== reconConvId));
+
+              const conv = await fetchConversation(projectId, reconConvId);
+              if (currentConvIdRef.current === reconConvId) {
+                setCurrentConversation(conv);
+                setMessages(conv.messages || []);
+                setStreamingText('');
+                setIsReconnecting(false);
+                setActiveExecutionId(null);
+                setActivityItems([]);
+                setTodos([]);
+              }
+              fetchConversations(projectId).then(setConversations);
             },
           });
         }
@@ -623,7 +652,22 @@ export default function ProjectPage() {
       const conv = await fetchConversation(projectId, conversationId);
       setCurrentConversation(conv);
       setMessages(conv.messages || []);
-      setActivityItems([]);
+
+      // Sync streaming UI state for the new conversation
+      const stream = allStreamsRef.current[conversationId];
+      if (stream) {
+        setStreamingText(stream.fullText);
+        setActivityItems([...stream.activityItems]);
+        setTodos([...stream.todos]);
+        setActiveExecutionId(stream.executionId);
+        setIsReconnecting(stream.isReconnecting);
+      } else {
+        setStreamingText('');
+        setActivityItems([]);
+        setTodos([]);
+        setActiveExecutionId(null);
+        setIsReconnecting(false);
+      }
       // Restore cluster selection from conversation, or default to first cluster
       setSelectedClusterId(conv.cluster_id || (clusters.length > 0 ? clusters[0].cluster_id : undefined));
       // Restore warehouse selection from conversation, or default to first warehouse
@@ -649,7 +693,12 @@ export default function ProjectPage() {
       setConversations((prev) => [conv, ...prev]);
       setCurrentConversation(conv);
       setMessages([]);
+      // Clear streaming UI (new conv isn't streaming yet)
+      setStreamingText('');
       setActivityItems([]);
+      setTodos([]);
+      setActiveExecutionId(null);
+      setIsReconnecting(false);
       inputRef.current?.focus();
     } catch (error) {
       console.error('Failed to create conversation:', error);
@@ -665,6 +714,14 @@ export default function ProjectPage() {
       await deleteConversation(projectId, conversationId);
       setConversations((prev) => prev.filter((c) => c.id !== conversationId));
 
+      // Clean up any active stream for this conversation
+      const stream = allStreamsRef.current[conversationId];
+      if (stream) {
+        stream.abortController?.abort();
+        delete allStreamsRef.current[conversationId];
+        setStreamingConvIds(prev => prev.filter(id => id !== conversationId));
+      }
+
       if (currentConversation?.id === conversationId) {
         const remaining = conversations.filter((c) => c.id !== conversationId);
         if (remaining.length > 0) {
@@ -675,7 +732,10 @@ export default function ProjectPage() {
           setCurrentConversation(null);
           setMessages([]);
         }
+        setStreamingText('');
         setActivityItems([]);
+        setTodos([]);
+        setActiveExecutionId(null);
       }
       toast.success('Conversation deleted');
     } catch (error) {
@@ -686,21 +746,21 @@ export default function ProjectPage() {
 
   // Send message
   const handleSendMessage = useCallback(async () => {
-    if (!projectId || !input.trim() || isStreaming) return;
+    if (!projectId || !input.trim()) return;
+    const convId = currentConversation?.id;
+    // Block only if THIS conversation is already streaming
+    if (convId && allStreamsRef.current[convId]) return;
 
     const userMessage = input.trim();
     setInput('');
-    setIsStreaming(true);
     setStreamingText('');
     setActivityItems([]);
     setTodos([]);
-    streamingToolsRef.current = [];
-    streamingConversationIdRef.current = currentConversation?.id || null;
 
     // Add user message to UI immediately
     const tempUserMessage: Message = {
       id: `temp-${Date.now()}`,
-      conversation_id: currentConversation?.id || '',
+      conversation_id: convId || '',
       role: 'user',
       content: userMessage,
       timestamp: new Date().toISOString(),
@@ -708,11 +768,23 @@ export default function ProjectPage() {
     };
     setMessages((prev) => [...prev, tempUserMessage]);
 
-    // Create abort controller
-    abortControllerRef.current = new AbortController();
+    // Create abort controller and initialize stream tracking
+    const abortController = new AbortController();
+    const effectiveConvId = convId || '';
+    let streamKey = effectiveConvId;
+    allStreamsRef.current[streamKey] = {
+      fullText: '',
+      activityItems: [],
+      todos: [],
+      tools: [],
+      executionId: null,
+      abortController,
+      isReconnecting: false,
+    };
+    setStreamingConvIds(prev => [...prev, effectiveConvId]);
 
     try {
-      let conversationId = currentConversation?.id;
+      let conversationId = convId;
       let fullText = '';
 
       await invokeAgent({
@@ -725,51 +797,60 @@ export default function ProjectPage() {
         warehouseId: selectedWarehouseId,
         workspaceFolder,
         mlflowExperimentName: mlflowExperimentName || null,
-        signal: abortControllerRef.current.signal,
-        onExecutionId: (executionId) => setActiveExecutionId(executionId),
+        signal: abortController.signal,
+        onExecutionId: (executionId) => {
+          const stream = allStreamsRef.current[streamKey];
+          if (stream) stream.executionId = executionId;
+          if (currentConvIdRef.current === streamKey) setActiveExecutionId(executionId);
+        },
         onEvent: (event) => {
           const type = event.type as string;
+          const stream = allStreamsRef.current[streamKey];
+          const isForeground = currentConvIdRef.current === streamKey;
 
           if (type === 'conversation.created') {
-            conversationId = event.conversation_id as string;
-            streamingConversationIdRef.current = conversationId;
-            // Set currentConversation immediately so isStreamingHere stays true
+            const newConvId = event.conversation_id as string;
+            // Move stream entry from old key to new key
+            const oldStream = allStreamsRef.current[streamKey];
+            delete allStreamsRef.current[streamKey];
+            const oldKey = streamKey;
+            streamKey = newConvId;
+            allStreamsRef.current[newConvId] = oldStream || {
+              fullText: '', activityItems: [], todos: [], tools: [],
+              executionId: null, abortController, isReconnecting: false,
+            };
+            conversationId = newConvId;
+            // Update streamingConvIds from old key to new key
+            setStreamingConvIds(prev => prev.filter(id => id !== oldKey).concat(newConvId));
+            // Set currentConversation immediately so UI stays consistent
             setCurrentConversation((prev) => prev ?? {
-              id: conversationId,
+              id: newConvId,
               project_id: projectId,
               title: 'New Chat',
               created_at: new Date().toISOString(),
               conversation_count: 0,
             } as unknown as Conversation);
+            currentConvIdRef.current = newConvId;
             fetchConversations(projectId).then(setConversations);
           } else if (type === 'text_delta') {
-            // Token-by-token streaming - accumulate and display for live updates
             const text = event.text as string;
             fullText += text;
-            console.log('[STREAM] text_delta received, fullText length:', fullText.length);
-            setStreamingText(fullText);
+            if (stream) stream.fullText = fullText;
+            if (isForeground) setStreamingText(fullText);
           } else if (type === 'text') {
-            // Complete text block from AssistantMessage - the authoritative final content
-            // This event contains the COMPLETE text for this response segment
-            // We always use it to ensure final responses after tool execution are captured
             const text = event.text as string;
-            console.log('[STREAM] text event received, text length:', text?.length, 'current fullText length:', fullText.length);
             if (text) {
-              // Append to fullText (there may be multiple text blocks in a conversation)
-              // Add separator if needed
               if (fullText && !fullText.endsWith('\n') && !text.startsWith('\n')) {
                 fullText += '\n\n';
               }
               fullText += text;
-              console.log('[STREAM] fullText updated, new length:', fullText.length);
-              setStreamingText(fullText);
+              if (stream) stream.fullText = fullText;
+              if (isForeground) setStreamingText(fullText);
             }
           } else if (type === 'thinking' || type === 'thinking_delta') {
-            // Handle both complete thinking blocks and streaming thinking deltas
             const thinking = (event.thinking as string) || '';
             if (thinking) {
-              setActivityItems((prev) => {
-                // For deltas, append to the last thinking item if it exists
+              const updateThinking = (prev: ActivityItem[]) => {
                 if (type === 'thinking_delta' && prev.length > 0 && prev[prev.length - 1].type === 'thinking') {
                   const updated = [...prev];
                   updated[updated.length - 1] = {
@@ -778,90 +859,82 @@ export default function ProjectPage() {
                   };
                   return updated;
                 }
-                // For complete blocks or first delta, add new item
                 return [
                   ...prev,
                   {
                     id: `thinking-${Date.now()}`,
-                    type: 'thinking',
+                    type: 'thinking' as const,
                     content: thinking,
                     timestamp: Date.now(),
                   },
                 ];
-              });
+              };
+              if (stream) stream.activityItems = updateThinking(stream.activityItems);
+              if (isForeground) setActivityItems(updateThinking);
             }
           } else if (type === 'tool_use') {
             const toolName = event.tool_name as string;
-            streamingToolsRef.current = [...streamingToolsRef.current, toolName];
-            setActivityItems((prev) => [
-              ...prev,
-              {
-                id: event.tool_id as string,
-                type: 'tool_use',
-                content: '',
-                toolName,
-                toolInput: event.tool_input as Record<string, unknown>,
-                timestamp: Date.now(),
-              },
-            ]);
+            const newItem: ActivityItem = {
+              id: event.tool_id as string,
+              type: 'tool_use',
+              content: '',
+              toolName,
+              toolInput: event.tool_input as Record<string, unknown>,
+              timestamp: Date.now(),
+            };
+            if (stream) {
+              stream.tools = [...stream.tools, toolName];
+              stream.activityItems = [...stream.activityItems, newItem];
+            }
+            if (isForeground) setActivityItems(prev => [...prev, newItem]);
           } else if (type === 'tool_result') {
             let content = event.content as string;
 
-            // Parse and improve error messages
             if (event.is_error && typeof content === 'string') {
-              // Extract error from XML-style tags like <tool_use_error>...</tool_use_error>
               const errorMatch = content.match(/<tool_use_error>(.*?)<\/tool_use_error>/s);
               if (errorMatch) {
                 content = errorMatch[1].trim();
               }
-
-              // Improve generic "Stream closed" errors
               if (content === 'Stream closed' || content.includes('Stream closed')) {
                 content = 'Tool execution interrupted: The operation took too long or the connection was lost. This may happen when operations exceed the 50-second timeout window. Check backend logs for details.';
               }
             }
 
-            setActivityItems((prev) => [
-              ...prev,
-              {
-                id: `result-${event.tool_use_id}`,
-                type: 'tool_result',
-                content: typeof content === 'string' ? content : JSON.stringify(content),
-                isError: event.is_error as boolean,
-                timestamp: Date.now(),
-              },
-            ]);
+            const newItem: ActivityItem = {
+              id: `result-${event.tool_use_id}`,
+              type: 'tool_result',
+              content: typeof content === 'string' ? content : JSON.stringify(content),
+              isError: event.is_error as boolean,
+              timestamp: Date.now(),
+            };
+            if (stream) stream.activityItems = [...stream.activityItems, newItem];
+            if (isForeground) setActivityItems(prev => [...prev, newItem]);
           } else if (type === 'error') {
             let errorMsg = event.error as string;
-
-            // Improve generic error messages
             if (errorMsg === 'Stream closed' || errorMsg.includes('Stream closed')) {
               errorMsg = 'Execution interrupted: The operation took too long or the connection was lost. Operations exceeding 50 seconds may be interrupted. Check backend logs for details.';
             }
-
-            toast.error(errorMsg, {
-              duration: 8000,
-            });
+            toast.error(errorMsg, { duration: 8000 });
           } else if (type === 'cancelled') {
-            // Agent was cancelled by user - show a toast notification
             toast.info('Generation stopped');
           } else if (type === 'todos') {
-            // Update todo list from agent
             const todoItems = event.todos as TodoItem[];
             if (todoItems) {
-              setTodos(todoItems);
+              if (stream) stream.todos = todoItems;
+              if (isForeground) setTodos(todoItems);
             }
           }
         },
         onError: (error) => {
           console.error('Stream error:', error);
-          // Show the actual error message instead of generic text
           const errorMessage = error.message || 'Failed to get response';
-          toast.error(errorMessage, {
-            duration: 8000, // Show error for 8 seconds
-          });
+          toast.error(errorMessage, { duration: 8000 });
         },
         onDone: async () => {
+          const finalStreamKey = streamKey;
+          const stream = allStreamsRef.current[finalStreamKey];
+          const tools = stream?.tools || [];
+
           if (fullText) {
             const msgId = `msg-${Date.now()}`;
             const assistantMessage: Message = {
@@ -872,79 +945,100 @@ export default function ProjectPage() {
               timestamp: new Date().toISOString(),
               is_error: false,
             };
-            setMessages((prev) => [...prev, assistantMessage]);
-            // Store tools used for this message
-            if (streamingToolsRef.current.length > 0) {
-              setMessageTools((prev) => ({ ...prev, [msgId]: streamingToolsRef.current }));
+            // Only update messages if user is viewing this conversation
+            if (currentConvIdRef.current === finalStreamKey) {
+              setMessages((prev) => [...prev, assistantMessage]);
+            }
+            if (tools.length > 0) {
+              setMessageTools((prev) => ({ ...prev, [msgId]: tools }));
             }
           }
-          setStreamingText('');
-          setIsStreaming(false);
-          setActiveExecutionId(null);
-          setActivityItems([]);
-          setTodos([]);
-          streamingConversationIdRef.current = null;
+
+          // Clean up stream
+          delete allStreamsRef.current[finalStreamKey];
+          setStreamingConvIds(prev => prev.filter(id => id !== finalStreamKey));
+
+          if (currentConvIdRef.current === finalStreamKey) {
+            setStreamingText('');
+            setActiveExecutionId(null);
+            setActivityItems([]);
+            setTodos([]);
+          }
 
           // Fetch full conversation to get updated title and messages
           if (conversationId) {
             const conv = await fetchConversation(projectId, conversationId);
-            setCurrentConversation(conv);
+            if (currentConvIdRef.current === finalStreamKey) {
+              setCurrentConversation(conv);
+            }
             fetchConversations(projectId).then(setConversations);
           }
         },
       });
     } catch (error) {
-      // Ignore AbortError — handleStopGeneration handles cleanup for user-initiated stops
       if (error instanceof Error && error.name === 'AbortError') return;
       console.error('Failed to send message:', error);
       const errorMessage = error instanceof Error ? error.message : 'Failed to send message';
-      toast.error(errorMessage, {
-        duration: 8000,
-      });
-      setIsStreaming(false);
+      toast.error(errorMessage, { duration: 8000 });
+      // Clean up stream on error
+      delete allStreamsRef.current[streamKey];
+      setStreamingConvIds(prev => prev.filter(id => id !== streamKey));
+      if (currentConvIdRef.current === streamKey) {
+        setStreamingText('');
+        setActiveExecutionId(null);
+        setActivityItems([]);
+        setTodos([]);
+      }
     }
-  }, [projectId, input, isStreaming, currentConversation?.id, selectedClusterId, defaultCatalog, defaultSchema, selectedWarehouseId, workspaceFolder, mlflowExperimentName]);
+  }, [projectId, input, currentConversation?.id, selectedClusterId, defaultCatalog, defaultSchema, selectedWarehouseId, workspaceFolder, mlflowExperimentName]);
 
   // Stop generation - abort client stream AND tell backend to cancel
   const handleStopGeneration = useCallback(async () => {
-    abortControllerRef.current?.abort();
+    const targetId = currentConversation?.id;
+    if (!targetId) return;
+
+    const stream = allStreamsRef.current[targetId];
+    if (!stream) return;
+
+    // Abort the fetch
+    stream.abortController?.abort();
 
     // Tell the backend to cancel the agent execution
-    if (activeExecutionId) {
+    if (stream.executionId) {
       try {
-        await stopExecution(activeExecutionId);
+        await stopExecution(stream.executionId);
       } catch (error) {
         console.error('Failed to stop execution on backend:', error);
       }
     }
 
-    // Finalize UI: keep user message and save whatever partial response we have
-    setStreamingText((currentText) => {
-      if (currentText) {
-        const msgId = `msg-stopped-${Date.now()}`;
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: msgId,
-            conversation_id: '',
-            role: 'assistant' as const,
-            content: currentText,
-            timestamp: new Date().toISOString(),
-            is_error: false,
-          },
-        ]);
-        if (streamingToolsRef.current.length > 0) {
-          setMessageTools((prev) => ({ ...prev, [msgId]: streamingToolsRef.current }));
-        }
+    // Save partial response
+    if (stream.fullText) {
+      const msgId = `msg-stopped-${Date.now()}`;
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: msgId,
+          conversation_id: targetId,
+          role: 'assistant' as const,
+          content: stream.fullText,
+          timestamp: new Date().toISOString(),
+          is_error: false,
+        },
+      ]);
+      if (stream.tools.length > 0) {
+        setMessageTools((prev) => ({ ...prev, [msgId]: stream.tools }));
       }
-      return '';
-    });
-    setIsStreaming(false);
+    }
+
+    // Clean up stream
+    delete allStreamsRef.current[targetId];
+    setStreamingConvIds(prev => prev.filter(id => id !== targetId));
+    setStreamingText('');
     setActiveExecutionId(null);
     setActivityItems([]);
     setTodos([]);
-    streamingConversationIdRef.current = null;
-  }, [activeExecutionId]);
+  }, [currentConversation?.id]);
 
   // Handle keyboard submit
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -1063,11 +1157,8 @@ export default function ProjectPage() {
     return chips;
   }, [defaultCatalog, defaultSchema, clusters, selectedClusterId, warehouses, selectedWarehouseId]);
 
-  // Only show streaming UI if viewing the conversation that owns the stream
-  const isStreamingHere = isStreaming && (
-    streamingConversationIdRef.current === null || // New conversation (not yet created)
-    streamingConversationIdRef.current === currentConversation?.id
-  );
+  // Only show streaming UI if viewing a conversation that is actively streaming
+  const isStreamingHere = streamingConvIds.includes(currentConversation?.id || '');
 
   if (isLoading) {
     return (
