@@ -35,6 +35,29 @@ SSE_WINDOW_SECONDS = 50
 
 _SAFE_FILENAME_RE = re.compile(r'[^A-Za-z0-9._-]+')
 
+
+def _read_project_claude_md(project_dir: Path) -> str | None:
+    """Read project-scoped CLAUDE.md content if present."""
+    claude_path = project_dir / 'CLAUDE.md'
+    if not claude_path.exists():
+        return None
+    try:
+        return claude_path.read_text(encoding='utf-8')
+    except Exception as e:
+        logger.warning(f'Failed to read {claude_path}: {e}')
+        return None
+
+
+def _write_project_claude_md(project_dir: Path, content: str) -> bool:
+    """Write project-scoped CLAUDE.md content."""
+    claude_path = project_dir / 'CLAUDE.md'
+    try:
+        claude_path.write_text(content, encoding='utf-8')
+        return True
+    except Exception as e:
+        logger.warning(f'Failed to write {claude_path}: {e}')
+        return False
+
 def sse_event(data: dict) -> str:
     """Format data as SSE event."""
     return f'data: {json.dumps(data)}\n\n'
@@ -108,6 +131,18 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
     # Read enabled skills from project filesystem (not DB)
     from ..services.skills_manager import get_project_enabled_skills
     project_dir = get_project_directory(body.project_id)
+
+    # Sync persisted CLAUDE.md from DB to project file before the run.
+    # If DB value is empty but file exists, backfill DB once.
+    if project.claude_md is not None:
+        on_disk_claude_md = _read_project_claude_md(project_dir)
+        if on_disk_claude_md != project.claude_md:
+            _write_project_claude_md(project_dir, project.claude_md)
+    else:
+        on_disk_claude_md = _read_project_claude_md(project_dir)
+        if on_disk_claude_md is not None:
+            await project_storage.update_claude_md(body.project_id, on_disk_claude_md)
+
     enabled_skills = get_project_enabled_skills(project_dir)
 
     # Get custom system prompt from project (if set)
@@ -162,6 +197,7 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
     async def run_agent():
         """Run the agent and accumulate events in the stream."""
         final_text_blocks: list[str] = []  # text blocks for persistence
+        delta_text_block: str = ''  # in-progress streaming delta text
         inline_image_paths: list[str] = []  # image paths for persistence
         new_session_id: Optional[str] = None
         error_message: Optional[str] = None
@@ -197,9 +233,10 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
 
                 if event_type == 'text_delta':
                     # Token-by-token streaming - forward to client for live display.
-                    # Do NOT accumulate to final_text here; text events (below) are the
-                    # authoritative source and will be used for persistence.
+                    # Track deltas so cancelled runs can still persist partial output.
                     text = event.get('text', '')
+                    if text:
+                        delta_text_block += text
                     stream.add_event({'type': 'text_delta', 'text': text})
 
                 elif event_type == 'text':
@@ -210,6 +247,7 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
                     text = event.get('text', '')
                     if text:
                         final_text_blocks.append(text)
+                        delta_text_block = ''
                         stream.add_event({'type': 'text', 'text': text})
 
                 elif event_type == 'thinking':
@@ -329,6 +367,13 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
 
         # Join text blocks with \n\n separators (same as client display logic)
         final_text = '\n\n'.join(final_text_blocks)
+        # If the run was stopped mid-block, persist any remaining streaming delta.
+        if delta_text_block:
+            final_text = (
+                f'{final_text}\n\n{delta_text_block}'
+                if final_text and not final_text.endswith('\n')
+                else f'{final_text}{delta_text_block}'
+            )
 
         # Append image markdown for any images not already referenced in the text
         image_markdown = '\n\n'.join(
@@ -337,65 +382,80 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
         if image_markdown:
             final_text = f'{final_text}\n\n{image_markdown}' if final_text else image_markdown
 
-        # Save messages to storage after stream completes (if not cancelled)
-        if not stream.is_cancelled:
-            try:
-                # Save user message
+        # Save messages to storage after stream completes, including cancelled runs.
+        try:
+            # Save user message
+            await conv_storage.add_message(
+                conversation_id=conversation_id,
+                role='user',
+                content=body.message,
+            )
+
+            # Save assistant response (or error). On cancellation, final_text may be
+            # partial output, which we still persist.
+            if final_text or error_message:
+                content = final_text if final_text else f'Error: {error_message}'
+                is_error = bool(error_message and not final_text)
+                logger.info(
+                    f'Saving assistant message: {len(content)} chars, '
+                    f'is_error={is_error}, cancelled={stream.is_cancelled}'
+                )
                 await conv_storage.add_message(
                     conversation_id=conversation_id,
-                    role='user',
-                    content=body.message,
+                    role='assistant',
+                    content=content,
+                    is_error=is_error,
+                )
+            else:
+                logger.warning(
+                    'No assistant response to save '
+                    f'(cancelled={stream.is_cancelled}, error={error_message is not None})'
                 )
 
-                # Save assistant response (or error)
-                if final_text or error_message:
-                    content = final_text if final_text else f'Error: {error_message}'
-                    is_error = bool(error_message and not final_text)
-                    logger.info(f'Saving assistant message: {len(content)} chars, is_error={is_error}')
-                    await conv_storage.add_message(
-                        conversation_id=conversation_id,
-                        role='assistant',
-                        content=content,
-                        is_error=is_error,
-                    )
-                else:
-                    logger.warning('No response to save (no text and no error)')
+            # Update session_id for conversation resumption
+            if new_session_id:
+                await conv_storage.update_session_id(conversation_id, new_session_id)
 
-                # Update session_id for conversation resumption
-                if new_session_id:
-                    await conv_storage.update_session_id(conversation_id, new_session_id)
+            # Update cluster_id if provided
+            if body.cluster_id:
+                await conv_storage.update_cluster_id(conversation_id, body.cluster_id)
 
-                # Update cluster_id if provided
-                if body.cluster_id:
-                    await conv_storage.update_cluster_id(conversation_id, body.cluster_id)
-
-                # Update catalog/schema if provided
-                if body.default_catalog or body.default_schema:
-                    await conv_storage.update_catalog_schema(
-                        conversation_id, body.default_catalog, body.default_schema
-                    )
-
-                # Update warehouse_id if provided
-                if body.warehouse_id:
-                    await conv_storage.update_warehouse_id(conversation_id, body.warehouse_id)
-
-                # Update workspace_folder if provided
-                if body.workspace_folder:
-                    await conv_storage.update_workspace_folder(conversation_id, body.workspace_folder)
-
-                logger.info(
-                    f'Saved messages to conversation {conversation_id}: '
-                    f'text={len(final_text)} chars, error={error_message is not None}'
+            # Update catalog/schema if provided
+            if body.default_catalog or body.default_schema:
+                await conv_storage.update_catalog_schema(
+                    conversation_id, body.default_catalog, body.default_schema
                 )
 
-                # Mark project for backup (will be processed by backup worker)
-                mark_for_backup(body.project_id)
+            # Update warehouse_id if provided
+            if body.warehouse_id:
+                await conv_storage.update_warehouse_id(conversation_id, body.warehouse_id)
 
-            except Exception as e:
-                logger.error(f'Failed to save messages: {e}')
+            # Update workspace_folder if provided
+            if body.workspace_folder:
+                await conv_storage.update_workspace_folder(conversation_id, body.workspace_folder)
+
+            logger.info(
+                f'Saved messages to conversation {conversation_id}: '
+                f'text={len(final_text)} chars, error={error_message is not None}, '
+                f'cancelled={stream.is_cancelled}'
+            )
+
+            # Mark project for backup (will be processed by backup worker)
+            mark_for_backup(body.project_id)
+
+            # Persist latest CLAUDE.md directly in Lakebase projects table.
+            # This keeps it durable like custom_system_prompt (not only in zip backups).
+            latest_claude_md = _read_project_claude_md(project_dir)
+            await project_storage.update_claude_md(body.project_id, latest_claude_md)
+
+        except Exception as e:
+            logger.error(f'Failed to save messages: {e}')
 
         # Mark stream as complete
-        if error_message and not final_text:
+        if stream.is_cancelled:
+            stream.is_complete = True
+            stream.add_event({'type': 'stream.completed', 'is_error': False})
+        elif error_message and not final_text:
             stream.mark_error(error_message)
         else:
             stream.mark_complete()
@@ -651,7 +711,7 @@ async def get_conversation_executions(
     try:
         exec_storage = ExecutionStorage(user_email, project_id, conversation_id)
         active = await exec_storage.get_active()
-        recent = await exec_storage.get_recent(limit=5)
+        recent = await exec_storage.get_recent(limit=50)
     except Exception as e:
         # Table might not exist yet (migration pending) - log and continue
         # In-memory streams will still work

@@ -51,7 +51,7 @@ class ProjectStorage:
       )
       session.add(project)
       await session.flush()
-      await session.refresh(project, ['id', 'name', 'user_email', 'created_at', 'custom_system_prompt'])
+      await session.refresh(project, ['id', 'name', 'user_email', 'created_at', 'custom_system_prompt', 'claude_md'])
       # Initialize conversations as empty list for to_dict()
       # (don't use ORM attribute assignment which triggers lazy load)
       project.__dict__['conversations'] = []
@@ -84,6 +84,21 @@ class ProjectStorage:
       project = result.scalar_one_or_none()
       if project:
         project.custom_system_prompt = system_prompt
+        return True
+      return False
+
+  async def update_claude_md(self, project_id: str, claude_md: str | None) -> bool:
+    """Update persisted CLAUDE.md content for a project."""
+    async with session_scope() as session:
+      result = await session.execute(
+        select(Project).where(
+          Project.id == project_id,
+          Project.user_email == self.user_email,
+        )
+      )
+      project = result.scalar_one_or_none()
+      if project:
+        project.claude_md = claude_md
         return True
       return False
 

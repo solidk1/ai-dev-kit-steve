@@ -5,12 +5,13 @@ Functions for uploading files and folders to Databricks Workspace.
 Uses Databricks Workspace API via SDK.
 """
 
+import base64
 import io
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.workspace import ImportFormat
@@ -47,6 +48,164 @@ class FolderUploadResult:
     def get_failed_uploads(self) -> List[UploadResult]:
         """Returns list of failed uploads"""
         return [r for r in self.results if not r.success]
+
+
+def _normalize_workspace_path(path: str) -> str:
+    """Normalize workspace path for Workspace API calls."""
+    normalized = (path or "").strip()
+    if not normalized:
+        return "/"
+    if normalized == "/Workspace":
+        return "/"
+    if normalized.startswith("/Workspace/"):
+        return normalized[len("/Workspace") :]
+    return normalized
+
+
+def _object_type_name(obj: Any) -> str:
+    """Convert SDK object_type enum/object into a stable string."""
+    if obj is None:
+        return ""
+    return str(getattr(obj, "name", obj))
+
+
+def list_workspace_files(
+    workspace_path: str,
+    recursive: bool = False,
+    max_results: int = 500,
+) -> Dict[str, Any]:
+    """List files/directories under a Databricks workspace path.
+
+    Args:
+        workspace_path: Workspace path (e.g., /Users/... or /Workspace/Users/...).
+        recursive: If True, recursively lists nested directories.
+        max_results: Maximum number of items to return (default 500, max 1000).
+
+    Returns:
+        Dictionary with files list and truncation metadata.
+    """
+    api_path = _normalize_workspace_path(workspace_path)
+    max_results = min(max_results, 1000)
+    limit_with_probe = max_results + 1
+
+    w = get_workspace_client()
+    pending_dirs = [api_path]
+    files: List[Dict[str, Any]] = []
+
+    while pending_dirs and len(files) < limit_with_probe:
+        current_dir = pending_dirs.pop(0)
+        for entry in w.workspace.list(path=current_dir):
+            object_type = _object_type_name(getattr(entry, "object_type", None))
+            is_directory = object_type == "DIRECTORY"
+            path = getattr(entry, "path", None)
+            files.append(
+                {
+                    "path": path,
+                    "name": Path(path).name if path else None,
+                    "object_type": object_type,
+                    "is_directory": is_directory,
+                    "language": _object_type_name(getattr(entry, "language", None)) or None,
+                    "object_id": getattr(entry, "object_id", None),
+                    "size": getattr(entry, "size", None),
+                    "created_at": getattr(entry, "created_at", None),
+                    "modified_at": getattr(entry, "modified_at", None),
+                }
+            )
+            if recursive and is_directory and path:
+                pending_dirs.append(path)
+            if len(files) >= limit_with_probe:
+                break
+
+    truncated = len(files) > max_results
+    files = files[:max_results]
+    return {
+        "workspace_path": workspace_path,
+        "returned_count": len(files),
+        "truncated": truncated,
+        "files": files,
+    }
+
+
+def read_workspace_file(workspace_path: str) -> Dict[str, Any]:
+    """Read a workspace file as UTF-8 text.
+
+    Args:
+        workspace_path: Workspace file path.
+
+    Returns:
+        Dictionary with workspace_path and text content.
+    """
+    from databricks.sdk.service.workspace import ExportFormat
+
+    api_path = _normalize_workspace_path(workspace_path)
+    w = get_workspace_client()
+    export = w.workspace.export(path=api_path, format=ExportFormat.SOURCE)
+    # SOURCE exports are base64-encoded text payloads.
+    decoded = ""
+    if getattr(export, "content", None):
+        decoded = base64.b64decode(export.content).decode("utf-8")
+    return {
+        "workspace_path": workspace_path,
+        "content": decoded,
+    }
+
+
+def write_workspace_file(
+    workspace_path: str,
+    content: str,
+    overwrite: bool = True,
+) -> Dict[str, Any]:
+    """Write UTF-8 text content to a workspace file.
+
+    Args:
+        workspace_path: Workspace destination path.
+        content: Text content to write.
+        overwrite: Whether to overwrite existing file.
+
+    Returns:
+        Dictionary with write status.
+    """
+    api_path = _normalize_workspace_path(workspace_path)
+    w = get_workspace_client()
+
+    parent_dir = str(Path(api_path).parent)
+    if parent_dir and parent_dir != "/":
+        try:
+            w.workspace.mkdirs(parent_dir)
+        except Exception:
+            pass
+
+    w.workspace.upload(
+        path=api_path,
+        content=io.BytesIO(content.encode("utf-8")),
+        format=ImportFormat.AUTO,
+        overwrite=overwrite,
+    )
+    return {
+        "workspace_path": workspace_path,
+        "bytes_written": len(content.encode("utf-8")),
+        "success": True,
+    }
+
+
+def delete_workspace_path(workspace_path: str, recursive: bool = False) -> Dict[str, Any]:
+    """Delete a workspace file or directory.
+
+    Args:
+        workspace_path: Workspace file/folder path to delete.
+        recursive: Required for deleting non-empty directories.
+
+    Returns:
+        Dictionary with delete status.
+    """
+    api_path = _normalize_workspace_path(workspace_path)
+    w = get_workspace_client()
+    w.workspace.delete(path=api_path, recursive=recursive)
+    return {
+        "workspace_path": workspace_path,
+        "recursive": recursive,
+        "success": True,
+    }
 
 
 def _upload_single_file(w: WorkspaceClient, local_path: str, remote_path: str, overwrite: bool = True) -> UploadResult:

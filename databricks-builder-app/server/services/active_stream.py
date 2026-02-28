@@ -107,12 +107,10 @@ class ActiveStream:
             return False
 
         self.is_cancelled = True
-        if self.task and not self.task.done():
-            self.task.cancel()
-
+        # Do not hard-cancel the task here.
+        # Let the agent loop observe is_cancelled and exit gracefully so it can
+        # persist partial output/thinking/tool progress before final completion.
         self.add_event({'type': 'stream.cancelled'})
-        self.add_event({'type': 'stream.completed', 'is_error': False})
-        self.is_complete = True
         return True
 
     def get_pending_events(self) -> list[dict]:

@@ -113,7 +113,7 @@ echo -e "  Full Upload:  ${FULL_UPLOAD}"
 echo ""
 
 # Check prerequisites
-echo -e "${YELLOW}[1/6] Checking prerequisites...${NC}"
+echo -e "${YELLOW}[1/7] Checking prerequisites...${NC}"
 
 # Check Databricks CLI
 if ! command -v databricks &> /dev/null; then
@@ -174,7 +174,7 @@ echo -e "  Deploy Path:  ${WORKSPACE_PATH}"
 echo ""
 
 # Check if app exists
-echo -e "${YELLOW}[2/6] Verifying app exists...${NC}"
+echo -e "${YELLOW}[2/7] Verifying app exists...${NC}"
 if ! databricks apps get "$APP_NAME" &> /dev/null; then
   echo -e "${RED}Error: App '${APP_NAME}' does not exist.${NC}"
   echo -e "Create it first with: ${GREEN}databricks apps create ${APP_NAME}${NC}"
@@ -183,8 +183,99 @@ fi
 echo -e "  ${GREEN}✓${NC} App '${APP_NAME}' exists"
 echo ""
 
+# Run database migrations synchronously (blocking) before packaging/deploy.
+# Do not background this step; deploy must fail fast on migration errors.
+echo -e "${YELLOW}[3/7] Applying database migrations...${NC}"
+cd "$PROJECT_DIR"
+
+# If LAKEBASE_* vars are not present in shell, derive from app.yaml.
+if [ -z "${LAKEBASE_PG_URL:-}" ] && [ -z "${LAKEBASE_INSTANCE_NAME:-}" ]; then
+  eval "$(python3 - <<'PY'
+import re
+from pathlib import Path
+
+app_yaml = Path("app.yaml")
+if not app_yaml.exists():
+    raise SystemExit(0)
+
+text = app_yaml.read_text(encoding="utf-8")
+
+def get_env(name: str) -> str:
+    pattern = re.compile(
+        rf"-\s*name:\s*{re.escape(name)}\s*\n\s*value:\s*\"([^\"]*)\"",
+        re.MULTILINE,
+    )
+    m = pattern.search(text)
+    return m.group(1) if m else ""
+
+instance = get_env("LAKEBASE_INSTANCE_NAME")
+database = get_env("LAKEBASE_DATABASE_NAME")
+
+if instance:
+    print(f'export LAKEBASE_INSTANCE_NAME="{instance}"')
+if database:
+    print(f'export LAKEBASE_DATABASE_NAME="{database}"')
+PY
+)"
+fi
+
+# Build a temporary tokenized LAKEBASE_PG_URL when not explicitly provided.
+# This makes local Alembic runs deterministic in CI/dev shells.
+if [ -z "${LAKEBASE_PG_URL:-}" ] && [ -n "${LAKEBASE_INSTANCE_NAME:-}" ]; then
+  eval "$(python3 - <<'PY'
+import os
+import urllib.parse
+
+from databricks.sdk import WorkspaceClient
+
+instance_name = os.environ.get("LAKEBASE_INSTANCE_NAME")
+database_name = os.environ.get("LAKEBASE_DATABASE_NAME", "databricks_postgres")
+
+if not instance_name:
+    raise SystemExit(0)
+
+w = WorkspaceClient()
+instance = w.database.get_database_instance(name=instance_name)
+cred = w.database.generate_database_credential(
+    request_id="deploy-alembic",
+    instance_names=[instance_name],
+)
+me = w.current_user.me()
+user = me.user_name or ""
+token = cred.token or ""
+
+encoded_user = urllib.parse.quote(user, safe="")
+encoded_token = urllib.parse.quote(token, safe="")
+url = f"postgresql://{encoded_user}:{encoded_token}@{instance.read_write_dns}:5432/{database_name}?sslmode=require"
+
+escaped = url.replace("'", "'\"'\"'")
+print(f"export LAKEBASE_PG_URL='{escaped}'")
+PY
+)"
+fi
+
+# Ensure local Alembic environment can import databricks_tools_core in dynamic auth mode.
+export PYTHONPATH="${REPO_ROOT}/databricks-tools-core:${PYTHONPATH:-}"
+
+if [ -n "${LAKEBASE_PG_URL:-}" ] || [ -n "${LAKEBASE_INSTANCE_NAME:-}" ]; then
+  if [ -x "$PROJECT_DIR/.venv/bin/alembic" ]; then
+    "$PROJECT_DIR/.venv/bin/alembic" -c "$PROJECT_DIR/alembic.ini" upgrade head
+  elif command -v alembic &> /dev/null; then
+    alembic -c "$PROJECT_DIR/alembic.ini" upgrade head
+  elif command -v uv &> /dev/null; then
+    uv run alembic -c "$PROJECT_DIR/alembic.ini" upgrade head
+  else
+    echo -e "${RED}Error: Alembic not found (expected .venv/bin/alembic, alembic, or uv run alembic)${NC}"
+    exit 1
+  fi
+  echo -e "  ${GREEN}✓${NC} Database migrations applied"
+else
+  echo -e "  ${YELLOW}Warning: No Lakebase configuration found in env or app.yaml; skipping migrations${NC}"
+fi
+echo ""
+
 # Build frontend
-echo -e "${YELLOW}[3/6] Building frontend...${NC}"
+echo -e "${YELLOW}[4/7] Building frontend...${NC}"
 cd "$PROJECT_DIR/client"
 
 if [ "$SKIP_BUILD" = true ]; then
@@ -208,7 +299,7 @@ cd "$PROJECT_DIR"
 echo ""
 
 # Prepare staging directory
-echo -e "${YELLOW}[4/6] Preparing deployment package...${NC}"
+echo -e "${YELLOW}[5/7] Preparing deployment package...${NC}"
 
 # Clean and create staging directory
 rm -rf "$STAGING_DIR"
@@ -219,6 +310,8 @@ echo "  Copying server code..."
 cp -r server "$STAGING_DIR/"
 cp app.yaml "$STAGING_DIR/"
 cp requirements.txt "$STAGING_DIR/"
+cp alembic.ini "$STAGING_DIR/"
+cp -r alembic "$STAGING_DIR/"
 
 # Copy frontend build (server expects it at client/out/)
 echo "  Copying frontend build..."
@@ -261,7 +354,7 @@ echo -e "  ${GREEN}✓${NC} Deployment package prepared"
 echo ""
 
 # Upload to workspace (incremental by default)
-echo -e "${YELLOW}[5/6] Uploading to Databricks workspace...${NC}"
+echo -e "${YELLOW}[6/7] Uploading to Databricks workspace...${NC}"
 echo "  Target: ${WORKSPACE_PATH}"
 
 MANIFEST_DIR="${PROJECT_DIR}/.deploy-manifests"
@@ -347,7 +440,7 @@ fi
 echo ""
 
 # Deploy the app
-echo -e "${YELLOW}[6/6] Deploying app...${NC}"
+echo -e "${YELLOW}[7/7] Deploying app...${NC}"
 DEPLOY_OUTPUT=$(databricks apps deploy "$APP_NAME" --source-code-path "$WORKSPACE_PATH" 2>&1)
 echo "$DEPLOY_OUTPUT"
 

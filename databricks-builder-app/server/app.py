@@ -1,6 +1,4 @@
 """FastAPI app for the Claude Code MCP application."""
-
-import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -59,8 +57,9 @@ async def lifespan(app: FastAPI):
       if is_dynamic_token_mode():
         await start_token_refresh()
 
-      # Run migrations in background thread (non-blocking)
-      asyncio.create_task(asyncio.to_thread(run_migrations))
+      # Run migrations synchronously during startup so schema is ready before
+      # serving requests. Deployment also runs migrations explicitly.
+      run_migrations()
 
       # Start backup worker
       start_backup_worker()

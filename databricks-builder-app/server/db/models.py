@@ -34,6 +34,7 @@ class Project(Base):
     DateTime(timezone=True), default=utc_now, nullable=False
   )
   custom_system_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  claude_md: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
   # Relationships
   conversations: Mapped[List['Conversation']] = relationship(
@@ -51,6 +52,7 @@ class Project(Base):
       'created_at': self.created_at.isoformat() if self.created_at else None,
       'conversation_count': len(self.conversations) if self.conversations else 0,
       'custom_system_prompt': self.custom_system_prompt,
+      'claude_md': self.claude_md,
     }
 
 

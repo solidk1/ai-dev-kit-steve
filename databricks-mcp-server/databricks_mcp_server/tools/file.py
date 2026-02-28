@@ -3,11 +3,101 @@
 from typing import Dict, Any
 
 from databricks_tools_core.file import (
+    delete_workspace_path as _delete_workspace_path,
+    list_workspace_files as _list_workspace_files,
+    read_workspace_file as _read_workspace_file,
     upload_folder as _upload_folder,
     upload_file as _upload_file,
+    write_workspace_file as _write_workspace_file,
 )
 
 from ..server import mcp
+
+
+@mcp.tool
+def read_workspace_file(workspace_path: str) -> Dict[str, Any]:
+    """
+    Read a Databricks workspace file as UTF-8 text.
+
+    Args:
+        workspace_path: Workspace file path
+            (e.g., "/Workspace/Users/user@example.com/script.py").
+
+    Returns:
+        Dictionary with workspace_path and content.
+    """
+    return _read_workspace_file(workspace_path=workspace_path)
+
+
+@mcp.tool
+def write_workspace_file(
+    workspace_path: str,
+    content: str,
+    overwrite: bool = True,
+) -> Dict[str, Any]:
+    """
+    Write text content to a Databricks workspace file.
+
+    Args:
+        workspace_path: Destination workspace file path.
+        content: UTF-8 text content to write.
+        overwrite: Whether to overwrite existing files.
+
+    Returns:
+        Dictionary with write status and bytes_written.
+    """
+    return _write_workspace_file(
+        workspace_path=workspace_path,
+        content=content,
+        overwrite=overwrite,
+    )
+
+
+@mcp.tool
+def delete_workspace_path(workspace_path: str, recursive: bool = False) -> Dict[str, Any]:
+    """
+    Delete a file or directory in Databricks workspace.
+
+    Args:
+        workspace_path: Workspace file/folder path to delete.
+        recursive: Required when deleting non-empty directories.
+
+    Returns:
+        Dictionary with delete status.
+    """
+    return _delete_workspace_path(
+        workspace_path=workspace_path,
+        recursive=recursive,
+    )
+
+
+@mcp.tool
+def list_workspace_files(
+    workspace_path: str,
+    recursive: bool = False,
+    max_results: int = 500,
+) -> Dict[str, Any]:
+    """
+    List files and folders in Databricks workspace paths.
+
+    Args:
+        workspace_path: Workspace path to list
+            (e.g., "/Workspace/Users/user@example.com", "/Users/user@example.com").
+        recursive: If True, recursively lists subdirectories.
+        max_results: Maximum number of items to return (default: 500, max: 1000).
+
+    Returns:
+        Dictionary with:
+        - workspace_path: Requested workspace path
+        - returned_count: Number of returned items
+        - truncated: Whether results were truncated at max_results
+        - files: Array of file/folder entries
+    """
+    return _list_workspace_files(
+        workspace_path=workspace_path,
+        recursive=recursive,
+        max_results=max_results,
+    )
 
 
 @mcp.tool

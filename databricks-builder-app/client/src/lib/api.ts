@@ -3,7 +3,7 @@
  * All routes are under /api (proxied in dev).
  */
 
-import type { Cluster, Conversation, Execution, PersonalSkill, Project, UserInfo, UserSettings, Warehouse } from '@/lib/types';
+import type { Cluster, Conversation, Execution, McpToolDescriptor, PersonalSkill, Project, UserInfo, UserSettings, Warehouse } from '@/lib/types';
 
 const API_BASE = '/api';
 
@@ -475,6 +475,13 @@ export async function savePersonalSkillFile(
   });
 }
 
+// --- MCP tools ---
+
+export async function fetchInstalledMcpTools(): Promise<McpToolDescriptor[]> {
+  const data = await request<{ tools: McpToolDescriptor[]; count: number }>('/mcp/tools');
+  return data.tools ?? [];
+}
+
 // --- User settings ---
 
 export async function fetchUserSettings(): Promise<UserSettings> {
@@ -521,5 +528,15 @@ export async function updateProjectSystemPrompt(
   await request(`/projects/${projectId}/system_prompt`, {
     method: 'PUT',
     body: { system_prompt: systemPrompt },
+  });
+}
+
+export async function updateProjectClaudeMd(
+  projectId: string,
+  claudeMd: string | null
+): Promise<void> {
+  await request(`/projects/${projectId}/claude_md`, {
+    method: 'PUT',
+    body: { claude_md: claudeMd },
   });
 }

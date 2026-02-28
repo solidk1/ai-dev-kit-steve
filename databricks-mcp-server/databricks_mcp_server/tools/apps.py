@@ -15,7 +15,6 @@ from databricks_tools_core.apps.apps import (
     list_apps as _list_apps,
     deploy_app as _deploy_app,
     delete_app as _delete_app,
-    get_app_logs as _get_app_logs,
 )
 from databricks_tools_core.identity import with_description_footer
 
@@ -46,6 +45,18 @@ def _find_app_by_name(name: str) -> Optional[Dict[str, Any]]:
         return result
     except Exception:
         return None
+
+
+def _is_clear_workspace_path(path: str) -> bool:
+    """Return True when path is an explicit workspace path (not inferred)."""
+    if not path:
+        return False
+    return (
+        path.startswith("/Workspace/")
+        or path.startswith("/Users/")
+        or path.startswith("/Shared/")
+        or path.startswith("/Repos/")
+    )
 
 
 # ============================================================================
@@ -87,7 +98,22 @@ def create_or_update_app(
         >>> create_or_update_app("my-app", "/Workspace/Users/me/my_app")
         {"name": "my-app", "created": True, "url": "...", "deployment": {...}}
     """
+    source_code_path = (source_code_path or "").strip() or None
     existing = _find_app_by_name(name)
+
+    # Don't guess or invent paths. If app doesn't exist yet and no clear workspace
+    # source path is provided, require clarification from the user.
+    if not existing and not source_code_path:
+        raise ValueError(
+            "source_code_path is required to create and deploy a new app. "
+            "Please provide an existing workspace path like "
+            "/Workspace/Users/<you>/<app_dir>."
+        )
+    if source_code_path and not _is_clear_workspace_path(source_code_path):
+        raise ValueError(
+            "source_code_path is unclear. Please provide an explicit workspace path "
+            "starting with /Workspace/, /Users/, /Shared/, or /Repos/."
+        )
 
     if existing:
         result = {**existing, "created": False}
@@ -110,16 +136,16 @@ def create_or_update_app(
 
     # Deploy if source_code_path provided
     if source_code_path:
-        try:
-            deployment = _deploy_app(
-                app_name=name,
-                source_code_path=source_code_path,
-                mode=mode,
-            )
-            result["deployment"] = deployment
-        except Exception as e:
-            logger.warning("Failed to deploy app '%s': %s", name, e)
-            result["deployment_error"] = str(e)
+        deployment = _deploy_app(
+            app_name=name,
+            source_code_path=source_code_path,
+            mode=mode,
+        )
+        result["deployment"] = deployment
+        # Make source path explicit in the response for tool-callers.
+        deployed_path = deployment.get("source_code_path") if isinstance(deployment, dict) else None
+        if deployed_path:
+            result["deployed_source_code_path"] = deployed_path
 
     return result
 
@@ -164,15 +190,21 @@ def get_app(
         result = _get_app(name=name)
 
         if include_logs:
-            try:
-                logs = _get_app_logs(
-                    app_name=name,
-                    deployment_id=deployment_id,
-                )
-                result["logs"] = logs.get("logs", "")
-                result["logs_deployment_id"] = logs.get("deployment_id")
-            except Exception as e:
-                result["logs_error"] = str(e)
+            # Intentionally do not fetch logs from MCP here.
+            # In some environments app-log retrieval endpoints may redirect or fail
+            # (for example websocket upgrade/302 behavior). Instead, return explicit
+            # command-line guidance so the agent can fetch logs directly.
+            dep = deployment_id or "ACTIVE_DEPLOYMENT_ID"
+            result["logs_unavailable_via_mcp"] = True
+            result["logs_instructions"] = (
+                "MCP get_app does not fetch logs directly. "
+                "Run CLI commands from a shell to retrieve logs."
+            )
+            result["logs_cli_commands"] = [
+                #f"databricks apps get {name} -o json",
+                #f"databricks apps list-deployments {name} -o json",
+                f"databricks apps logs {name} --tail-lines 500 --search {dep}",
+            ]
 
         return result
 

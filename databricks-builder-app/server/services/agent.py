@@ -111,15 +111,18 @@ def _extract_image_paths(content: str) -> list[str]:
   return paths
 
 
-def _is_command_execution_tool(tool_name: str | None) -> bool:
-  """True only for Databricks command-execution MCP tool names."""
+def _is_inline_image_tool(tool_name: str | None) -> bool:
+  """True for MCP tools whose output may include renderable image paths."""
   if not tool_name:
     return False
   normalized = tool_name.strip()
   return (
     normalized == 'execute_databricks_command'
     or normalized.endswith('__execute_databricks_command')
+    or normalized == 'check_operation_status'
+    or normalized.endswith('__check_operation_status')
   )
+
 
 # Built-in Claude Code tools
 BUILTIN_TOOLS = [
@@ -560,11 +563,17 @@ async def stream_agent_response(
     # UserMessage events with the same ToolResultBlock — first partial, then
     # complete. Track emitted IDs so we only yield the first occurrence.
     _emitted_tool_result_ids: set[str] = set()
+    # Track last content per tool_use_id so we can skip exact duplicates while
+    # still allowing partial -> complete updates for the same tool result.
+    _last_tool_result_content_by_id: dict[str, str] = {}
     # Track emitted inline image paths to avoid duplicates.
     _emitted_inline_image_paths: set[str] = set()
     # Track tool names by tool_use_id so tool_result handling can enforce
     # image extraction boundaries to specific MCP tools.
     _tool_name_by_id: dict[str, str] = {}
+    # Some SDK tool results may omit tool_use_id; keep the most recent tool name
+    # as a best-effort fallback for inline image gating.
+    _last_tool_use_name: str = ''
 
     # Process messages from the queue with keepalive for long operations
     KEEPALIVE_INTERVAL = 15  # seconds - send keepalive if no activity
@@ -620,6 +629,7 @@ async def stream_agent_response(
               }
             elif isinstance(block, ToolUseBlock):
               _tool_name_by_id[block.id] = block.name
+              _last_tool_use_name = block.name
               yield {
                 'type': 'tool_use',
                 'tool_id': block.id,
@@ -627,11 +637,33 @@ async def stream_agent_response(
                 'tool_input': block.input,
               }
             elif isinstance(block, ToolResultBlock):
-              # ToolResultBlock inside AssistantMessage appears when include_partial_messages=True
-              # sends intermediate conversation snapshots. The UserMessage handler below emits
-              # the authoritative, complete tool_result event — skip emitting here to avoid
-              # duplicates.
-              logger.debug(f'Skipping AssistantMessage ToolResultBlock tid={block.tool_use_id!r} (dedup)')
+              # Some SDK traces surface tool result content (including image paths)
+              # inside AssistantMessage blocks. We still avoid emitting tool_result
+              # UI events here to prevent duplicates, but we do process inline-image
+              # extraction so charts/images from command/status tools are not missed.
+              raw_tid = block.tool_use_id
+              tool_name = _tool_name_by_id.get(raw_tid, '') if raw_tid else _last_tool_use_name
+              if not block.is_error and _is_inline_image_tool(tool_name):
+                content = block.content
+                if isinstance(content, list):
+                  texts = []
+                  for item in content:
+                    if isinstance(item, dict) and 'text' in item:
+                      texts.append(item['text'])
+                    elif isinstance(item, str):
+                      texts.append(item)
+                    elif hasattr(item, 'text'):
+                      texts.append(item.text)
+                    else:
+                      texts.append(str(item))
+                  content = '\n'.join(texts) if texts else str(block.content)
+                elif not isinstance(content, str):
+                  content = str(content)
+                for img_path in _extract_image_paths(content):
+                  if img_path not in _emitted_inline_image_paths:
+                    _emitted_inline_image_paths.add(img_path)
+                    yield {'type': 'inline_image', 'path': img_path}
+              logger.debug(f'Processed AssistantMessage ToolResultBlock tid={block.tool_use_id!r}')
 
         elif isinstance(msg, ResultMessage):
           yield {
@@ -661,11 +693,6 @@ async def stream_agent_response(
                 # Some ToolResultBlocks may not include tool_use_id. Treat those as
                 # unique events so they don't collide on the empty string and get dropped.
                 raw_tid = block.tool_use_id
-                if raw_tid and raw_tid in _emitted_tool_result_ids:
-                  logger.debug(f'Skipping duplicate tool_result for tid={raw_tid!r}')
-                  continue
-                if raw_tid:
-                  _emitted_tool_result_ids.add(raw_tid)
                 tid = raw_tid or f'anon-tool-result-{time.time_ns()}'
 
                 # Extract content - may be string, list, or complex structure
@@ -677,11 +704,24 @@ async def stream_agent_response(
                       texts.append(item['text'])
                     elif isinstance(item, str):
                       texts.append(item)
+                    elif hasattr(item, 'text'):
+                      texts.append(item.text)
                     else:
                       texts.append(str(item))
                   content = '\n'.join(texts) if texts else str(block.content)
                 elif not isinstance(content, str):
                   content = str(content)
+
+                # Skip exact duplicate snapshots, but allow updated content for the
+                # same tool_use_id (e.g., partial -> final output where image paths
+                # only appear in the final snapshot).
+                if raw_tid:
+                  prev_content = _last_tool_result_content_by_id.get(raw_tid)
+                  if prev_content == content:
+                    logger.debug(f'Skipping identical tool_result snapshot for tid={raw_tid!r}')
+                    continue
+                  _last_tool_result_content_by_id[raw_tid] = content
+                  _emitted_tool_result_ids.add(raw_tid)
 
                 # Improve generic "Stream closed" error messages
                 if block.is_error and 'Stream closed' in content:
@@ -695,9 +735,11 @@ async def stream_agent_response(
                   'is_error': block.is_error,
                 }
 
-                # Only allow inline images from command-execution MCP outputs.
-                tool_name = _tool_name_by_id.get(raw_tid, '') if raw_tid else ''
-                if not block.is_error and _is_command_execution_tool(tool_name):
+                # Only allow inline images from command/status tool outputs.
+                # Prefer exact tool_use_id mapping; fall back to last seen tool name
+                # when tool_use_id is missing in the SDK ToolResultBlock.
+                tool_name = _tool_name_by_id.get(raw_tid, '') if raw_tid else _last_tool_use_name
+                if not block.is_error and _is_inline_image_tool(tool_name):
                   for img_path in _extract_image_paths(content):
                     if img_path not in _emitted_inline_image_paths:
                       _emitted_inline_image_paths.add(img_path)

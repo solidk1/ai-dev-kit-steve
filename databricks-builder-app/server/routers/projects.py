@@ -34,6 +34,12 @@ class UpdateSystemPromptRequest(BaseModel):
   system_prompt: Optional[str] = None
 
 
+class UpdateClaudeMdRequest(BaseModel):
+  """Request to update a project's persisted CLAUDE.md content."""
+
+  claude_md: Optional[str] = None
+
+
 @router.get('/projects')
 async def get_all_projects(request: Request):
   """Get all projects for the current user sorted by created_at (newest first)."""
@@ -128,3 +134,18 @@ async def update_system_prompt(request: Request, project_id: str, body: UpdateSy
     raise HTTPException(status_code=404, detail=f'Project {project_id} not found')
 
   return {'success': True, 'project_id': project_id, 'has_custom_prompt': body.system_prompt is not None}
+
+
+@router.put('/projects/{project_id}/claude_md')
+async def update_claude_md(request: Request, project_id: str, body: UpdateClaudeMdRequest):
+  """Persist or reset project-scoped CLAUDE.md content."""
+  user_email = await get_current_user(request)
+  storage = ProjectStorage(user_email)
+
+  logger.info(f'Updating CLAUDE.md for project {project_id} (user: {user_email})')
+
+  success = await storage.update_claude_md(project_id, body.claude_md)
+  if not success:
+    raise HTTPException(status_code=404, detail=f'Project {project_id} not found')
+
+  return {'success': True, 'project_id': project_id, 'has_claude_md': body.claude_md is not None}

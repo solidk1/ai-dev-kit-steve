@@ -23,6 +23,7 @@ export interface Project {
   created_at: string | null;
   conversation_count: number;
   custom_system_prompt: string | null;
+  claude_md: string | null;
 }
 
 /** Conversation summary (list) or full (detail with messages) */
@@ -87,6 +88,15 @@ export interface PersonalSkill {
   name: string;
   description: string;
   workspace_path: string;
+}
+
+/** MCP tool descriptor from GET /api/mcp/tools */
+export interface McpToolDescriptor {
+  server: string;
+  name: string;
+  description: string;
+  arguments: Record<string, unknown>;
+  output_schema?: Record<string, unknown> | null;
 }
 
 /** Per-user saved settings from GET /api/settings */
