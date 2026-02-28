@@ -191,19 +191,18 @@ def get_app(
 
         if include_logs:
             # Intentionally do not fetch logs from MCP here.
-            # In some environments app-log retrieval endpoints may redirect or fail
-            # (for example websocket upgrade/302 behavior). Instead, return explicit
-            # command-line guidance so the agent can fetch logs directly.
-            dep = deployment_id or "ACTIVE_DEPLOYMENT_ID"
+            # Return only safe guidance/metadata commands and avoid suggesting
+            # any potentially unsupported log-retrieval command.
             result["logs_unavailable_via_mcp"] = True
             result["logs_instructions"] = (
-                "MCP get_app does not fetch logs directly. "
-                "Run CLI commands from a shell to retrieve logs."
+                "MCP get_app does not fetch logs directly in this environment. "
+                "Use shell to inspect app/deployment metadata, then retrieve logs "
+                "using your workspace-supported method (for example Databricks UI Logs tab)."
             )
             result["logs_cli_commands"] = [
                 #f"databricks apps get {name} -o json",
                 #f"databricks apps list-deployments {name} -o json",
-                f"databricks apps logs {name} --tail-lines 500 --search {dep}",
+                f"databricks apps logs {name} --tail-lines 100",
             ]
 
         return result
