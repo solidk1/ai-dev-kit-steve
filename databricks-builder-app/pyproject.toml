@@ -25,7 +25,6 @@ dependencies = [
   "alembic>=1.16.1",
   "psycopg[binary]>=3.2.0",  # psycopg3 async driver with hostaddr support
   "greenlet>=3.0.0",
-  "psycopg2-binary>=2.9.11",  # For alembic migrations (sync)
   # Claude Agent SDK (successor to claude-code-sdk)
   "claude-agent-sdk>=0.1.19",
   "anthropic>=0.42.0",

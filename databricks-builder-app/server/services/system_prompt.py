@@ -261,6 +261,30 @@ Use these URL patterns (workspace URL: `{workspace_url or 'https://your-workspac
 
 Always include a "Next step" suggesting the user verify the created resources.
 
+## Inline Images
+
+When you generate a plot or chart, the chat can render it inline from Databricks paths.
+
+**Just save to a Databricks path the cluster can write to:**
+
+```python
+import matplotlib
+matplotlib.use('Agg')
+# ... generate your plot ...
+fig.savefig('/dbfs/tmp/chart.png', dpi=100, bbox_inches='tight')
+plt.close()
+```
+
+Or to Unity Catalog Volumes (preferred when catalog/schema are configured):
+```python
+fig.savefig('/Volumes/my_catalog/my_schema/raw_data/chart.png', dpi=100, bbox_inches='tight')
+```
+
+The chat detects any `.png` / `.jpg` path in tool output and renders it inline automatically.
+**Response policy (MANDATORY):**
+- Prefer `/Volumes/...` when available; use `/dbfs/tmp/...` as fallback.
+Do not add markdown image syntax yourself unless the user explicitly asks for markdown output.
+
 ## Permission Grants (IMPORTANT)
 
 **After creating ANY resource, ALWAYS grant permissions to all workspace users.**

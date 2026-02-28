@@ -25,6 +25,7 @@ APP_NAME="${APP_NAME:-}"
 WORKSPACE_PATH=""
 STAGING_DIR=""
 SKIP_BUILD="${SKIP_BUILD:-false}"
+FULL_UPLOAD="${FULL_UPLOAD:-false}"
 
 # Usage information
 usage() {
@@ -37,6 +38,7 @@ usage() {
   echo ""
   echo "Options:"
   echo "  --skip-build          Skip frontend build (use existing build)"
+  echo "  --full-upload         Force full workspace import"
   echo "  --staging-dir DIR     Custom staging directory (default: /tmp/<app-name>-deploy)"
   echo "  -h, --help            Show this help message"
   echo ""
@@ -61,6 +63,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-build)
       SKIP_BUILD=true
+      shift
+      ;;
+    --full-upload)
+      FULL_UPLOAD=true
       shift
       ;;
     --staging-dir)
@@ -103,6 +109,7 @@ echo ""
 echo -e "  App Name:     ${GREEN}${APP_NAME}${NC}"
 echo -e "  Staging Dir:  ${STAGING_DIR}"
 echo -e "  Skip Build:   ${SKIP_BUILD}"
+echo -e "  Full Upload:  ${FULL_UPLOAD}"
 echo ""
 
 # Check prerequisites
@@ -253,11 +260,90 @@ find "$STAGING_DIR" -type f -name "*.pyc" -delete 2>/dev/null || true
 echo -e "  ${GREEN}✓${NC} Deployment package prepared"
 echo ""
 
-# Upload to workspace
+# Upload to workspace (incremental by default)
 echo -e "${YELLOW}[5/6] Uploading to Databricks workspace...${NC}"
 echo "  Target: ${WORKSPACE_PATH}"
-databricks workspace import-dir "$STAGING_DIR" "$WORKSPACE_PATH" --overwrite 2>&1 | tail -5
-echo -e "  ${GREEN}✓${NC} Upload complete"
+
+MANIFEST_DIR="${PROJECT_DIR}/.deploy-manifests"
+MANIFEST_FILE="${MANIFEST_DIR}/${APP_NAME}.manifest.tsv"
+NEW_MANIFEST_FILE="$(mktemp)"
+
+if [ "$FULL_UPLOAD" = true ] || [ ! -f "$MANIFEST_FILE" ]; then
+  if [ "$FULL_UPLOAD" = true ]; then
+    echo "  Full upload requested (--full-upload)"
+  else
+    echo "  No previous manifest found; performing initial full upload"
+  fi
+
+  databricks workspace import-dir "$STAGING_DIR" "$WORKSPACE_PATH" --overwrite 2>&1 | tail -5
+
+  mkdir -p "$MANIFEST_DIR"
+  while IFS= read -r -d '' local_file; do
+    rel_path="${local_file#$STAGING_DIR/}"
+    checksum="$(shasum -a 256 "$local_file" | awk '{print $1}')"
+    printf "%s\t%s\n" "$checksum" "$rel_path" >> "$NEW_MANIFEST_FILE"
+  done < <(find "$STAGING_DIR" -type f -print0)
+  mv "$NEW_MANIFEST_FILE" "$MANIFEST_FILE"
+  echo -e "  ${GREEN}✓${NC} Upload complete (full)"
+else
+  echo "  Incremental upload using manifest"
+
+  uploaded_count=0
+  unchanged_count=0
+  deleted_count=0
+
+  # Build current manifest from staging
+  while IFS= read -r -d '' local_file; do
+    rel_path="${local_file#$STAGING_DIR/}"
+    checksum="$(shasum -a 256 "$local_file" | awk '{print $1}')"
+    printf "%s\t%s\n" "$checksum" "$rel_path" >> "$NEW_MANIFEST_FILE"
+  done < <(find "$STAGING_DIR" -type f -print0)
+
+  CHANGED_LIST="$(mktemp)"
+  DELETED_LIST="$(mktemp)"
+
+  # Changed/new files: path missing in old manifest OR checksum changed
+  awk -F $'\t' '
+    NR==FNR { old[$2]=$1; next }
+    { if (!(($2 in old) && old[$2]==$1)) print $2 }
+  ' "$MANIFEST_FILE" "$NEW_MANIFEST_FILE" > "$CHANGED_LIST"
+
+  while IFS= read -r rel_path; do
+    if [ -n "$rel_path" ]; then
+      local_file="$STAGING_DIR/$rel_path"
+      remote_file="$WORKSPACE_PATH/$rel_path"
+      remote_dir="$(dirname "$remote_file")"
+      databricks workspace mkdirs "$remote_dir" >/dev/null
+      databricks workspace import --file "$local_file" "$remote_file" --overwrite --format AUTO >/dev/null
+      uploaded_count=$((uploaded_count + 1))
+    fi
+  done < "$CHANGED_LIST"
+
+  # Deleted files: path existed before but is not in current manifest
+  awk -F $'\t' '
+    NR==FNR { new[$2]=1; next }
+    { if (!($2 in new)) print $2 }
+  ' "$NEW_MANIFEST_FILE" "$MANIFEST_FILE" > "$DELETED_LIST"
+
+  while IFS= read -r rel_path; do
+    if [ -n "$rel_path" ]; then
+      databricks workspace delete "$WORKSPACE_PATH/$rel_path" >/dev/null 2>&1 || true
+      deleted_count=$((deleted_count + 1))
+    fi
+  done < "$DELETED_LIST"
+
+  total_files=$(wc -l < "$NEW_MANIFEST_FILE" | tr -d ' ')
+  unchanged_count=$((total_files - uploaded_count))
+  if [ "$unchanged_count" -lt 0 ]; then unchanged_count=0; fi
+
+  mkdir -p "$MANIFEST_DIR"
+  mv "$NEW_MANIFEST_FILE" "$MANIFEST_FILE"
+  rm -f "$CHANGED_LIST" "$DELETED_LIST"
+  echo -e "  ${GREEN}✓${NC} Upload complete (incremental)"
+  echo "    Uploaded:  ${uploaded_count} changed file(s)"
+  echo "    Unchanged: ${unchanged_count} file(s)"
+  echo "    Deleted:   ${deleted_count} file(s)"
+fi
 echo ""
 
 # Deploy the app

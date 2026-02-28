@@ -15,7 +15,7 @@ from .database import (
   stop_token_refresh,
   test_database_connection,
 )
-from .models import Base, Conversation, Execution, Message, Project
+from .models import Base, Conversation, Execution, Message, Project, UserConfig
 
 __all__ = [
   'Base',
@@ -23,6 +23,7 @@ __all__ = [
   'Execution',
   'Message',
   'Project',
+  'UserConfig',
   'create_tables',
   'get_engine',
   'get_lakebase_project_id',
