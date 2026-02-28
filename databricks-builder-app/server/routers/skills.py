@@ -25,6 +25,13 @@ class UpdateEnabledSkillsRequest(BaseModel):
   enabled_skills: list[str] | None = None  # None means all skills enabled
 
 
+class SaveSkillFileRequest(BaseModel):
+  """Request to save a skill file in the project's local skills directory."""
+
+  path: str    # Relative path within .claude/skills/
+  content: str
+
+
 def _get_skills_dir(project_id: str) -> Path:
   """Get the skills directory for a project."""
   project_dir = get_project_directory(project_id)
@@ -110,6 +117,28 @@ async def get_skill_file(
   except Exception as e:
     logger.error(f'Failed to read skill file: {e}')
     raise HTTPException(status_code=500, detail=f'Failed to read file: {str(e)}')
+
+
+@router.put('/projects/{project_id}/skills/file')
+async def save_skill_file(project_id: str, body: SaveSkillFileRequest):
+  """Save content of a skill file in the project's local .claude/skills directory."""
+  skills_dir = _get_skills_dir(project_id)
+
+  try:
+    requested_path = (skills_dir / body.path).resolve()
+
+    if not str(requested_path).startswith(str(skills_dir.resolve())):
+      raise HTTPException(status_code=403, detail='Access denied: path outside skills directory')
+
+    requested_path.parent.mkdir(parents=True, exist_ok=True)
+    requested_path.write_text(body.content, encoding='utf-8')
+    return {'success': True, 'path': body.path}
+
+  except HTTPException:
+    raise
+  except Exception as e:
+    logger.error(f'Failed to save skill file: {e}')
+    raise HTTPException(status_code=500, detail=f'Failed to save file: {str(e)}')
 
 
 @router.get('/projects/{project_id}/skills/available')

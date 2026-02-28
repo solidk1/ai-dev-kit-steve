@@ -5,6 +5,7 @@ import { ProjectsProvider } from "./contexts/ProjectsContext";
 import HomePage from "./pages/HomePage";
 import ProjectPage from "./pages/ProjectPage";
 import DocPage from "./pages/DocPage";
+import SettingsPage from "./pages/SettingsPage";
 
 function App() {
   return (
@@ -14,6 +15,7 @@ function App() {
           <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/doc" element={<DocPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
             <Route path="/projects/:projectId" element={<ProjectPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

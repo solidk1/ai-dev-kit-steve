@@ -3,7 +3,7 @@
  * All routes are under /api (proxied in dev).
  */
 
-import type { Cluster, Conversation, Execution, Project, UserInfo, Warehouse } from '@/lib/types';
+import type { Cluster, Conversation, Execution, PersonalSkill, Project, UserInfo, UserSettings, Warehouse } from '@/lib/types';
 
 const API_BASE = '/api';
 
@@ -39,7 +39,7 @@ async function request<T>(
 // --- Config / user ---
 
 export async function fetchUserInfo(): Promise<UserInfo> {
-  return request<UserInfo>('/me');
+  return request<UserInfo>('/config/me');
 }
 
 // --- Projects ---
@@ -108,10 +108,17 @@ export async function fetchWarehouses(): Promise<Warehouse[]> {
 
 // --- Agent (invoke + streaming) ---
 
+export interface ImageAttachment {
+  type: 'base64';
+  media_type: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+  data: string;
+}
+
 export interface InvokeAgentParams {
   projectId: string;
   conversationId?: string | null;
   message: string;
+  images?: ImageAttachment[] | null;
   clusterId?: string | null;
   defaultCatalog?: string | null;
   defaultSchema?: string | null;
@@ -130,6 +137,7 @@ export async function invokeAgent(params: InvokeAgentParams): Promise<void> {
     projectId,
     conversationId,
     message,
+    images,
     clusterId,
     defaultCatalog,
     defaultSchema,
@@ -149,6 +157,7 @@ export async function invokeAgent(params: InvokeAgentParams): Promise<void> {
       project_id: projectId,
       conversation_id: conversationId ?? null,
       message,
+      images: images ?? null,
       cluster_id: clusterId ?? null,
       default_catalog: defaultCatalog ?? null,
       default_schema: defaultSchema ?? null,
@@ -239,6 +248,13 @@ async function streamProgress(params: {
       });
 
       if (!res.ok) {
+        // 404 means the stream no longer exists in memory (e.g. server restarted after a
+        // deploy while the execution was running). Treat it as completed so the caller
+        // reloads the conversation from the DB instead of showing an error.
+        if (res.status === 404) {
+          await onDone();
+          return;
+        }
         const errBody = await res.json().catch(() => ({}));
         const message = (errBody.detail ?? res.statusText) as string;
         onError(new Error(typeof message === 'string' ? message : JSON.stringify(message)));
@@ -321,6 +337,36 @@ export async function fetchExecutions(
   return data;
 }
 
+// --- Project local file uploads ---
+
+export interface UploadedProjectFile {
+  name: string;
+  path: string; // relative path inside project directory
+  size: number;
+}
+
+export async function uploadProjectFile(
+  projectId: string,
+  file: File
+): Promise<UploadedProjectFile> {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const res = await fetch(`${API_BASE}/projects/${projectId}/files/upload`, {
+    method: 'POST',
+    credentials: 'include',
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}));
+    const message = (errBody.detail ?? res.statusText) as string;
+    throw new Error(typeof message === 'string' ? message : JSON.stringify(message));
+  }
+
+  return res.json() as Promise<UploadedProjectFile>;
+}
+
 // --- Skills ---
 
 export interface SkillTreeNode {
@@ -386,4 +432,94 @@ export async function updateEnabledSkills(
 
 export async function reloadProjectSkills(projectId: string): Promise<void> {
   await request(`/projects/${projectId}/skills/reload`, { method: 'POST' });
+}
+
+export async function saveProjectSkillFile(
+  projectId: string,
+  path: string,
+  content: string
+): Promise<void> {
+  await request(`/projects/${projectId}/skills/file`, {
+    method: 'PUT',
+    body: { path, content },
+  });
+}
+
+// --- Personal workspace (user's /Users/<email>/.claude/ in Databricks) ---
+
+export async function fetchPersonalSkills(): Promise<PersonalSkill[]> {
+  const data = await request<{ skills: PersonalSkill[] }>('/personal/skills');
+  return data.skills ?? [];
+}
+
+export async function fetchPersonalSkillsTree(): Promise<SkillTreeNode[]> {
+  const data = await request<{ tree: SkillTreeNode[] }>('/personal/skills/tree');
+  return data.tree ?? [];
+}
+
+export async function fetchPersonalSkillFile(
+  workspacePath: string
+): Promise<{ content: string; path: string; filename: string }> {
+  return request<{ content: string; path: string; filename: string }>(
+    `/personal/skills/file?path=${encodeURIComponent(workspacePath)}`
+  );
+}
+
+export async function savePersonalSkillFile(
+  workspacePath: string,
+  content: string
+): Promise<void> {
+  await request('/personal/skills/file', {
+    method: 'PUT',
+    body: { workspace_path: workspacePath, content },
+  });
+}
+
+// --- User settings ---
+
+export async function fetchUserSettings(): Promise<UserSettings> {
+  return request<UserSettings>('/config/settings');
+}
+
+export interface SaveUserSettingsParams {
+  defaultCatalog: string | null;
+  defaultSchema: string | null;
+  workspaceFolder: string | null;
+  model: string | null;
+  modelMini: string | null;
+}
+
+export async function saveUserSettings(params: SaveUserSettingsParams): Promise<void> {
+  await request('/config/settings', {
+    method: 'PUT',
+    body: {
+      default_catalog: params.defaultCatalog || null,
+      default_schema: params.defaultSchema || null,
+      workspace_folder: params.workspaceFolder || null,
+      model: params.model || null,
+      model_mini: params.modelMini || null,
+    },
+  });
+}
+
+// --- PAT management ---
+
+export async function savePat(pat: string): Promise<void> {
+  await request('/config/pat', { method: 'PUT', body: { pat } });
+}
+
+export async function deletePat(): Promise<void> {
+  await request('/config/pat', { method: 'DELETE' });
+}
+
+// --- System Prompt ---
+
+export async function updateProjectSystemPrompt(
+  projectId: string,
+  systemPrompt: string | null
+): Promise<void> {
+  await request(`/projects/${projectId}/system_prompt`, {
+    method: 'PUT',
+    body: { system_prompt: systemPrompt },
+  });
 }

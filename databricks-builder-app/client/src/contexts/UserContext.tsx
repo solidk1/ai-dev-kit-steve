@@ -13,6 +13,10 @@ interface UserContextType {
   workspaceUrl: string | null;
   lakebaseConfigured: boolean;
   lakebaseError: string | null;
+  appName: string | null;
+  appVersion: string | null;
+  model: string | null;
+  modelMini: string | null;
   loading: boolean;
   error: Error | null;
 }
@@ -44,6 +48,10 @@ export function UserProvider({ children }: { children: ReactNode }) {
     workspaceUrl: userInfo?.workspace_url || null,
     lakebaseConfigured: userInfo?.lakebase_configured || false,
     lakebaseError: userInfo?.lakebase_error || null,
+    appName: userInfo?.app_name || null,
+    appVersion: userInfo?.app_version || null,
+    model: userInfo?.model || null,
+    modelMini: userInfo?.model_mini || null,
     loading,
     error,
   };

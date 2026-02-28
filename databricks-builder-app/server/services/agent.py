@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import queue
+import re
 import sys
 import threading
 import time
@@ -41,13 +42,84 @@ from claude_agent_sdk.types import (
   ToolUseBlock,
   UserMessage,
 )
+import databricks_tools_core.auth as _dt_auth
 from databricks_tools_core.auth import set_databricks_auth, clear_databricks_auth
+
+# OBO patch: replace get_workspace_client with a version that uses the user's
+# forwarded token (X-Forwarded-Access-Token) via credentials_strategy.
+# credentials_strategy avoids putting token= into the SDK Config, which would
+# conflict with DATABRICKS_CLIENT_ID/SECRET env vars ("both methods" error).
+# Must be applied before clusters.py and MCP tool modules are imported.
+_original_get_workspace_client = _dt_auth.get_workspace_client
+
+
+def _obo_workspace_client():
+  """OBO: user token (when set) takes priority over SP OAuth for workspace ops."""
+  host = _dt_auth._host_ctx.get() or os.environ.get('DATABRICKS_HOST')
+  token = _dt_auth._token_ctx.get()
+  if token:
+    if not host:
+      raise ValueError('Databricks host is required when using a context token')
+    from databricks.sdk import WorkspaceClient
+    from databricks.sdk.credentials_provider import CredentialsStrategy
+    from databricks_tools_core.identity import PRODUCT_NAME, PRODUCT_VERSION, tag_client
+
+    _t = token
+
+    class _OBOStrategy(CredentialsStrategy):
+      def auth_type(self) -> str:
+        return 'pat'
+
+      def __call__(self, cfg):
+        return lambda: {'Authorization': f'Bearer {_t}'}
+
+    return tag_client(WorkspaceClient(
+      host=host,
+      credentials_strategy=_OBOStrategy(),
+      product=PRODUCT_NAME,
+      product_version=PRODUCT_VERSION,
+    ))
+  return _original_get_workspace_client()
+
+
+_dt_auth.get_workspace_client = _obo_workspace_client
 
 from .backup_manager import ensure_project_directory as _ensure_project_directory
 from .databricks_tools import load_databricks_tools, create_filtered_databricks_server
 from .system_prompt import get_system_prompt
 
 logger = logging.getLogger(__name__)
+
+# Detect Databricks image file paths in tool result output.
+# Matches: dbfs:/..., /dbfs/..., /Volumes/..., /Workspace/..., /Users/..., /Shared/...
+_IMAGE_PATH_RE = re.compile(
+  r'(?:dbfs:/|/dbfs/|/Volumes/|/Workspace/|/Users/|/Shared/)'
+  r'[^\s\'"<>\]]*\.(?:png|jpg|jpeg|gif|svg|webp)',
+  re.IGNORECASE,
+)
+
+
+def _extract_image_paths(content: str) -> list[str]:
+  """Return normalised Databricks paths for any image files mentioned in tool output."""
+  paths = []
+  for m in _IMAGE_PATH_RE.finditer(content):
+    p = m.group(0)
+    # Normalise /dbfs/ mount-point prefix to dbfs:/ API prefix
+    if p.startswith('/dbfs/'):
+      p = 'dbfs:/' + p[6:]
+    paths.append(p)
+  return paths
+
+
+def _is_command_execution_tool(tool_name: str | None) -> bool:
+  """True only for Databricks command-execution MCP tool names."""
+  if not tool_name:
+    return False
+  normalized = tool_name.strip()
+  return (
+    normalized == 'execute_databricks_command'
+    or normalized.endswith('__execute_databricks_command')
+  )
 
 # Built-in Claude Code tools
 BUILTIN_TOOLS = [
@@ -207,7 +279,7 @@ def _get_mlflow_stop_hook(experiment_name: str | None = None):
     return None
 
 
-def _run_agent_in_fresh_loop(message, options, result_queue, context, is_cancelled_fn, mlflow_experiment=None):
+def _run_agent_in_fresh_loop(message, options, result_queue, context, is_cancelled_fn, mlflow_experiment=None, images=None):
   """Run agent in a fresh event loop (workaround for issue #462).
 
   This function runs in a separate thread with a fresh event loop to avoid
@@ -248,33 +320,22 @@ def _run_agent_in_fresh_loop(message, options, result_queue, context, is_cancell
       """Run agent using query() for proper streaming."""
       # Create prompt generator in the fresh event loop context
       async def prompt_generator():
-        yield {'type': 'user', 'message': {'role': 'user', 'content': message}}
+        if images:
+          content = [{'type': 'image', 'source': img} for img in images]
+          if message:
+            content.append({'type': 'text', 'text': message})
+          yield {'type': 'user', 'message': {'role': 'user', 'content': content}}
+        else:
+          yield {'type': 'user', 'message': {'role': 'user', 'content': message}}
 
       try:
-        msg_count = 0
         async for msg in query(prompt=prompt_generator(), options=options):
-          msg_count += 1
-          msg_type = type(msg).__name__
-          logger.info(f"[AGENT DEBUG] Received message #{msg_count}: {msg_type}")
-
-          # Log more details for specific message types
-          if hasattr(msg, 'content'):
-            content = msg.content
-            if isinstance(content, list):
-              block_types = [type(b).__name__ for b in content]
-              logger.info(f"[AGENT DEBUG]   Content blocks: {block_types}")
-          if hasattr(msg, 'is_error') and msg.is_error:
-            logger.error(f"[AGENT DEBUG]   is_error=True")
-          if hasattr(msg, 'session_id'):
-            logger.info(f"[AGENT DEBUG]   session_id={msg.session_id}")
-
           # Check for cancellation before processing each message
           if is_cancelled_fn():
             logger.info("Agent cancelled by user request")
             result_queue.put(('cancelled', None))
             return
           result_queue.put(('message', msg))
-        logger.info(f"[AGENT DEBUG] query() loop completed normally after {msg_count} messages")
       except asyncio.CancelledError:
         logger.warning("Agent query was cancelled (asyncio.CancelledError)")
         result_queue.put(('error', Exception("Agent query cancelled - likely due to stream timeout or connection issue")))
@@ -302,20 +363,21 @@ def _run_agent_in_fresh_loop(message, options, result_queue, context, is_cancell
 async def stream_agent_response(
   project_id: str,
   message: str,
+  images: list[dict] | None = None,
   session_id: str | None = None,
   cluster_id: str | None = None,
   default_catalog: str | None = None,
   default_schema: str | None = None,
   warehouse_id: str | None = None,
   workspace_folder: str | None = None,
-  fmapi_host: str | None = None,
-  fmapi_token: str | None = None,
   databricks_host: str | None = None,
   databricks_token: str | None = None,
-  is_cross_workspace: bool = False,
   is_cancelled_fn: callable = None,
   enabled_skills: list[str] | None = None,
   mlflow_experiment_name: str | None = None,
+  custom_system_prompt: str | None = None,
+  user_email: str | None = None,
+  user_access_token: str | None = None,
 ) -> AsyncIterator[dict]:
   """Stream Claude agent response with all event types.
 
@@ -331,14 +393,13 @@ async def stream_agent_response(
       default_schema: Optional default schema name
       warehouse_id: Optional Databricks SQL warehouse ID for queries
       workspace_folder: Optional workspace folder for file uploads
-      fmapi_host: Builder App workspace URL for Claude API (FMAPI)
-      fmapi_token: Builder App token for Claude API authentication
-      databricks_host: Target workspace URL for Databricks tool operations
-      databricks_token: Target workspace token for Databricks tool auth
-      is_cross_workspace: When True, tool operations target a different workspace
-          than the Builder App. Enables force_token in auth context.
+      databricks_host: Databricks workspace URL for auth context
+      databricks_token: User's Databricks access token for auth context
       is_cancelled_fn: Optional callable that returns True if request is cancelled
       enabled_skills: Optional list of enabled skill names. None means all skills.
+      user_email: User's email address for personal workspace operations
+      user_access_token: User's personal Databricks access token (X-Forwarded-Access-Token)
+          used to sync personal skills from /Users/<email>/.claude/ into the project.
 
   Yields:
       Event dicts with 'type' field for frontend consumption
@@ -354,10 +415,16 @@ async def stream_agent_response(
   logger.info(f'Agent working directory (cwd): {project_dir}')
   logger.info(f'Workspace folder (remote): {workspace_folder}')
 
-  # Set auth context for tool operations (targets the specified workspace)
-  # When cross-workspace, force_token ensures the target credentials are used
-  # even when OAuth M2M credentials exist in environment
-  set_databricks_auth(databricks_host, databricks_token, force_token=is_cross_workspace)
+  # Set auth context for MCP tool operations (cluster exec, SQL, etc.).
+  # When the user has a stored PAT, use it — it has full permissions for
+  # clusters, SQL, command-execution, and workspace resources.
+  # Otherwise, pass None to fall through to SP OAuth (default).
+  if user_access_token:
+    logger.info('Using user PAT for MCP tool auth context')
+    set_databricks_auth(databricks_host, user_access_token)
+  else:
+    logger.info('Using SP OAuth for MCP tool auth context (no user PAT)')
+    set_databricks_auth(databricks_host, None)
 
   try:
     # Build allowed tools list
@@ -366,6 +433,17 @@ async def stream_agent_response(
     # Sync project skills directory before running agent
     from .skills_manager import sync_project_skills, get_available_skills, get_allowed_mcp_tools
     sync_project_skills(project_dir, enabled_skills=enabled_skills)
+
+    # Overlay personal workspace skills (from /Users/<email>/.claude/skills/) if available.
+    # Personal skills override app-default skills with the same directory name.
+    if user_email and user_access_token:
+      try:
+        from .workspace_personal import sync_personal_skills_to_project
+        synced = sync_personal_skills_to_project(user_email, user_access_token, project_dir)
+        if synced > 0:
+          logger.info(f'Overlaid {synced} personal workspace skills for {user_email}')
+      except Exception as e:
+        logger.warning(f'Personal skills sync skipped (non-fatal): {e}')
 
     # Get Databricks tools and filter based on enabled skills.
     # We must create a filtered MCP server (not just filter allowed_tools)
@@ -388,54 +466,55 @@ async def stream_agent_response(
     if available:
       allowed_tools.append('Skill')
 
-    # Generate system prompt with available skills, cluster, warehouse, and catalog/schema context
-    system_prompt = get_system_prompt(
-      cluster_id=cluster_id,
-      default_catalog=default_catalog,
-      default_schema=default_schema,
-      warehouse_id=warehouse_id,
-      workspace_folder=workspace_folder,
-      workspace_url=databricks_host,
-      enabled_skills=enabled_skills,
-    )
+    # Use custom system prompt if set, otherwise generate from context
+    if custom_system_prompt:
+      system_prompt = custom_system_prompt
+      logger.info('Using custom system prompt from project settings')
+    else:
+      system_prompt = get_system_prompt(
+        cluster_id=cluster_id,
+        default_catalog=default_catalog,
+        default_schema=default_schema,
+        warehouse_id=warehouse_id,
+        workspace_folder=workspace_folder,
+        workspace_url=databricks_host,
+        enabled_skills=enabled_skills,
+      )
 
     # Load Claude settings for Databricks model serving authentication
     claude_env = _load_claude_settings()
 
     # Log auth state for debugging
-    logger.info(
-      f'Auth state: fmapi_host={fmapi_host}, databricks_host={databricks_host}, '
-      f'is_cross_workspace={is_cross_workspace}'
-    )
+    logger.info(f'Auth state: databricks_host={databricks_host}, token_present={databricks_token is not None and len(str(databricks_token)) > 0}')
 
-    # Configure Claude subprocess to use Databricks FMAPI on the Builder App's
-    # workspace. FMAPI auth always points at the Builder App, even when tool
-    # operations target a different workspace (cross-workspace mode).
-    # Fall back to databricks_host/token for callers that don't split FMAPI creds.
-    effective_fmapi_host = fmapi_host or databricks_host
-    effective_fmapi_token = fmapi_token or databricks_token
-    if effective_fmapi_host and effective_fmapi_token:
-      host = effective_fmapi_host.replace('https://', '').replace('http://', '').rstrip('/')
+    # Ensure Databricks model serving endpoint is used
+    # Pass OAuth/PAT token for authentication with Databricks FMAPI
+    if databricks_host and databricks_token:
+      # Build the Anthropic base URL from Databricks host
+      # Format: https://<workspace>/serving-endpoints/anthropic
+      host = databricks_host.replace('https://', '').replace('http://', '').rstrip('/')
       anthropic_base_url = f'https://{host}/serving-endpoints/anthropic'
 
-      claude_env['ANTHROPIC_BASE_URL'] = anthropic_base_url
-      claude_env['ANTHROPIC_API_KEY'] = effective_fmapi_token
-      claude_env['ANTHROPIC_AUTH_TOKEN'] = effective_fmapi_token
+      # Set environment variables for Claude Code subprocess
+      # These ensure Claude Code uses Databricks model serving
+      # Note: Claude SDK uses ANTHROPIC_API_KEY for authentication
+      # Route Claude Code through the local proxy so unsupported fields
+      # (context_management, betas) are stripped before hitting Databricks FMAPI.
+      app_port = os.environ.get('DATABRICKS_APP_PORT', '8000')
+      proxy_base_url = f'http://localhost:{app_port}/anthropic-proxy'
+      claude_env['ANTHROPIC_BASE_URL'] = proxy_base_url
+      claude_env['ANTHROPIC_API_KEY'] = databricks_token
+      claude_env['ANTHROPIC_AUTH_TOKEN'] = databricks_token
+
+      # Tell the proxy where to forward requests (real FMAPI URL)
+      claude_env['ANTHROPIC_CUSTOM_HEADERS'] = f'x-real-fmapi-url: {anthropic_base_url}'
 
       # Set the model to use (required for Databricks FMAPI)
       anthropic_model = os.environ.get('ANTHROPIC_MODEL', 'databricks-claude-opus-4-5')
       claude_env['ANTHROPIC_MODEL'] = anthropic_model
 
-      # Disable beta headers for Databricks FMAPI compatibility
-      claude_env['ANTHROPIC_CUSTOM_HEADERS'] = 'x-databricks-disable-beta-headers: true'
-
       logger.info(f'Configured Databricks model serving: {anthropic_base_url} with model {anthropic_model}')
       logger.info(f'Claude env vars: BASE_URL={claude_env.get("ANTHROPIC_BASE_URL")}, MODEL={claude_env.get("ANTHROPIC_MODEL")}')
-
-    # Databricks SDK upstream tracking for subprocess user-agent attribution
-    from databricks_tools_core.identity import PRODUCT_NAME, PRODUCT_VERSION
-    claude_env['DATABRICKS_SDK_UPSTREAM'] = PRODUCT_NAME
-    claude_env['DATABRICKS_SDK_UPSTREAM_VERSION'] = PRODUCT_VERSION
 
     # Ensure stream timeout is set (1 hour to handle long tool sequences)
     stream_timeout = os.environ.get('CLAUDE_CODE_STREAM_CLOSE_TIMEOUT', '3600000')
@@ -443,7 +522,7 @@ async def stream_agent_response(
 
     # Stderr callback to capture Claude subprocess output for debugging
     def stderr_callback(line: str):
-      logger.debug(f'[Claude stderr] {line.strip()}')
+      logger.info(f'[Claude stderr] {line.strip()}')
       # Also print to stderr for immediate visibility during development
       print(f'[Claude stderr] {line.strip()}', file=sys.stderr, flush=True)
 
@@ -472,10 +551,20 @@ async def stream_agent_response(
 
     agent_thread = threading.Thread(
       target=_run_agent_in_fresh_loop,
-      args=(message, options, result_queue, ctx, cancel_check, mlflow_experiment),
+      args=(message, options, result_queue, ctx, cancel_check, mlflow_experiment, images),
       daemon=True
     )
     agent_thread.start()
+
+    # Dedup: with include_partial_messages=True the SDK may emit multiple
+    # UserMessage events with the same ToolResultBlock — first partial, then
+    # complete. Track emitted IDs so we only yield the first occurrence.
+    _emitted_tool_result_ids: set[str] = set()
+    # Track emitted inline image paths to avoid duplicates.
+    _emitted_inline_image_paths: set[str] = set()
+    # Track tool names by tool_use_id so tool_result handling can enforce
+    # image extraction boundaries to specific MCP tools.
+    _tool_name_by_id: dict[str, str] = {}
 
     # Process messages from the queue with keepalive for long operations
     KEEPALIVE_INTERVAL = 15  # seconds - send keepalive if no activity
@@ -530,6 +619,7 @@ async def stream_agent_response(
                 'thinking': block.thinking,
               }
             elif isinstance(block, ToolUseBlock):
+              _tool_name_by_id[block.id] = block.name
               yield {
                 'type': 'tool_use',
                 'tool_id': block.id,
@@ -537,33 +627,11 @@ async def stream_agent_response(
                 'tool_input': block.input,
               }
             elif isinstance(block, ToolResultBlock):
-              # Extract content - may be string, list, or complex structure
-              content = block.content
-              if isinstance(content, list):
-                # Handle list of content blocks (e.g., [{'type': 'text', 'text': '...'}])
-                texts = []
-                for item in content:
-                  if isinstance(item, dict) and 'text' in item:
-                    texts.append(item['text'])
-                  elif isinstance(item, str):
-                    texts.append(item)
-                  else:
-                    texts.append(str(item))
-                content = '\n'.join(texts) if texts else str(block.content)
-              elif not isinstance(content, str):
-                content = str(content)
-
-              # Improve generic "Stream closed" error messages
-              if block.is_error and 'Stream closed' in content:
-                content = f'Tool execution interrupted: {content}. This may occur when operations exceed timeout limits or when the connection is interrupted. Check backend logs for more details.'
-                logger.warning(f'Tool result error (improved): {content}')
-
-              yield {
-                'type': 'tool_result',
-                'tool_use_id': block.tool_use_id,
-                'content': content,
-                'is_error': block.is_error,
-              }
+              # ToolResultBlock inside AssistantMessage appears when include_partial_messages=True
+              # sends intermediate conversation snapshots. The UserMessage handler below emits
+              # the authoritative, complete tool_result event — skip emitting here to avoid
+              # duplicates.
+              logger.debug(f'Skipping AssistantMessage ToolResultBlock tid={block.tool_use_id!r} (dedup)')
 
         elif isinstance(msg, ResultMessage):
           yield {
@@ -588,6 +656,18 @@ async def stream_agent_response(
           if isinstance(msg_content, list):
             for block in msg_content:
               if isinstance(block, ToolResultBlock):
+                # Dedup: skip if we already emitted a result for this tool_use_id
+                # (include_partial_messages=True sends partial then complete UserMessage)
+                # Some ToolResultBlocks may not include tool_use_id. Treat those as
+                # unique events so they don't collide on the empty string and get dropped.
+                raw_tid = block.tool_use_id
+                if raw_tid and raw_tid in _emitted_tool_result_ids:
+                  logger.debug(f'Skipping duplicate tool_result for tid={raw_tid!r}')
+                  continue
+                if raw_tid:
+                  _emitted_tool_result_ids.add(raw_tid)
+                tid = raw_tid or f'anon-tool-result-{time.time_ns()}'
+
                 # Extract content - may be string, list, or complex structure
                 content = block.content
                 if isinstance(content, list):
@@ -610,10 +690,19 @@ async def stream_agent_response(
 
                 yield {
                   'type': 'tool_result',
-                  'tool_use_id': block.tool_use_id,
+                  'tool_use_id': tid,
                   'content': content,
                   'is_error': block.is_error,
                 }
+
+                # Only allow inline images from command-execution MCP outputs.
+                tool_name = _tool_name_by_id.get(raw_tid, '') if raw_tid else ''
+                if not block.is_error and _is_command_execution_tool(tool_name):
+                  for img_path in _extract_image_paths(content):
+                    if img_path not in _emitted_inline_image_paths:
+                      _emitted_inline_image_paths.add(img_path)
+                      yield {'type': 'inline_image', 'path': img_path}
+
           # Skip string content (just echo of user input)
 
         elif isinstance(msg, StreamEvent):

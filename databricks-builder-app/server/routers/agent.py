@@ -11,10 +11,12 @@ The async pattern:
 import asyncio
 import json
 import logging
+import re
 from datetime import datetime
-from typing import Optional
+from pathlib import Path
+from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -23,7 +25,7 @@ from ..services.agent import get_project_directory, stream_agent_response
 from ..services.backup_manager import mark_for_backup
 from ..services.storage import ConversationStorage, ProjectStorage
 from ..services.title_generator import generate_title_async
-from ..services.user import get_current_user, get_current_token, get_fmapi_token, get_workspace_url
+from ..services.user import get_current_user, get_databricks_token, get_fmapi_token, get_workspace_url
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -31,6 +33,7 @@ router = APIRouter()
 # SSE streaming window duration (seconds) - break before 60s timeout
 SSE_WINDOW_SECONDS = 50
 
+_SAFE_FILENAME_RE = re.compile(r'[^A-Za-z0-9._-]+')
 
 def sse_event(data: dict) -> str:
     """Format data as SSE event."""
@@ -49,8 +52,7 @@ class InvokeAgentRequest(BaseModel):
     warehouse_id: Optional[str] = None  # Databricks SQL warehouse for queries
     workspace_folder: Optional[str] = None  # Workspace folder for file uploads
     mlflow_experiment_name: Optional[str] = None  # MLflow experiment name for tracing
-    target_databricks_host: Optional[str] = None  # Target workspace URL for cross-workspace ops
-    target_databricks_token: Optional[str] = None  # Pre-generated OAuth token for target workspace
+    images: Optional[List[dict]] = None  # Attached images [{type, media_type, data}]
 
 
 class InvokeAgentResponse(BaseModel):
@@ -92,17 +94,9 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
     user_email = await get_current_user(request)
     # Use FMAPI token for Claude API (Service Principal OAuth in production)
     user_token = await get_fmapi_token(request)
+    # Best available Databricks token for MCP tools + workspace access (PAT > forwarded > SP)
+    user_access_token = await get_databricks_token(request, user_email)
     workspace_url = get_workspace_url()
-
-    # FMAPI (Claude API) always uses the Builder App's own workspace
-    fmapi_host = workspace_url
-    fmapi_token = user_token
-
-    # Databricks tool operations target the caller-specified workspace when
-    # cross-workspace params are provided, otherwise default to this workspace
-    is_cross_workspace = body.target_databricks_host is not None
-    tools_host = body.target_databricks_host or workspace_url
-    tools_token = body.target_databricks_token or user_token
 
     # Verify project exists and belongs to user
     project_storage = ProjectStorage(user_email)
@@ -115,6 +109,9 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
     from ..services.skills_manager import get_project_enabled_skills
     project_dir = get_project_directory(body.project_id)
     enabled_skills = get_project_enabled_skills(project_dir)
+
+    # Get custom system prompt from project (if set)
+    custom_system_prompt = project.custom_system_prompt
 
     # Get or create conversation
     conv_storage = ConversationStorage(user_email, body.project_id)
@@ -130,15 +127,14 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
         logger.info(f'Created new conversation: {conversation_id}')
 
         # Generate AI title in the background (fire-and-forget)
-        # Title generation calls the Claude API, so always use FMAPI creds
         asyncio.create_task(
             generate_title_async(
                 message=body.message,
                 conversation_id=conversation_id,
                 user_email=user_email,
                 project_id=body.project_id,
-                databricks_host=fmapi_host,
-                databricks_token=fmapi_token,
+                databricks_host=workspace_url,
+                databricks_token=user_token,
             )
         )
     else:
@@ -165,10 +161,10 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
     # Create the agent coroutine that will run in background
     async def run_agent():
         """Run the agent and accumulate events in the stream."""
-        final_text = ''
+        final_text_blocks: list[str] = []  # text blocks for persistence
+        inline_image_paths: list[str] = []  # image paths for persistence
         new_session_id: Optional[str] = None
         error_message: Optional[str] = None
-        received_deltas = False  # Track if we received streaming deltas
 
         try:
             # Stream all events from Claude
@@ -182,14 +178,15 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
                 default_schema=body.default_schema,
                 warehouse_id=body.warehouse_id,
                 workspace_folder=body.workspace_folder,
-                fmapi_host=fmapi_host,
-                fmapi_token=fmapi_token,
-                databricks_host=tools_host,
-                databricks_token=tools_token,
-                is_cross_workspace=is_cross_workspace,
+                databricks_host=workspace_url,
+                databricks_token=user_token,
                 is_cancelled_fn=lambda: stream.is_cancelled,
                 enabled_skills=enabled_skills,
                 mlflow_experiment_name=body.mlflow_experiment_name,
+                custom_system_prompt=custom_system_prompt,
+                images=body.images,
+                user_email=user_email,
+                user_access_token=user_access_token,
             ):
                 # Check if cancelled (also checked in agent thread, but double-check here)
                 if stream.is_cancelled:
@@ -199,27 +196,21 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
                 event_type = event.get('type', '')
 
                 if event_type == 'text_delta':
-                    # Token-by-token streaming - this is preferred
+                    # Token-by-token streaming - forward to client for live display.
+                    # Do NOT accumulate to final_text here; text events (below) are the
+                    # authoritative source and will be used for persistence.
                     text = event.get('text', '')
-                    final_text += text
-                    received_deltas = True
                     stream.add_event({'type': 'text_delta', 'text': text})
 
                 elif event_type == 'text':
-                    # Complete text block - accumulate all text blocks
-                    # Claude sends multiple text blocks when there are tool calls in between
-                    # We track received_deltas to know if we should also emit text events
-                    # (if deltas are being used, the client already has the text token-by-token)
+                    # Complete text block - ALWAYS emit to client as a block-boundary marker.
+                    # The client uses text events to insert \n\n separators between text blocks
+                    # that are separated by tool calls. Skipping these events (the old behaviour)
+                    # caused all blocks to be concatenated without line breaks.
                     text = event.get('text', '')
                     if text:
-                        if not received_deltas:
-                            # No deltas received, so send complete text blocks to client
-                            final_text += text
-                            stream.add_event({'type': 'text', 'text': text})
-                        # Note: If received_deltas is True, we skip sending 'text' events
-                        # because the client already received the same content via 'text_delta'
-                        # BUT we still need to track final_text for persistence
-                        # The text_delta handler already accumulates to final_text
+                        final_text_blocks.append(text)
+                        stream.add_event({'type': 'text', 'text': text})
 
                 elif event_type == 'thinking':
                     stream.add_event({
@@ -248,6 +239,8 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
                 elif event_type == 'tool_result':
                     content = event.get('content', '')
                     is_error = event.get('is_error', False)
+                    tool_use_id = event.get('tool_use_id', '')
+                    logger.debug(f'tool_result: tid={tool_use_id!r} content_len={len(str(content))}')
 
                     # Detect cascade failure pattern - "Stream closed" errors indicate
                     # the Claude subprocess's MCP connection is broken
@@ -258,7 +251,7 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
 
                     stream.add_event({
                         'type': 'tool_result',
-                        'tool_use_id': event.get('tool_use_id', ''),
+                        'tool_use_id': tool_use_id,
                         'content': content,
                         'is_error': is_error,
                     })
@@ -296,6 +289,20 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
                     stream.add_event({'type': 'cancelled'})
                     break
 
+                elif event_type == 'inline_image':
+                    # Auto-detected image path in tool result - forward to client for inline display
+                    path = event.get('path', '')
+                    stream.add_event({'type': 'inline_image', 'path': path})
+                    # Track for persistence so images survive in conversation history
+                    if path and path not in inline_image_paths:
+                        inline_image_paths.append(path)
+
+                elif event_type == 'thinking_delta':
+                    stream.add_event({
+                        'type': 'thinking_delta',
+                        'thinking': event.get('thinking', ''),
+                    })
+
                 elif event_type == 'keepalive':
                     # Keepalive during long tool execution - forward to stream to keep connection alive
                     elapsed = event.get('elapsed_since_last_event', 0)
@@ -319,6 +326,16 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
                 error_message = f'Agent communication interrupted: {error_message}. This typically occurs when the Claude subprocess terminates unexpectedly. Check backend logs for details.'
 
             stream.add_event({'type': 'error', 'error': error_message})
+
+        # Join text blocks with \n\n separators (same as client display logic)
+        final_text = '\n\n'.join(final_text_blocks)
+
+        # Append image markdown for any images not already referenced in the text
+        image_markdown = '\n\n'.join(
+            f'![]({p})' for p in inline_image_paths if f']({p})' not in final_text
+        )
+        if image_markdown:
+            final_text = f'{final_text}\n\n{image_markdown}' if final_text else image_markdown
 
         # Save messages to storage after stream completes (if not cancelled)
         if not stream.is_cancelled:
@@ -531,6 +548,56 @@ async def list_project_files(request: Request, project_id: str):
             )
 
     return {'project_id': project_id, 'files': files}
+
+
+@router.post('/projects/{project_id}/files/upload')
+async def upload_project_file(
+    request: Request,
+    project_id: str,
+    file: UploadFile = File(...),
+):
+    """Upload a file into the project's local uploads folder.
+
+    Returns a relative path that the agent can use directly (cwd is project root).
+    """
+    user_email = await get_current_user(request)
+
+    # Verify project exists and belongs to user
+    project_storage = ProjectStorage(user_email)
+    project = await project_storage.get(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail=f'Project {project_id} not found')
+
+    original_name = Path(file.filename or '').name
+    if not original_name:
+        raise HTTPException(status_code=400, detail='Missing filename')
+
+    # Sanitize filename and make it unique
+    stem = Path(original_name).stem
+    suffix = Path(original_name).suffix
+    safe_stem = _SAFE_FILENAME_RE.sub('_', stem).strip('._') or 'file'
+    safe_suffix = _SAFE_FILENAME_RE.sub('', suffix)[:20]
+    timestamp = datetime.utcnow().strftime('%Y%m%d-%H%M%S')
+    target_name = f'{timestamp}-{safe_stem}{safe_suffix}'
+
+    project_dir = get_project_directory(project_id)
+    upload_dir = project_dir / 'uploads'
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    target_path = upload_dir / target_name
+
+    content = await file.read()
+    target_path.write_bytes(content)
+    await file.close()
+
+    # Keep backups current for uploaded project files
+    mark_for_backup(project_id)
+
+    rel_path = str(target_path.relative_to(project_dir))
+    return {
+        'name': original_name,
+        'path': rel_path,
+        'size': len(content),
+    }
 
 
 @router.get('/projects/{project_id}/conversations/{conversation_id}/executions')

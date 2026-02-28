@@ -9,8 +9,12 @@ import {
   Folder,
   FolderOpen,
   Loader2,
+  Pencil,
   RefreshCw,
+  RotateCcw,
+  Save,
   Sparkles,
+  User,
   X,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
@@ -19,11 +23,15 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import {
   fetchAvailableSkills,
+  fetchPersonalSkillFile,
+  fetchPersonalSkillsTree,
   fetchSkillFile,
   fetchSkillsTree,
   fetchSystemPrompt,
   reloadProjectSkills,
+  savePersonalSkillFile,
   updateEnabledSkills,
+  updateProjectSystemPrompt,
   type FetchSystemPromptParams,
   type SkillTreeNode,
 } from '@/lib/api';
@@ -152,36 +160,59 @@ function Toggle({
   );
 }
 
+type SelectedType = 'system_prompt' | 'skill' | 'personal_skill';
+
 interface SkillsExplorerProps {
   projectId: string;
   systemPromptParams: FetchSystemPromptParams;
+  customSystemPrompt: string | null;
+  onSystemPromptChange: (prompt: string | null) => void;
   onClose: () => void;
 }
 
 export function SkillsExplorer({
   projectId,
   systemPromptParams,
+  customSystemPrompt,
+  onSystemPromptChange,
   onClose,
 }: SkillsExplorerProps) {
   const [tree, setTree] = useState<SkillTreeNode[]>([]);
   const [isLoadingTree, setIsLoadingTree] = useState(true);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [selectedType, setSelectedType] = useState<'system_prompt' | 'skill'>('system_prompt');
+  const [selectedType, setSelectedType] = useState<SelectedType>('system_prompt');
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [content, setContent] = useState<string>('');
   const [isLoadingContent, setIsLoadingContent] = useState(false);
   const [showRawCode, setShowRawCode] = useState(false);
   const [isReloading, setIsReloading] = useState(false);
 
+  // System prompt editing state
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedPrompt, setEditedPrompt] = useState('');
+  const [defaultPrompt, setDefaultPrompt] = useState('');
+  const [isSavingPrompt, setIsSavingPrompt] = useState(false);
+
   // Skill management state
   const [availableSkills, setAvailableSkills] = useState<AvailableSkill[]>([]);
   const [isUpdatingSkills, setIsUpdatingSkills] = useState(false);
 
-  // Load skills tree and available skills
+  // Personal workspace state
+  const [personalTree, setPersonalTree] = useState<SkillTreeNode[]>([]);
+  const [isLoadingPersonalTree, setIsLoadingPersonalTree] = useState(false);
+  const [personalExpandedPaths, setPersonalExpandedPaths] = useState<Set<string>>(new Set());
+  const [isEditingPersonal, setIsEditingPersonal] = useState(false);
+  const [editedPersonalContent, setEditedPersonalContent] = useState('');
+  const [isSavingPersonal, setIsSavingPersonal] = useState(false);
+  const [activePersonalPath, setActivePersonalPath] = useState<string | null>(null);
+
+  // Load skills tree, available skills, and personal workspace tree
   useEffect(() => {
     const loadData = async () => {
       try {
         setIsLoadingTree(true);
+        setIsLoadingPersonalTree(true);
+
         const [treeData, skillsData] = await Promise.all([
           fetchSkillsTree(projectId),
           fetchAvailableSkills(projectId),
@@ -202,6 +233,21 @@ export function SkillsExplorer({
       } finally {
         setIsLoadingTree(false);
       }
+
+      // Load personal workspace tree (non-blocking, may fail if no token)
+      try {
+        const personalTreeData = await fetchPersonalSkillsTree();
+        setPersonalTree(personalTreeData);
+        const personalExpanded = new Set<string>();
+        personalTreeData.forEach((node) => {
+          if (node.type === 'directory') personalExpanded.add(node.path);
+        });
+        setPersonalExpandedPaths(personalExpanded);
+      } catch {
+        // Personal workspace may be unavailable (dev mode, no token, etc.)
+      } finally {
+        setIsLoadingPersonalTree(false);
+      }
     };
 
     loadData();
@@ -212,9 +258,13 @@ export function SkillsExplorer({
     const loadSystemPrompt = async () => {
       try {
         setIsLoadingContent(true);
-        const prompt = await fetchSystemPrompt(systemPromptParams);
-        setContent(prompt);
+        const generated = await fetchSystemPrompt(systemPromptParams);
+        setDefaultPrompt(generated);
+        const activePrompt = customSystemPrompt ?? generated;
+        setContent(activePrompt);
+        setEditedPrompt(activePrompt);
         setSelectedType('system_prompt');
+        setIsEditing(!!customSystemPrompt);
       } catch (error) {
         console.error('Failed to load system prompt:', error);
         setContent('Error loading system prompt');
@@ -224,27 +274,109 @@ export function SkillsExplorer({
     };
 
     loadSystemPrompt();
-  }, [systemPromptParams]);
+  }, [systemPromptParams, customSystemPrompt]);
 
   const handleSelectSystemPrompt = useCallback(async () => {
     setSelectedPath(null);
+    setActivePersonalPath(null);
     setSelectedType('system_prompt');
+    setIsEditingPersonal(false);
     setIsLoadingContent(true);
     try {
-      const prompt = await fetchSystemPrompt(systemPromptParams);
-      setContent(prompt);
+      const generated = await fetchSystemPrompt(systemPromptParams);
+      setDefaultPrompt(generated);
+      const activePrompt = customSystemPrompt ?? generated;
+      setContent(activePrompt);
+      setEditedPrompt(activePrompt);
+      setIsEditing(!!customSystemPrompt);
     } catch (error) {
       console.error('Failed to load system prompt:', error);
       setContent('Error loading system prompt');
     } finally {
       setIsLoadingContent(false);
     }
-  }, [systemPromptParams]);
+  }, [systemPromptParams, customSystemPrompt]);
+
+  // --- Personal skill files ---
+
+  const handleSelectPersonalSkillFile = useCallback(async (path: string) => {
+    setSelectedPath(null);
+    setActivePersonalPath(path);
+    setSelectedType('personal_skill');
+    setIsEditing(false);
+    setIsEditingPersonal(false);
+    setIsLoadingContent(true);
+    try {
+      const file = await fetchPersonalSkillFile(path);
+      setContent(file.content);
+      setEditedPersonalContent(file.content);
+    } catch (error) {
+      console.error('Failed to load personal skill file:', error);
+      setContent('Error loading file');
+    } finally {
+      setIsLoadingContent(false);
+    }
+  }, []);
+
+  const handleSavePersonalSkillFile = useCallback(async () => {
+    if (!activePersonalPath) return;
+    setIsSavingPersonal(true);
+    try {
+      await savePersonalSkillFile(activePersonalPath, editedPersonalContent);
+      setContent(editedPersonalContent);
+      setIsEditingPersonal(false);
+      toast.success('Skill file saved to personal workspace');
+    } catch (error) {
+      console.error('Failed to save personal skill file:', error);
+      toast.error('Failed to save skill file');
+    } finally {
+      setIsSavingPersonal(false);
+    }
+  }, [activePersonalPath, editedPersonalContent]);
+
+  const handleSaveSystemPrompt = useCallback(async () => {
+    setIsSavingPrompt(true);
+    try {
+      await updateProjectSystemPrompt(projectId, editedPrompt);
+      onSystemPromptChange(editedPrompt);
+      setContent(editedPrompt);
+      toast.success('System prompt saved');
+    } catch (error) {
+      console.error('Failed to save system prompt:', error);
+      toast.error('Failed to save system prompt');
+    } finally {
+      setIsSavingPrompt(false);
+    }
+  }, [projectId, editedPrompt, onSystemPromptChange]);
+
+  const handleResetSystemPrompt = useCallback(async () => {
+    setIsSavingPrompt(true);
+    try {
+      await updateProjectSystemPrompt(projectId, null);
+      onSystemPromptChange(null);
+      setContent(defaultPrompt);
+      setEditedPrompt(defaultPrompt);
+      setIsEditing(false);
+      toast.success('System prompt reset to default');
+    } catch (error) {
+      console.error('Failed to reset system prompt:', error);
+      toast.error('Failed to reset system prompt');
+    } finally {
+      setIsSavingPrompt(false);
+    }
+  }, [projectId, defaultPrompt, onSystemPromptChange]);
+
+  const handleStartEditing = useCallback(() => {
+    setIsEditing(true);
+    setEditedPrompt(content);
+  }, [content]);
 
   const handleSelectSkill = useCallback(
     async (path: string) => {
       setSelectedPath(path);
+      setActivePersonalPath(null);
       setSelectedType('skill');
+      setIsEditingPersonal(false);
       setIsLoadingContent(true);
       try {
         const file = await fetchSkillFile(projectId, path);
@@ -261,6 +393,18 @@ export function SkillsExplorer({
 
   const handleToggle = useCallback((path: string) => {
     setExpandedPaths((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
+    });
+  }, []);
+
+  const handlePersonalToggle = useCallback((path: string) => {
+    setPersonalExpandedPaths((prev) => {
       const next = new Set(prev);
       if (next.has(path)) {
         next.delete(path);
@@ -399,7 +543,13 @@ export function SkillsExplorer({
 
   const enabledCount = availableSkills.filter((s) => s.enabled).length;
   const totalCount = availableSkills.length;
-  const isMarkdownFile = selectedType === 'system_prompt' || selectedPath?.endsWith('.md');
+  const isMarkdownFile =
+    selectedType === 'system_prompt' ||
+    selectedPath?.endsWith('.md') ||
+    activePersonalPath?.endsWith('.md') ||
+    activePersonalPath?.includes('SKILL');
+
+  const isPersonalEditable = selectedType === 'personal_skill';
 
   return (
     <div className="fixed inset-0 z-50 flex">
@@ -429,7 +579,7 @@ export function SkillsExplorer({
             <button
               onClick={handleSelectSystemPrompt}
               className={cn(
-                'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors mb-2',
+                'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors mb-1',
                 selectedType === 'system_prompt'
                   ? 'bg-[var(--color-accent-primary)]/10 text-[var(--color-accent-primary)]'
                   : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-secondary)] hover:text-[var(--color-text-primary)]'
@@ -513,7 +663,7 @@ export function SkillsExplorer({
               </div>
             )}
 
-            {/* File tree (collapsed by default behind a divider) */}
+            {/* App skill files (read-only) */}
             {tree.length > 0 && (
               <>
                 <div className="my-3 border-t border-[var(--color-border)]" />
@@ -535,6 +685,38 @@ export function SkillsExplorer({
                 </div>
               </>
             )}
+
+            {/* Personal workspace skill files (editable) */}
+            {(personalTree.length > 0 || isLoadingPersonalTree) && (
+              <>
+                <div className="my-3 border-t border-[var(--color-border)]" />
+                <div className="flex items-center gap-1 px-2 py-1">
+                  <User className="h-3 w-3 text-[var(--color-text-muted)]" />
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+                    Personal Skills
+                  </span>
+                </div>
+                {isLoadingPersonalTree ? (
+                  <div className="flex items-center justify-center py-4">
+                    <Loader2 className="h-3 w-3 animate-spin text-[var(--color-text-muted)]" />
+                  </div>
+                ) : (
+                  <div className="space-y-0.5">
+                    {personalTree.map((node) => (
+                      <TreeNode
+                        key={node.path}
+                        node={node}
+                        level={0}
+                        selectedPath={activePersonalPath}
+                        expandedPaths={personalExpandedPaths}
+                        onSelect={handleSelectPersonalSkillFile}
+                        onToggle={handlePersonalToggle}
+                      />
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </div>
 
@@ -547,11 +729,33 @@ export function SkillsExplorer({
                 <>
                   <Sparkles className="h-4 w-4 flex-shrink-0 text-[var(--color-accent-primary)]" />
                   <div className="min-w-0">
-                    <h3 className="text-sm font-semibold text-[var(--color-text-heading)] truncate">
+                    <h3 className="text-sm font-semibold text-[var(--color-text-heading)] truncate flex items-center gap-2">
                       System Prompt
+                      {customSystemPrompt != null && (
+                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-[var(--color-accent-primary)]/10 text-[var(--color-accent-primary)]">
+                          Custom
+                        </span>
+                      )}
                     </h3>
                     <p className="text-xs text-[var(--color-text-muted)]">
-                      Instructions injected to Claude Code
+                      {customSystemPrompt != null
+                        ? 'Custom instructions — click Edit to modify'
+                        : 'Auto-generated — click Edit to customize'}
+                    </p>
+                  </div>
+                </>
+              ) : selectedType === 'personal_skill' ? (
+                <>
+                  <FileText className="h-4 w-4 flex-shrink-0 text-[var(--color-accent-secondary)]" />
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-semibold text-[var(--color-text-heading)] truncate flex items-center gap-2">
+                      {activePersonalPath?.split('/').pop() || 'Personal Skill File'}
+                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-[var(--color-text-muted)]/10 text-[var(--color-text-muted)]">
+                        personal
+                      </span>
+                    </h3>
+                    <p className="text-xs text-[var(--color-text-muted)] truncate">
+                      {activePersonalPath || ''}
                     </p>
                   </div>
                 </>
@@ -571,8 +775,83 @@ export function SkillsExplorer({
             </div>
 
             <div className="flex items-center gap-2">
+              {/* System prompt editing controls */}
+              {selectedType === 'system_prompt' && !isEditing && (
+                <button
+                  onClick={handleStartEditing}
+                  className="flex items-center gap-1 px-2 py-1 rounded-md text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-secondary)] transition-colors"
+                >
+                  <Pencil className="h-3 w-3" />
+                  Edit
+                </button>
+              )}
+              {selectedType === 'system_prompt' && isEditing && (
+                <>
+                  {customSystemPrompt != null && (
+                    <button
+                      onClick={handleResetSystemPrompt}
+                      disabled={isSavingPrompt}
+                      className="flex items-center gap-1 px-2 py-1 rounded-md text-xs text-[var(--color-text-muted)] hover:text-[var(--color-warning)] hover:bg-[var(--color-bg-secondary)] transition-colors disabled:opacity-50"
+                      title="Reset to auto-generated default"
+                    >
+                      <RotateCcw className="h-3 w-3" />
+                      Reset
+                    </button>
+                  )}
+                  <button
+                    onClick={handleSaveSystemPrompt}
+                    disabled={isSavingPrompt || editedPrompt === (customSystemPrompt ?? defaultPrompt)}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-[var(--color-accent-primary)] text-white hover:bg-[var(--color-accent-secondary)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isSavingPrompt ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Save className="h-3 w-3" />
+                    )}
+                    Save
+                  </button>
+                </>
+              )}
+
+              {/* Personal workspace editing controls */}
+              {isPersonalEditable && !isEditingPersonal && (
+                <button
+                  onClick={() => {
+                    setIsEditingPersonal(true);
+                    setEditedPersonalContent(content);
+                  }}
+                  className="flex items-center gap-1 px-2 py-1 rounded-md text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-secondary)] transition-colors"
+                >
+                  <Pencil className="h-3 w-3" />
+                  Edit
+                </button>
+              )}
+              {isPersonalEditable && isEditingPersonal && (
+                <>
+                  <button
+                    onClick={() => setIsEditingPersonal(false)}
+                    disabled={isSavingPersonal}
+                    className="flex items-center gap-1 px-2 py-1 rounded-md text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-secondary)] transition-colors disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSavePersonalSkillFile}
+                    disabled={isSavingPersonal || editedPersonalContent === content}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-[var(--color-accent-primary)] text-white hover:bg-[var(--color-accent-secondary)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isSavingPersonal ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Save className="h-3 w-3" />
+                    )}
+                    Save to Workspace
+                  </button>
+                </>
+              )}
+
               {/* Toggle raw/rendered for markdown */}
-              {isMarkdownFile && (
+              {isMarkdownFile && !isEditing && !isEditingPersonal && (
                 <button
                   onClick={() => setShowRawCode(!showRawCode)}
                   className={cn(
@@ -607,13 +886,43 @@ export function SkillsExplorer({
           </div>
 
           {/* Content area */}
-          <div className="flex-1 overflow-y-auto p-5">
+          <div className="flex-1 overflow-y-auto p-5 flex flex-col">
             {isLoadingContent ? (
               <div className="flex items-center justify-center py-20">
                 <div className="flex flex-col items-center gap-3">
                   <Loader2 className="h-6 w-6 animate-spin text-[var(--color-accent-primary)]" />
                   <p className="text-xs text-[var(--color-text-muted)]">Loading...</p>
                 </div>
+              </div>
+            ) : selectedType === 'system_prompt' && isEditing ? (
+              <div className="flex-1 flex flex-col gap-2">
+                {customSystemPrompt != null && (
+                  <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-[var(--color-accent-primary)]/5 border border-[var(--color-accent-primary)]/20 text-[10px] text-[var(--color-accent-primary)]">
+                    <Pencil className="h-3 w-3" />
+                    Custom system prompt active — this overrides the auto-generated default
+                  </div>
+                )}
+                <textarea
+                  value={editedPrompt}
+                  onChange={(e) => setEditedPrompt(e.target.value)}
+                  className="flex-1 w-full resize-none rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)]/30 p-4 text-xs font-mono text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-primary)]/50 focus:border-[var(--color-accent-primary)] transition-colors"
+                  placeholder="Enter your custom system prompt..."
+                  spellCheck={false}
+                />
+              </div>
+            ) : isPersonalEditable && isEditingPersonal ? (
+              <div className="flex-1 flex flex-col gap-2">
+                <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-[var(--color-accent-primary)]/5 border border-[var(--color-accent-primary)]/20 text-[10px] text-[var(--color-accent-primary)]">
+                  <User className="h-3 w-3" />
+                  Editing personal skill file — saved to your Databricks workspace
+                </div>
+                <textarea
+                  value={editedPersonalContent}
+                  onChange={(e) => setEditedPersonalContent(e.target.value)}
+                  className="flex-1 w-full resize-none rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)]/30 p-4 text-xs font-mono text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-primary)]/50 focus:border-[var(--color-accent-primary)] transition-colors"
+                  placeholder="Edit skill file content..."
+                  spellCheck={false}
+                />
               </div>
             ) : showRawCode || !isMarkdownFile ? (
               <pre className="text-xs font-mono text-[var(--color-text-primary)] whitespace-pre-wrap break-words bg-[var(--color-bg-secondary)]/50 p-4 rounded-lg border border-[var(--color-border)]">

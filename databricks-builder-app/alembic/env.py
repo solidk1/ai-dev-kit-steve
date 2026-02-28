@@ -1,7 +1,7 @@
 """Alembic environment configuration for database migrations.
 
-Uses sync psycopg2 driver for migrations (simpler and avoids async event loop issues).
-Runtime database access uses async psycopg3 driver.
+Uses sync psycopg3 driver for migrations (simpler and avoids async event loop issues).
+Runtime database access also uses psycopg3 for async access.
 """
 
 import os
@@ -66,7 +66,7 @@ def get_url_and_connect_args():
   1. Static URL: Uses LAKEBASE_PG_URL directly
   2. Dynamic OAuth: Builds URL from LAKEBASE_INSTANCE_NAME + generates token
 
-  Returns tuple of (url, connect_args) for psycopg2 driver.
+  Returns tuple of (url, connect_args) for psycopg3 driver.
   """
   global _resolved_hostaddr
   connect_args = {}
@@ -114,11 +114,11 @@ def get_url_and_connect_args():
     if _resolved_hostaddr:
       connect_args['hostaddr'] = _resolved_hostaddr
 
-  # Ensure URL uses sync driver (psycopg2) for migrations
+  # Ensure URL uses psycopg3 sync driver for migrations.
   if url.startswith('postgresql+asyncpg://'):
-    url = url.replace('postgresql+asyncpg://', 'postgresql://', 1)
-  if url.startswith('postgresql+psycopg://'):
-    url = url.replace('postgresql+psycopg://', 'postgresql://', 1)
+    url = url.replace('postgresql+asyncpg://', 'postgresql+psycopg://', 1)
+  elif url.startswith('postgresql://'):
+    url = url.replace('postgresql://', 'postgresql+psycopg://', 1)
 
   return url, connect_args
 

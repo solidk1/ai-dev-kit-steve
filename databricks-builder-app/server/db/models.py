@@ -33,6 +33,7 @@ class Project(Base):
   created_at: Mapped[datetime] = mapped_column(
     DateTime(timezone=True), default=utc_now, nullable=False
   )
+  custom_system_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
   # Relationships
   conversations: Mapped[List['Conversation']] = relationship(
@@ -49,6 +50,7 @@ class Project(Base):
       'user_email': self.user_email,
       'created_at': self.created_at.isoformat() if self.created_at else None,
       'conversation_count': len(self.conversations) if self.conversations else 0,
+      'custom_system_prompt': self.custom_system_prompt,
     }
 
 
@@ -85,7 +87,10 @@ class Conversation(Base):
   # Relationships
   project: Mapped['Project'] = relationship('Project', back_populates='conversations')
   messages: Mapped[List['Message']] = relationship(
-    'Message', back_populates='conversation', cascade='all, delete-orphan'
+    'Message',
+    back_populates='conversation',
+    cascade='all, delete-orphan',
+    order_by='(Message.timestamp, Message.id)',
   )
 
   __table_args__ = (Index('ix_conversations_project_created', 'project_id', 'created_at'),)
@@ -152,6 +157,34 @@ class Message(Base):
       'content': self.content,
       'timestamp': self.timestamp.isoformat() if self.timestamp else None,
       'is_error': self.is_error,
+    }
+
+
+class UserConfig(Base):
+  """Per-user configuration stored in Lakebase."""
+
+  __tablename__ = 'user_configs'
+
+  user_email: Mapped[str] = mapped_column(String(255), primary_key=True)
+  default_catalog: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+  default_schema: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+  workspace_folder: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+  model: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+  model_mini: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+  databricks_pat_encrypted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  updated_at: Mapped[datetime] = mapped_column(
+    DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False
+  )
+
+  def to_dict(self) -> dict[str, Any]:
+    """Convert to dictionary (excludes PAT for security)."""
+    return {
+      'user_email': self.user_email,
+      'default_catalog': self.default_catalog,
+      'default_schema': self.default_schema,
+      'workspace_folder': self.workspace_folder,
+      'model': self.model,
+      'model_mini': self.model_mini,
     }
 
 
