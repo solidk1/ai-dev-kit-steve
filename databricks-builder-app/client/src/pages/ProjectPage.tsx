@@ -33,7 +33,7 @@ import javascriptLang from 'react-syntax-highlighter/dist/esm/languages/prism/ja
 import typescriptLang from 'react-syntax-highlighter/dist/esm/languages/prism/typescript';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Sidebar } from '@/components/layout/Sidebar';
-import { SkillsExplorer } from '@/components/SkillsExplorer';
+
 import { FunLoader } from '@/components/FunLoader';
 import { Button } from '@/components/ui/Button';
 import {
@@ -118,6 +118,11 @@ interface ActivityItem {
   content: string;
   toolName?: string;
   toolInput?: Record<string, unknown>;
+  commandExecution?: {
+    cluster_id?: string;
+    cluster_name?: string;
+    context_id?: string;
+  };
   isError?: boolean;
   timestamp: number;
 }
@@ -164,20 +169,61 @@ function buildActivityItemsFromExecutionEvents(events: unknown[]): ActivityItem[
 
     if (type === 'tool_result') {
       const toolUseId = String(event.tool_use_id ?? '');
-      const resultItem: ActivityItem = {
-        id: `result-${toolUseId || items.length}`,
-        type: 'tool_result',
-        content: typeof event.content === 'string' ? event.content : JSON.stringify(event.content),
-        isError: Boolean(event.is_error),
-        timestamp: Date.now(),
-      };
-      const existingIdx = items.findIndex((item) => item.id === resultItem.id);
-      if (existingIdx >= 0) items[existingIdx] = resultItem;
-      else items.push(resultItem);
+      const resultItem = buildToolResultItem(event, `result-${toolUseId || items.length}`);
+      const mergedItems = applyToolResultToItems(items, resultItem, toolUseId || undefined, resultItem.commandExecution);
+      items.length = 0;
+      items.push(...mergedItems);
       continue;
     }
   }
   return items;
+}
+
+function toCommandExecutionMeta(value: unknown): ActivityItem['commandExecution'] | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const obj = value as Record<string, unknown>;
+  const cluster_id = typeof obj.cluster_id === 'string' && obj.cluster_id ? obj.cluster_id : undefined;
+  const cluster_name = typeof obj.cluster_name === 'string' && obj.cluster_name ? obj.cluster_name : undefined;
+  const context_id = typeof obj.context_id === 'string' && obj.context_id ? obj.context_id : undefined;
+  if (!cluster_id && !cluster_name && !context_id) return undefined;
+  return { cluster_id, cluster_name, context_id };
+}
+
+function buildToolResultItem(
+  event: Record<string, unknown>,
+  id: string | undefined,
+  contentOverride?: string,
+): ActivityItem {
+  return {
+    id: id ?? `result-${String(event.tool_use_id ?? '')}`,
+    type: 'tool_result',
+    content: contentOverride ?? (typeof event.content === 'string' ? event.content : JSON.stringify(event.content)),
+    commandExecution: toCommandExecutionMeta(event.command_execution),
+    isError: Boolean(event.is_error),
+    timestamp: Date.now(),
+  };
+}
+
+function applyToolResultToItems(
+  items: ActivityItem[],
+  resultItem: ActivityItem,
+  toolUseId: string | undefined,
+  commandExecution: ActivityItem['commandExecution'],
+): ActivityItem[] {
+  const nextItems = upsertActivityItem(items, resultItem);
+  if (!toolUseId || !commandExecution) return nextItems;
+  return nextItems.map((item) => {
+    if (item.type === 'tool_use' && item.id === toolUseId) {
+      return {
+        ...item,
+        commandExecution: {
+          ...(item.commandExecution || {}),
+          ...commandExecution,
+        },
+      };
+    }
+    return item;
+  });
 }
 
 function buildTraceHistoryFromExecutions(executions: Execution[]): ActivityItem[][] {
@@ -332,7 +378,17 @@ function VerboseItem({ item }: { item: ActivityItem }) {
     const toolName = item.toolName?.replace('mcp__databricks__', '') ?? '';
     const codeInfo = getCodeFromToolInput(item.toolName, item.toolInput);
     const inputStr = !codeInfo && item.toolInput ? JSON.stringify(item.toolInput, null, 2) : '';
-    const hasExpandable = !!(codeInfo || inputStr);
+    const toolParams = Object.entries(codeInfo?.params ?? {}).filter(
+      ([, val]) => val !== null && val !== undefined && String(val).trim() !== ''
+    );
+    const metaParams = [
+      item.commandExecution?.cluster_name ? (['cluster', item.commandExecution.cluster_name] as [string, string]) : null,
+      item.commandExecution?.context_id ? (['context_id', item.commandExecution.context_id] as [string, string]) : null,
+      !item.commandExecution?.cluster_name && item.commandExecution?.cluster_id
+        ? (['cluster_id', item.commandExecution.cluster_id] as [string, string])
+        : null,
+    ].filter((entry): entry is [string, string] => Boolean(entry));
+    const hasExpandable = !!(codeInfo || inputStr || toolParams.length > 0 || metaParams.length > 0);
     return (
       <div className="border-b border-[var(--color-border)]/20 last:border-0">
         <button
@@ -350,9 +406,15 @@ function VerboseItem({ item }: { item: ActivityItem }) {
             <ChevronDown className={cn('h-3 w-3 ml-auto flex-shrink-0 text-[var(--color-text-muted)] transition-transform', expanded && 'rotate-180')} />
           )}
         </button>
-        {expanded && codeInfo?.params && (
+        {expanded && (toolParams.length > 0 || metaParams.length > 0) && (
           <div className="flex flex-wrap gap-1 mx-3 mb-1.5">
-            {Object.entries(codeInfo.params).map(([key, val]) => (
+            {metaParams.map(([key, val]) => (
+              <span key={`meta-${key}`} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono bg-[var(--color-bg-secondary)]/60 text-[var(--color-text-muted)] border border-[var(--color-border)]/30">
+                <span className="text-[var(--color-text-muted)]/70">{key}:</span>
+                <span className="text-[var(--color-text-primary)]">{val}</span>
+              </span>
+            ))}
+            {toolParams.map(([key, val]) => (
               <span key={key} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono bg-[var(--color-bg-secondary)]/60 text-[var(--color-text-muted)] border border-[var(--color-border)]/30">
                 <span className="text-[var(--color-text-muted)]/70">{key}:</span>
                 <span className="text-[var(--color-text-primary)]">{String(val)}</span>
@@ -884,7 +946,7 @@ export default function ProjectPage() {
   const [defaultSchema, setDefaultSchema] = useState<string>('');
   const [workspaceFolder, setWorkspaceFolder] = useState<string>('');
   const [mlflowExperimentName, setMlflowExperimentName] = useState<string>('');
-  const [skillsExplorerOpen, setSkillsExplorerOpen] = useState(false);
+
   const [activeExecutionId, setActiveExecutionId] = useState<string | null>(null);
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [verbose, setVerbose] = useState(true);
@@ -1238,16 +1300,13 @@ export default function ProjectPage() {
                   (items) => upsertActivityItem(items, toolItem)
                 );
               } else if (type === 'tool_result') {
-                const resultItem = {
-                  id: `result-${event.tool_use_id}`,
-                  type: 'tool_result' as const,
-                  content: typeof event.content === 'string' ? event.content : JSON.stringify(event.content),
-                  isError: event.is_error as boolean,
-                  timestamp: Date.now(),
-                };
+                const resultItem = buildToolResultItem(
+                  event as Record<string, unknown>,
+                  `result-${event.tool_use_id}`,
+                );
                 updateConversationActivityItems(
                   currentConversation.id,
-                  (items) => upsertActivityItem(items, resultItem)
+                  (items) => applyToolResultToItems(items, resultItem, event.tool_use_id as string | undefined, resultItem.commandExecution)
                 );
               } else if (type === 'inline_image') {
                 const path = event.path as string;
@@ -1716,14 +1775,15 @@ export default function ProjectPage() {
               }
             }
 
-            const resultItem = {
-              id: `result-${event.tool_use_id}`,
-              type: 'tool_result' as const,
-              content: typeof content === 'string' ? content : JSON.stringify(content),
-              isError: event.is_error as boolean,
-              timestamp: Date.now(),
-            };
-            updateConversationActivityItems(conversationId, (items) => upsertActivityItem(items, resultItem));
+            const resultItem = buildToolResultItem(
+              event as Record<string, unknown>,
+              `result-${event.tool_use_id}`,
+              typeof content === 'string' ? content : JSON.stringify(content),
+            );
+            updateConversationActivityItems(
+              conversationId,
+              (items) => applyToolResultToItems(items, resultItem, event.tool_use_id as string | undefined, resultItem.commandExecution)
+            );
           } else if (type === 'error') {
             let errorMsg = event.error as string;
 
@@ -2010,14 +2070,14 @@ export default function ProjectPage() {
         }
 
         if (type === 'tool_result') {
-          const resultItem = {
-            id: `result-${event.tool_use_id}`,
-            type: 'tool_result' as const,
-            content: typeof event.content === 'string' ? event.content : JSON.stringify(event.content),
-            isError: Boolean(event.is_error),
-            timestamp: Date.now(),
-          };
-          updateConversationActivityItems(conversationId, (items) => upsertActivityItem(items, resultItem));
+          const resultItem = buildToolResultItem(
+            event as Record<string, unknown>,
+            `result-${event.tool_use_id}`,
+          );
+          updateConversationActivityItems(
+            conversationId,
+            (items) => applyToolResultToItems(items, resultItem, event.tool_use_id as string | undefined, resultItem.commandExecution)
+          );
         }
       },
       onError: (error) => {
@@ -2372,9 +2432,18 @@ export default function ProjectPage() {
     [handleAddFiles]
   );
 
-  // Open skills explorer
+  // Open skills explorer in a new tab
   const handleViewSkills = () => {
-    setSkillsExplorerOpen(true);
+    if (projectId) {
+      const params = new URLSearchParams();
+      if (selectedClusterId) params.set('cluster_id', selectedClusterId);
+      if (selectedWarehouseId) params.set('warehouse_id', selectedWarehouseId);
+      if (defaultCatalog) params.set('default_catalog', defaultCatalog);
+      if (defaultSchema) params.set('default_schema', defaultSchema);
+      if (workspaceFolder) params.set('workspace_folder', workspaceFolder);
+      const qs = params.toString();
+      window.open(`/projects/${projectId}/skills${qs ? `?${qs}` : ''}`, '_blank');
+    }
   };
 
   const configChips = useMemo(() => {
@@ -2881,25 +2950,7 @@ export default function ProjectPage() {
         </div>
       </div>
 
-      {/* Skills Explorer */}
-      {skillsExplorerOpen && projectId && (
-        <SkillsExplorer
-          projectId={projectId}
-          systemPromptParams={{
-            clusterId: selectedClusterId,
-            warehouseId: selectedWarehouseId,
-            defaultCatalog,
-            defaultSchema,
-            workspaceFolder,
-            projectId,
-          }}
-          customSystemPrompt={project?.custom_system_prompt ?? null}
-          onSystemPromptChange={(prompt) => {
-            setProject((prev) => prev ? { ...prev, custom_system_prompt: prompt } : prev);
-          }}
-          onClose={() => setSkillsExplorerOpen(false)}
-        />
-      )}
+      {/* Skills Explorer removed — now opens in a separate tab via /projects/:id/skills */}
     </MainLayout>
   );
 }
