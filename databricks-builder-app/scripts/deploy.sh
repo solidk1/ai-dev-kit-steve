@@ -219,10 +219,14 @@ PY
 )"
 fi
 
+# Prefer the project venv Python so databricks-sdk is importable.
+VENV_PYTHON="${PROJECT_DIR}/.venv/bin/python3"
+[ ! -x "$VENV_PYTHON" ] && VENV_PYTHON="python3"
+
 # Build a temporary tokenized LAKEBASE_PG_URL when not explicitly provided.
 # This makes local Alembic runs deterministic in CI/dev shells.
 if [ -z "${LAKEBASE_PG_URL:-}" ] && [ -n "${LAKEBASE_INSTANCE_NAME:-}" ]; then
-  eval "$(python3 - <<'PY'
+  eval "$($VENV_PYTHON - <<'PY'
 import os
 import urllib.parse
 
@@ -275,7 +279,7 @@ if [ -n "${LAKEBASE_PG_URL:-}" ] || [ -n "${LAKEBASE_INSTANCE_NAME:-}" ]; then
   # connects as its SP at runtime and needs explicit grants.
   if [ -n "${LAKEBASE_PG_URL:-}" ]; then
     export APP_NAME_FOR_GRANT="${APP_NAME}"
-    python3 - <<'GRANT_PY'
+    $VENV_PYTHON - <<'GRANT_PY'
 import os, psycopg
 
 url = os.environ["LAKEBASE_PG_URL"]
