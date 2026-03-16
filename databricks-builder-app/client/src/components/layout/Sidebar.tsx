@@ -13,6 +13,7 @@ import type { Conversation } from '@/lib/types';
 interface SidebarProps {
   conversations: Conversation[];
   currentConversationId?: string;
+  streamingConversationIds?: string[];
   onConversationSelect: (conversationId: string) => void;
   onNewConversation: () => void;
   onDeleteConversation: (conversationId: string) => void;
@@ -23,6 +24,7 @@ interface SidebarProps {
 export function Sidebar({
   conversations,
   currentConversationId,
+  streamingConversationIds = [],
   onConversationSelect,
   onNewConversation,
   onDeleteConversation,
@@ -107,6 +109,15 @@ export function Sidebar({
                   >
                     {conv.title}
                   </h3>
+                  {streamingConversationIds.includes(conv.id) && (
+                    <span
+                      className={`
+                        absolute right-2 top-1/2 -translate-y-1/2 h-2 w-2 rounded-full animate-pulse
+                        ${currentConversationId === conv.id ? 'bg-white/90' : 'bg-[var(--color-accent-primary)]'}
+                      `}
+                      title="Streaming"
+                    />
+                  )}
 
                   {/* Delete button - show on hover */}
                   {hoveredConversation === conv.id && (

@@ -51,7 +51,7 @@ class ProjectStorage:
       )
       session.add(project)
       await session.flush()
-      await session.refresh(project, ['id', 'name', 'user_email', 'created_at'])
+      await session.refresh(project, ['id', 'name', 'user_email', 'created_at', 'custom_system_prompt', 'claude_md'])
       # Initialize conversations as empty list for to_dict()
       # (don't use ORM attribute assignment which triggers lazy load)
       project.__dict__['conversations'] = []
@@ -69,6 +69,36 @@ class ProjectStorage:
       project = result.scalar_one_or_none()
       if project:
         project.name = name
+        return True
+      return False
+
+  async def update_system_prompt(self, project_id: str, system_prompt: str | None) -> bool:
+    """Update custom system prompt. Pass None to reset to auto-generated default."""
+    async with session_scope() as session:
+      result = await session.execute(
+        select(Project).where(
+          Project.id == project_id,
+          Project.user_email == self.user_email,
+        )
+      )
+      project = result.scalar_one_or_none()
+      if project:
+        project.custom_system_prompt = system_prompt
+        return True
+      return False
+
+  async def update_claude_md(self, project_id: str, claude_md: str | None) -> bool:
+    """Update persisted CLAUDE.md content for a project."""
+    async with session_scope() as session:
+      result = await session.execute(
+        select(Project).where(
+          Project.id == project_id,
+          Project.user_email == self.user_email,
+        )
+      )
+      project = result.scalar_one_or_none()
+      if project:
+        project.claude_md = claude_md
         return True
       return False
 
@@ -287,6 +317,12 @@ class ConversationStorage:
     role: str,
     content: str,
     is_error: bool = False,
+    duration_ms: int | None = None,
+    num_turns: int | None = None,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+    cache_read_tokens: int | None = None,
+    cache_creation_tokens: int | None = None,
   ) -> Optional[Message]:
     """Add a message to a conversation.
 
@@ -314,6 +350,12 @@ class ConversationStorage:
         role=role,
         content=content,
         is_error=is_error,
+        duration_ms=duration_ms,
+        num_turns=num_turns,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cache_read_tokens=cache_read_tokens,
+        cache_creation_tokens=cache_creation_tokens,
       )
       session.add(message)
 

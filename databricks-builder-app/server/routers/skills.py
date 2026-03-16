@@ -1,7 +1,11 @@
 """Skills explorer and management API endpoints."""
 
+import json
+import importlib
 import logging
+import os
 from pathlib import Path
+import pkgutil
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
@@ -23,6 +27,98 @@ class UpdateEnabledSkillsRequest(BaseModel):
   """Request to update enabled skills for a project."""
 
   enabled_skills: list[str] | None = None  # None means all skills enabled
+
+
+class SaveSkillFileRequest(BaseModel):
+  """Request to save a skill file in the project's local skills directory."""
+
+  path: str    # Relative path within .claude/skills/
+  content: str
+
+
+def _discover_mcp_tools() -> list[dict]:
+  """Discover MCP tools from runtime registration and descriptor files.
+
+  Returns:
+      List of MCP tool metadata dictionaries sorted by server/tool name.
+  """
+  discovered: list[dict] = []
+  seen_tools: set[tuple[str, str]] = set()
+
+  # 1) Runtime tools from databricks_mcp_server (works in deployed app)
+  try:
+    from databricks_mcp_server.server import mcp
+    import databricks_mcp_server.tools as tools_pkg
+
+    # Import all tool modules so decorators register them with FastMCP
+    for module_info in pkgutil.iter_modules(tools_pkg.__path__):
+      if not module_info.ispkg:
+        importlib.import_module(f'databricks_mcp_server.tools.{module_info.name}')
+
+    for tool_name, mcp_tool in mcp._tool_manager._tools.items():
+      dedupe_key = ('databricks', tool_name)
+      if dedupe_key in seen_tools:
+        continue
+      seen_tools.add(dedupe_key)
+      discovered.append({
+        'server': 'databricks',
+        'name': tool_name,
+        'description': str(getattr(mcp_tool, 'description', '') or ''),
+        'arguments': getattr(mcp_tool, 'parameters', {}) or {},
+        'output_schema': getattr(mcp_tool, 'output_schema', None),
+      })
+  except Exception as e:
+    logger.warning(f'Failed to discover runtime Databricks MCP tools: {e}')
+
+  # 2) Descriptor file fallback (works in local dev environments)
+  tool_files: list[Path] = []
+  candidate_mcps_dirs: list[Path] = []
+
+  configured_mcps_dir = os.getenv('MCP_DESCRIPTORS_DIR')
+  if configured_mcps_dir:
+    candidate_mcps_dirs.append(Path(configured_mcps_dir).expanduser())
+
+  cursor_projects_dir = Path.home() / '.cursor' / 'projects'
+  if cursor_projects_dir.exists():
+    for project_dir in cursor_projects_dir.iterdir():
+      mcps_dir = project_dir / 'mcps'
+      if mcps_dir.exists():
+        candidate_mcps_dirs.append(mcps_dir)
+
+  seen_dirs: set[str] = set()
+  unique_mcps_dirs: list[Path] = []
+  for directory in candidate_mcps_dirs:
+    resolved = str(directory.resolve())
+    if resolved in seen_dirs:
+      continue
+    seen_dirs.add(resolved)
+    unique_mcps_dirs.append(directory)
+
+  for mcps_dir in unique_mcps_dirs:
+    if not mcps_dir.exists():
+      continue
+    tool_files.extend(mcps_dir.glob('*/tools/*.json'))
+
+  for tool_file in sorted(tool_files, key=lambda p: str(p).lower()):
+    try:
+      payload = json.loads(tool_file.read_text(encoding='utf-8'))
+      server_name = tool_file.parent.parent.name
+      tool_name = str(payload.get('name') or tool_file.stem)
+      dedupe_key = (server_name, tool_name)
+      if dedupe_key in seen_tools:
+        continue
+      seen_tools.add(dedupe_key)
+      discovered.append({
+        'server': server_name,
+        'name': tool_name,
+        'description': str(payload.get('description') or ''),
+        'arguments': payload.get('arguments') or {},
+        'output_schema': payload.get('outputSchema'),
+      })
+    except Exception as e:
+      logger.warning(f'Failed to parse MCP tool descriptor {tool_file}: {e}')
+
+  return sorted(discovered, key=lambda t: (str(t.get('server', '')).lower(), str(t.get('name', '')).lower()))
 
 
 def _get_skills_dir(project_id: str) -> Path:
@@ -112,6 +208,28 @@ async def get_skill_file(
     raise HTTPException(status_code=500, detail=f'Failed to read file: {str(e)}')
 
 
+@router.put('/projects/{project_id}/skills/file')
+async def save_skill_file(project_id: str, body: SaveSkillFileRequest):
+  """Save content of a skill file in the project's local .claude/skills directory."""
+  skills_dir = _get_skills_dir(project_id)
+
+  try:
+    requested_path = (skills_dir / body.path).resolve()
+
+    if not str(requested_path).startswith(str(skills_dir.resolve())):
+      raise HTTPException(status_code=403, detail='Access denied: path outside skills directory')
+
+    requested_path.parent.mkdir(parents=True, exist_ok=True)
+    requested_path.write_text(body.content, encoding='utf-8')
+    return {'success': True, 'path': body.path}
+
+  except HTTPException:
+    raise
+  except Exception as e:
+    logger.error(f'Failed to save skill file: {e}')
+    raise HTTPException(status_code=500, detail=f'Failed to save file: {str(e)}')
+
+
 @router.get('/projects/{project_id}/skills/available')
 async def get_available_skills_for_project(project_id: str):
   """Get all available skills with their enabled/disabled status for a project."""
@@ -182,3 +300,10 @@ async def reload_skills(project_id: str):
   except Exception as e:
     logger.error(f'Failed to reload skills: {e}')
     raise HTTPException(status_code=500, detail=f'Failed to reload skills: {str(e)}')
+
+
+@router.get('/mcp/tools')
+async def list_mcp_tools():
+  """List locally installed MCP tools with description and schema specs."""
+  tools = _discover_mcp_tools()
+  return {'tools': tools, 'count': len(tools)}
