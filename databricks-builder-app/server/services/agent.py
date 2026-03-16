@@ -483,9 +483,11 @@ async def stream_agent_response(
 
     # Stderr callback to capture Claude subprocess output for debugging
     def stderr_callback(line: str):
-      logger.debug(f'[Claude stderr] {line.strip()}')
-      # Also print to stderr for immediate visibility during development
-      print(f'[Claude stderr] {line.strip()}', file=sys.stderr, flush=True)
+      stripped = line.strip()
+      if not stripped:
+        return
+      logger.warning(f'[Claude stderr] {stripped}')
+      print(f'[Claude stderr] {stripped}', flush=True)
 
     # Handle AskUserQuestion tool calls gracefully.
     # With bypassPermissions and no callback, AskUserQuestion triggers an SDK
@@ -673,10 +675,15 @@ async def stream_agent_response(
     error_msg = f'Error during Claude query: {e}'
     full_traceback = traceback.format_exc()
 
-    # Use print to stderr for immediate visibility
-    print(f'\n{"="*60}', file=sys.stderr)
-    print(f'AGENT ERROR: {error_msg}', file=sys.stderr)
-    print(full_traceback, file=sys.stderr)
+    print(f'\n{"="*60}')
+    print(f'AGENT ERROR: {error_msg}')
+    print(full_traceback)
+
+    if hasattr(e, 'stderr') and e.stderr:
+      print(f'Claude CLI stderr: {e.stderr}')
+      logger.error(f'Claude CLI stderr: {e.stderr}')
+    if hasattr(e, 'message') and 'Check stderr' in str(e):
+      print('NOTE: Claude CLI exited with error. Check stderr_callback output above.')
 
     # Also log normally
     logger.error(error_msg)
@@ -686,12 +693,12 @@ async def stream_agent_response(
     if hasattr(e, 'exceptions'):
       for i, sub_exc in enumerate(e.exceptions):
         sub_tb = ''.join(traceback.format_exception(type(sub_exc), sub_exc, sub_exc.__traceback__))
-        print(f'Sub-exception {i}: {sub_exc}', file=sys.stderr)
-        print(sub_tb, file=sys.stderr)
+        print(f'Sub-exception {i}: {sub_exc}')
+        print(sub_tb)
         logger.error(f'Sub-exception {i}: {sub_exc}')
         logger.error(sub_tb)
 
-    print(f'{"="*60}\n', file=sys.stderr)
+    print(f'{"="*60}\n')
 
     yield {
       'type': 'error',
