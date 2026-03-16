@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, List, Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, LargeBinary, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, LargeBinary, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -12,7 +12,13 @@ def generate_uuid() -> str:
   return str(uuid.uuid4())
 
 
-def utc_now() -> datetime:
+def utc_now(_ctx: Any | None = None) -> datetime:
+  """Return timezone-aware UTC timestamp.
+
+  SQLAlchemy may invoke Python-side default/onupdate callables with an
+  execution context argument. Accepting an optional context keeps this helper
+  compatible for both direct calls and ORM callback invocation.
+  """
   return datetime.now(timezone.utc)
 
 
@@ -33,6 +39,8 @@ class Project(Base):
   created_at: Mapped[datetime] = mapped_column(
     DateTime(timezone=True), default=utc_now, nullable=False
   )
+  custom_system_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  claude_md: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
   # Relationships
   conversations: Mapped[List['Conversation']] = relationship(
@@ -49,6 +57,8 @@ class Project(Base):
       'user_email': self.user_email,
       'created_at': self.created_at.isoformat() if self.created_at else None,
       'conversation_count': len(self.conversations) if self.conversations else 0,
+      'custom_system_prompt': self.custom_system_prompt,
+      'claude_md': self.claude_md,
     }
 
 
@@ -85,7 +95,10 @@ class Conversation(Base):
   # Relationships
   project: Mapped['Project'] = relationship('Project', back_populates='conversations')
   messages: Mapped[List['Message']] = relationship(
-    'Message', back_populates='conversation', cascade='all, delete-orphan'
+    'Message',
+    back_populates='conversation',
+    cascade='all, delete-orphan',
+    order_by='(Message.timestamp, Message.id)',
   )
 
   __table_args__ = (Index('ix_conversations_project_created', 'project_id', 'created_at'),)
@@ -138,6 +151,13 @@ class Message(Base):
   )
   is_error: Mapped[bool] = mapped_column(Boolean, default=False)
 
+  duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+  num_turns: Mapped[int | None] = mapped_column(Integer, nullable=True)
+  input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+  output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+  cache_read_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+  cache_creation_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
   # Relationships
   conversation: Mapped['Conversation'] = relationship('Conversation', back_populates='messages')
 
@@ -145,13 +165,49 @@ class Message(Base):
 
   def to_dict(self) -> dict[str, Any]:
     """Convert to dictionary."""
-    return {
+    result = {
       'id': self.id,
       'conversation_id': self.conversation_id,
       'role': self.role,
       'content': self.content,
       'timestamp': self.timestamp.isoformat() if self.timestamp else None,
       'is_error': self.is_error,
+    }
+    if self.role == 'assistant':
+      result['duration_ms'] = self.duration_ms
+      result['num_turns'] = self.num_turns
+      result['input_tokens'] = self.input_tokens
+      result['output_tokens'] = self.output_tokens
+      result['cache_read_tokens'] = self.cache_read_tokens
+      result['cache_creation_tokens'] = self.cache_creation_tokens
+    return result
+
+
+class UserConfig(Base):
+  """Per-user configuration stored in Lakebase."""
+
+  __tablename__ = 'user_configs'
+
+  user_email: Mapped[str] = mapped_column(String(255), primary_key=True)
+  default_catalog: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+  default_schema: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+  workspace_folder: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+  model: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+  model_mini: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+  databricks_pat_encrypted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+  updated_at: Mapped[datetime] = mapped_column(
+    DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False
+  )
+
+  def to_dict(self) -> dict[str, Any]:
+    """Convert to dictionary (excludes PAT for security)."""
+    return {
+      'user_email': self.user_email,
+      'default_catalog': self.default_catalog,
+      'default_schema': self.default_schema,
+      'workspace_folder': self.workspace_folder,
+      'model': self.model,
+      'model_mini': self.model_mini,
     }
 
 
@@ -207,6 +263,7 @@ class Execution(Base):
   def to_dict(self) -> dict[str, Any]:
     """Convert to dictionary."""
     import json
+
     return {
       'id': self.id,
       'conversation_id': self.conversation_id,

@@ -292,6 +292,26 @@ def _fetch_user_from_workspace() -> str:
     raise ValueError(f'Could not determine current user: {e}') from e
 
 
+async def get_databricks_token(request: Request, user_email: str | None = None) -> str | None:
+  """Get the best available Databricks token for resource access.
+
+  Priority: stored PAT > forwarded user token > SP OAuth (None).
+  """
+  from .user_config import get_user_pat
+
+  if not user_email:
+    user_email = await get_current_user(request)
+  pat = await get_user_pat(user_email)
+  if pat:
+    return pat
+  return request.headers.get('X-Forwarded-Access-Token') or await get_current_token(request)
+
+
+def get_user_access_token(request) -> str | None:
+  """Get the user's personal Databricks access token from the request."""
+  return request.headers.get('X-Forwarded-Access-Token')
+
+
 def get_workspace_url() -> str:
   """Get the Databricks workspace URL.
 
