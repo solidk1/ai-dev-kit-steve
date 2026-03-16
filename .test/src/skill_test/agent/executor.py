@@ -282,7 +282,11 @@ def _get_agent_env() -> dict[str, str]:
 
     # 2. Env vars with known prefixes override settings file values
     # Skip internal Claude Code vars that would confuse the subprocess
-    _skip_keys = {"CLAUDE_CODE_SSE_PORT", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY"}
+    _skip_keys = {
+        "CLAUDE_CODE_SSE_PORT",
+        "CLAUDE_CODE_ENTRYPOINT",
+        "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY",
+    }
     for key, value in os.environ.items():
         if key in _skip_keys:
             continue

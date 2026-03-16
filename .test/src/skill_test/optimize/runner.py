@@ -164,13 +164,20 @@ def _evaluate_on_tasks(evaluator, candidate, tasks, label: str = "Evaluating", m
                         idx = futures[future]
                         task_id = tasks[idx].get("id", f"task_{idx}")
                         inst = gepa_instances[idx]
-                        score, side_info = 0.0, {"_error": str(e), "scores": {"final": 0.0}}
+                        score, side_info = (
+                            0.0,
+                            {"_error": str(e), "scores": {"final": 0.0}},
+                        )
                         logger.warning("Evaluator failed for task %s: %s", task_id, e)
                     per_task[task_id] = score
                     side_info_by_id[task_id] = side_info
                     side_info_by_input[inst.get("input", f"task_{idx}")] = side_info
                     completed += 1
-                    print(f"\r  {label}: {completed}/{total} ({task_id})...", end="", flush=True)
+                    print(
+                        f"\r  {label}: {completed}/{total} ({task_id})...",
+                        end="",
+                        flush=True,
+                    )
             except TimeoutError:
                 # as_completed timeout — score remaining tasks as 0.0
                 for future, idx in futures.items():
@@ -179,7 +186,11 @@ def _evaluate_on_tasks(evaluator, candidate, tasks, label: str = "Evaluating", m
                         inst = gepa_instances[idx]
                         per_task.setdefault(task_id, 0.0)
                         side_info_by_id.setdefault(
-                            task_id, {"_error": "as_completed timeout (900s)", "scores": {"final": 0.0}}
+                            task_id,
+                            {
+                                "_error": "as_completed timeout (900s)",
+                                "scores": {"final": 0.0},
+                            },
                         )
                         side_info_by_input.setdefault(inst.get("input", f"task_{idx}"), side_info_by_id[task_id])
                         future.cancel()

@@ -446,7 +446,10 @@ class AgentEvaluator:
             reg_val = regression_fb.value
             if isinstance(reg_val, bool):
                 regression_penalty = 1.0 if reg_val else 0.0
-            elif isinstance(reg_val, str) and reg_val.strip().lower() in ("yes", "true"):
+            elif isinstance(reg_val, str) and reg_val.strip().lower() in (
+                "yes",
+                "true",
+            ):
                 regression_penalty = 1.0
 
         # Phase 4: Deterministic fact/pattern assertions (zero LLM cost — static spine)

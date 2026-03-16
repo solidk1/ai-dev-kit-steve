@@ -646,7 +646,11 @@ def run_judge_safe(
                 fb = future.result(timeout=timeout)
             except concurrent.futures.TimeoutError:
                 fb_pool.shutdown(wait=False)
-                logger.warning("Fallback '%s' timed out after %ds, trying next", fallback_model, timeout)
+                logger.warning(
+                    "Fallback '%s' timed out after %ds, trying next",
+                    fallback_model,
+                    timeout,
+                )
                 continue
             finally:
                 fb_pool.shutdown(wait=False)

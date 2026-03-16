@@ -378,16 +378,20 @@ function VerboseItem({ item }: { item: ActivityItem }) {
     const toolName = item.toolName?.replace('mcp__databricks__', '') ?? '';
     const codeInfo = getCodeFromToolInput(item.toolName, item.toolInput);
     const inputStr = !codeInfo && item.toolInput ? JSON.stringify(item.toolInput, null, 2) : '';
-    const toolParams = Object.entries(codeInfo?.params ?? {}).filter(
-      ([, val]) => val !== null && val !== undefined && String(val).trim() !== ''
-    );
     const metaParams = [
       item.commandExecution?.cluster_name ? (['cluster', item.commandExecution.cluster_name] as [string, string]) : null,
-      item.commandExecution?.context_id ? (['context_id', item.commandExecution.context_id] as [string, string]) : null,
       !item.commandExecution?.cluster_name && item.commandExecution?.cluster_id
         ? (['cluster_id', item.commandExecution.cluster_id] as [string, string])
         : null,
     ].filter((entry): entry is [string, string] => Boolean(entry));
+    const metaKeys = new Set(metaParams.map(([k]) => k));
+    if (item.commandExecution) {
+      if (item.commandExecution.cluster_name) { metaKeys.add('cluster_id'); metaKeys.add('cluster_name'); }
+      if (item.commandExecution.context_id) metaKeys.add('context_id');
+    }
+    const toolParams = Object.entries(codeInfo?.params ?? {}).filter(
+      ([key, val]) => val !== null && val !== undefined && String(val).trim() !== '' && !metaKeys.has(key)
+    );
     const hasExpandable = !!(codeInfo || inputStr || toolParams.length > 0 || metaParams.length > 0);
     return (
       <div className="border-b border-[var(--color-border)]/20 last:border-0">
