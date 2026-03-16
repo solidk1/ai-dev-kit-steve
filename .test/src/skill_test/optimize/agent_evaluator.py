@@ -81,8 +81,12 @@ def _run_mlflow_tool_judges(
             if isinstance(tc_result, Feedback):
                 scores["tool_correctness"] = 1.0 if tc_result.value == "yes" else 0.0
             elif isinstance(tc_result, list):
-                yes_count = sum(1 for fb in tc_result if getattr(fb, "value", None) == "yes")
-                scores["tool_correctness"] = yes_count / len(tc_result) if tc_result else 0.5
+                yes_count = sum(
+                    1 for fb in tc_result if getattr(fb, "value", None) == "yes"
+                )
+                scores["tool_correctness"] = (
+                    yes_count / len(tc_result) if tc_result else 0.5
+                )
         except Exception as e:
             logger.debug("ToolCallCorrectness not available: %s", e)
 
@@ -97,8 +101,12 @@ def _run_mlflow_tool_judges(
             if isinstance(te_result, Feedback):
                 scores["tool_efficiency"] = 1.0 if te_result.value == "yes" else 0.0
             elif isinstance(te_result, list):
-                yes_count = sum(1 for fb in te_result if getattr(fb, "value", None) == "yes")
-                scores["tool_efficiency"] = yes_count / len(te_result) if te_result else 0.5
+                yes_count = sum(
+                    1 for fb in te_result if getattr(fb, "value", None) == "yes"
+                )
+                scores["tool_efficiency"] = (
+                    yes_count / len(te_result) if te_result else 0.5
+                )
         except Exception as e:
             logger.debug("ToolCallEfficiency not available: %s", e)
 
@@ -228,7 +236,9 @@ class AgentEvaluator:
         self._baseline_judge_cache: dict[str, JudgeFeedback] = {}
 
         # Create judge
-        self._quality_judge = create_skill_quality_judge(skill_guidelines, judge_model=judge_model)
+        self._quality_judge = create_skill_quality_judge(
+            skill_guidelines, judge_model=judge_model
+        )
 
     def _run_agent(self, prompt: str, skill_md: str | None = None) -> AgentResult:
         """Run the agent and return result. Synchronous wrapper."""
@@ -271,7 +281,9 @@ class AgentEvaluator:
 
         # Decode expectations
         expectations: dict[str, Any] = {}
-        expectations_json = example.get("additional_context", {}).get("expectations", "")
+        expectations_json = example.get("additional_context", {}).get(
+            "expectations", ""
+        )
         if expectations_json:
             try:
                 expectations = json.loads(expectations_json)
@@ -293,7 +305,9 @@ class AgentEvaluator:
 
         # Phase 2: Run agent WITHOUT skill (cached)
         logger.info("Running agent WITHOUT skill (cached if available)...")
-        without_response, without_trace, _without_mlflow_trace = self._get_baseline(prompt)
+        without_response, without_trace, _without_mlflow_trace = self._get_baseline(
+            prompt
+        )
 
         with_response = with_result.response_text
         with_trace = with_result.trace_metrics.to_dict()
@@ -306,15 +320,18 @@ class AgentEvaluator:
         facts_str = "\n".join(f"- {f}" for f in facts) if facts else "None specified"
         patterns_str = (
             "\n".join(
-                f"- {p}" if isinstance(p, str) else f"- {p.get('description', p.get('pattern', ''))}" for p in patterns
+                f"- {p}"
+                if isinstance(p, str)
+                else f"- {p.get('description', p.get('pattern', ''))}"
+                for p in patterns
             )
             if patterns
             else "None specified"
         )
-        guidelines_str = "\n".join(f"- {g}" for g in guidelines) if guidelines else "None specified"
-        expectations_text = (
-            f"Expected facts:\n{facts_str}\n\nExpected patterns:\n{patterns_str}\n\nGuidelines:\n{guidelines_str}"
+        guidelines_str = (
+            "\n".join(f"- {g}" for g in guidelines) if guidelines else "None specified"
         )
+        expectations_text = f"Expected facts:\n{facts_str}\n\nExpected patterns:\n{patterns_str}\n\nGuidelines:\n{guidelines_str}"
         expectations_dict = {"criteria": expectations_text}
 
         # Quality judge: score WITH response
@@ -354,7 +371,9 @@ class AgentEvaluator:
         tool_efficiency = tool_scores.get("tool_efficiency", 0.5)
 
         # Phase 5: Behavioral trace scorers
-        behavioral_score, behavioral_details = _run_behavioral_scorers(with_trace, trace_expectations)
+        behavioral_score, behavioral_details = _run_behavioral_scorers(
+            with_trace, trace_expectations
+        )
 
         # Phase 6: Execution success
         execution_success = _compute_execution_success(with_result)
@@ -401,7 +420,11 @@ class AgentEvaluator:
         }
         side_info["Judge_effectiveness"] = {
             "verdict": (
-                "improved" if effectiveness_delta > 0.05 else "regressed" if effectiveness_delta < -0.05 else "same"
+                "improved"
+                if effectiveness_delta > 0.05
+                else "regressed"
+                if effectiveness_delta < -0.05
+                else "same"
             ),
             "delta": effectiveness_delta,
         }
@@ -455,7 +478,9 @@ class AgentEvaluator:
                 f"(with={score_with:.2f}, without={score_without:.2f})"
             )
         elif score_with < 0.5:
-            side_info["Error"] = f"NEEDS_SKILL: quality_with={score_with:.2f}. Judge: {quality_with_fb.rationale[:200]}"
+            side_info["Error"] = (
+                f"NEEDS_SKILL: quality_with={score_with:.2f}. Judge: {quality_with_fb.rationale[:200]}"
+            )
 
         return final_score, side_info
 
@@ -479,7 +504,9 @@ def create_agent_evaluator(
 
     skill_guidelines = _collect_skill_guidelines(skill_name)
     if skill_guidelines:
-        logger.info("Loaded %d domain guidelines for agent quality judge", len(skill_guidelines))
+        logger.info(
+            "Loaded %d domain guidelines for agent quality judge", len(skill_guidelines)
+        )
 
     return AgentEvaluator(
         original_token_counts=original_token_counts,
@@ -508,7 +535,9 @@ def build_agent_eval_background(
     baseline_desc = ""
     if baseline_scores:
         mean_score = sum(baseline_scores.values()) / len(baseline_scores)
-        baseline_desc = f"\nBASELINE: mean {mean_score:.3f} across {len(baseline_scores)} tasks."
+        baseline_desc = (
+            f"\nBASELINE: mean {mean_score:.3f} across {len(baseline_scores)} tasks."
+        )
 
         if baseline_side_info:
             tool_issues = []
@@ -516,7 +545,9 @@ def build_agent_eval_background(
                 behavioral = info.get("behavioral_scores", {})
                 for scorer_name, result in behavioral.items():
                     if result.get("value") == "no":
-                        tool_issues.append(f"{tid}: {scorer_name} failed - {result.get('rationale', '')[:80]}")
+                        tool_issues.append(
+                            f"{tid}: {scorer_name} failed - {result.get('rationale', '')[:80]}"
+                        )
             if tool_issues:
                 baseline_desc += f"\n  TOOL ISSUES ({len(tool_issues)}):"
                 for issue in tool_issues[:5]:

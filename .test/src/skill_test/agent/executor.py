@@ -100,7 +100,11 @@ def _build_trace_metrics(
 
             if tool_use_id in tool_calls_by_id:
                 tc = tool_calls_by_id[tool_use_id]
-                tc.result = result_text[:2000] if isinstance(result_text, str) else str(result_text)[:2000]
+                tc.result = (
+                    result_text[:2000]
+                    if isinstance(result_text, str)
+                    else str(result_text)[:2000]
+                )
                 tc.success = not is_error
 
                 # Extract file operations from tool results
@@ -110,17 +114,23 @@ def _build_trace_metrics(
                     fp = tool_input.get("file_path", "")
                     if fp:
                         metrics.files_created.append(fp)
-                        metrics.file_operations.append(FileOperation(type="create", file_path=fp, timestamp=ts))
+                        metrics.file_operations.append(
+                            FileOperation(type="create", file_path=fp, timestamp=ts)
+                        )
                 elif tool_name == "Edit" and tc.success:
                     fp = tool_input.get("file_path", "")
                     if fp:
                         metrics.files_modified.append(fp)
-                        metrics.file_operations.append(FileOperation(type="edit", file_path=fp, timestamp=ts))
+                        metrics.file_operations.append(
+                            FileOperation(type="edit", file_path=fp, timestamp=ts)
+                        )
                 elif tool_name == "Read":
                     fp = tool_input.get("file_path", "")
                     if fp:
                         metrics.files_read.append(fp)
-                        metrics.file_operations.append(FileOperation(type="read", file_path=fp, timestamp=ts))
+                        metrics.file_operations.append(
+                            FileOperation(type="read", file_path=fp, timestamp=ts)
+                        )
 
         elif event.type == "assistant_turn":
             num_turns += 1
@@ -243,7 +253,11 @@ def _get_agent_env() -> dict[str, str]:
 
     # 2. Env vars with known prefixes override settings file values
     # Skip internal Claude Code vars that would confuse the subprocess
-    _skip_keys = {"CLAUDE_CODE_SSE_PORT", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY"}
+    _skip_keys = {
+        "CLAUDE_CODE_SSE_PORT",
+        "CLAUDE_CODE_ENTRYPOINT",
+        "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY",
+    }
     for key, value in os.environ.items():
         if key in _skip_keys:
             continue
@@ -261,7 +275,9 @@ def _get_agent_env() -> dict[str, str]:
     return env
 
 
-def _get_mlflow_stop_hook(mlflow_experiment: str | None = None, skill_name: str | None = None):
+def _get_mlflow_stop_hook(
+    mlflow_experiment: str | None = None, skill_name: str | None = None
+):
     """Create an MLflow Stop hook that processes the transcript into a real trace.
 
     Mirrors the pattern from databricks-builder-app/server/services/agent.py:
@@ -305,7 +321,9 @@ def _get_mlflow_stop_hook(mlflow_experiment: str | None = None, skill_name: str 
 
     stc = SkillTestConfig()
     tracking_uri = stc.mlflow.tracking_uri
-    experiment_name = agent_experiment  # Use our override, not stc's (which may read stale env)
+    experiment_name = (
+        agent_experiment  # Use our override, not stc's (which may read stale env)
+    )
 
     # Sync env vars so setup_mlflow() from mlflow.claude_code.tracing agrees
     os.environ["MLFLOW_TRACKING_URI"] = tracking_uri
@@ -330,14 +348,18 @@ def _get_mlflow_stop_hook(mlflow_experiment: str | None = None, skill_name: str 
             )
             return None, None
 
-    print(f"    [MLflow] Tracing configured: uri={tracking_uri} experiment={experiment_name}")
+    print(
+        f"    [MLflow] Tracing configured: uri={tracking_uri} experiment={experiment_name}"
+    )
 
     async def mlflow_stop_hook(input_data, tool_use_id, context):
         """Process transcript and create MLflow trace when agent stops."""
         session_id = input_data.get("session_id")
         transcript_path = input_data.get("transcript_path")
 
-        print(f"    [MLflow] Stop hook fired: session={session_id}, transcript={transcript_path}")
+        print(
+            f"    [MLflow] Stop hook fired: session={session_id}, transcript={transcript_path}"
+        )
 
         try:
             # Ensure MLflow is set up (matches builder app: call every time)
@@ -357,16 +379,24 @@ def _get_mlflow_stop_hook(mlflow_experiment: str | None = None, skill_name: str 
                     requested_model = os.environ.get("ANTHROPIC_MODEL", "")
                     base_url = os.environ.get("ANTHROPIC_BASE_URL", "")
                     if requested_model:
-                        client.set_trace_tag(trace_id, "databricks.requested_model", requested_model)
+                        client.set_trace_tag(
+                            trace_id, "databricks.requested_model", requested_model
+                        )
                     if base_url:
-                        client.set_trace_tag(trace_id, "databricks.model_serving_endpoint", base_url)
-                    client.set_trace_tag(trace_id, "mlflow.source", "skill-test-agent-eval")
+                        client.set_trace_tag(
+                            trace_id, "databricks.model_serving_endpoint", base_url
+                        )
+                    client.set_trace_tag(
+                        trace_id, "mlflow.source", "skill-test-agent-eval"
+                    )
                     if skill_name:
                         client.set_trace_tag(trace_id, "skill_name", skill_name)
                 except Exception as tag_err:
                     print(f"    [MLflow] Warning: could not add tags: {tag_err}")
             else:
-                print("    [MLflow] Warning: process_transcript returned None (empty transcript?)")
+                print(
+                    "    [MLflow] Warning: process_transcript returned None (empty transcript?)"
+                )
 
         except Exception as e:
             print(f"    [MLflow] Error processing transcript: {e}")
@@ -452,7 +482,9 @@ async def run_agent(
                 server_cfg["env"] = mcp_env
 
     # Set up MLflow tracing via Stop hook
-    mlflow_hook, mlflow_result = _get_mlflow_stop_hook(mlflow_experiment=mlflow_experiment, skill_name=skill_name)
+    mlflow_hook, mlflow_result = _get_mlflow_stop_hook(
+        mlflow_experiment=mlflow_experiment, skill_name=skill_name
+    )
     hooks = {}
     if mlflow_hook:
         hooks["Stop"] = [HookMatcher(hooks=[mlflow_hook])]
@@ -509,8 +541,12 @@ async def run_agent(
                         usage_data = {
                             "input_tokens": getattr(msg.usage, "input_tokens", 0),
                             "output_tokens": getattr(msg.usage, "output_tokens", 0),
-                            "cache_creation_input_tokens": getattr(msg.usage, "cache_creation_input_tokens", 0),
-                            "cache_read_input_tokens": getattr(msg.usage, "cache_read_input_tokens", 0),
+                            "cache_creation_input_tokens": getattr(
+                                msg.usage, "cache_creation_input_tokens", 0
+                            ),
+                            "cache_read_input_tokens": getattr(
+                                msg.usage, "cache_read_input_tokens", 0
+                            ),
                         }
                     events.append(
                         AgentEvent(
@@ -538,7 +574,9 @@ async def run_agent(
                                     data={
                                         "id": block.id,
                                         "name": block.name,
-                                        "input": block.input if isinstance(block.input, dict) else {},
+                                        "input": block.input
+                                        if isinstance(block.input, dict)
+                                        else {},
                                     },
                                 )
                             )
@@ -548,7 +586,9 @@ async def run_agent(
                                     type="tool_result",
                                     timestamp=now,
                                     data={
-                                        "tool_use_id": getattr(block, "tool_use_id", ""),
+                                        "tool_use_id": getattr(
+                                            block, "tool_use_id", ""
+                                        ),
                                         "content": getattr(block, "content", ""),
                                         "is_error": getattr(block, "is_error", False),
                                     },
@@ -564,7 +604,9 @@ async def run_agent(
                                     type="tool_result",
                                     timestamp=now,
                                     data={
-                                        "tool_use_id": getattr(block, "tool_use_id", ""),
+                                        "tool_use_id": getattr(
+                                            block, "tool_use_id", ""
+                                        ),
                                         "content": getattr(block, "content", ""),
                                         "is_error": getattr(block, "is_error", False),
                                     },
@@ -689,7 +731,9 @@ def _run_in_fresh_loop(coro) -> Any:
                 for task in pending:
                     task.cancel()
                 if pending:
-                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                    loop.run_until_complete(
+                        asyncio.gather(*pending, return_exceptions=True)
+                    )
                 loop.run_until_complete(loop.shutdown_asyncgens())
                 loop.run_until_complete(loop.shutdown_default_executor())
             except Exception:

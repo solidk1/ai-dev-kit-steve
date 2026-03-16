@@ -37,7 +37,9 @@ from mlflow.genai.judges import make_judge
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_JUDGE_LM = os.environ.get("GEPA_JUDGE_LM", "databricks:/databricks-claude-sonnet-4-6")
+DEFAULT_JUDGE_LM = os.environ.get(
+    "GEPA_JUDGE_LM", "databricks:/databricks-claude-sonnet-4-6"
+)
 
 # ---------------------------------------------------------------------------
 # Fallback model chain for rate limit errors
@@ -303,7 +305,9 @@ def create_skill_quality_judge(
         principles = "\n".join(f"- {g}" for g in skill_guidelines)
         instructions += f"\n\n## Domain-Specific Principles\n{principles}\n"
 
-    model_uri, inference_params = _to_judge_model_and_params(judge_model or DEFAULT_JUDGE_LM)
+    model_uri, inference_params = _to_judge_model_and_params(
+        judge_model or DEFAULT_JUDGE_LM
+    )
     return make_judge(
         name="skill_quality",
         model=model_uri,
@@ -365,7 +369,9 @@ def create_effectiveness_judge(judge_model: str | None = None) -> Any:
         judge_model: LLM model for the judge. Defaults to GEPA_JUDGE_LM env
             or databricks/databricks-claude-sonnet-4-6.
     """
-    model_uri, inference_params = _to_judge_model_and_params(judge_model or DEFAULT_JUDGE_LM)
+    model_uri, inference_params = _to_judge_model_and_params(
+        judge_model or DEFAULT_JUDGE_LM
+    )
     return make_judge(
         name="skill_effectiveness",
         model=model_uri,
@@ -418,7 +424,9 @@ def create_regression_judge(judge_model: str | None = None) -> Any:
         judge_model: LLM model for the judge. Defaults to GEPA_JUDGE_LM env
             or databricks/databricks-claude-sonnet-4-6.
     """
-    model_uri, inference_params = _to_judge_model_and_params(judge_model or DEFAULT_JUDGE_LM)
+    model_uri, inference_params = _to_judge_model_and_params(
+        judge_model or DEFAULT_JUDGE_LM
+    )
     return make_judge(
         name="skill_regression",
         model=model_uri,
@@ -481,7 +489,9 @@ def run_judge_safe(
                 inference_params=inference_params,
             )
             fb = fallback_judge(**kwargs)
-            logger.info("Judge '%s' succeeded with fallback model '%s'", name, fallback_model)
+            logger.info(
+                "Judge '%s' succeeded with fallback model '%s'", name, fallback_model
+            )
             return JudgeFeedback(
                 value=fb.value,
                 rationale=fb.rationale or "",
@@ -489,7 +499,9 @@ def run_judge_safe(
             )
         except Exception as fallback_err:
             if _is_rate_limit_error(fallback_err):
-                logger.warning("Fallback '%s' also rate limited, trying next", fallback_model)
+                logger.warning(
+                    "Fallback '%s' also rate limited, trying next", fallback_model
+                )
                 continue
             logger.warning("Fallback '%s' failed: %s", fallback_model, fallback_err)
             continue
