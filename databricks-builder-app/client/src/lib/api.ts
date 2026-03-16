@@ -200,8 +200,14 @@ export async function reconnectToExecution(params: ReconnectToExecutionParams): 
 
   let lastTimestamp: number | undefined;
   const lastEv = storedEvents[storedEvents.length - 1] as Record<string, unknown> | undefined;
-  if (lastEv && typeof lastEv === 'object' && lastEv.timestamp != null) {
-    lastTimestamp = Number(lastEv.timestamp);
+  if (lastEv && typeof lastEv === 'object') {
+    const rawCursor = lastEv._cursor ?? lastEv.timestamp;
+    if (rawCursor != null) {
+      const parsed = Number(rawCursor);
+      if (Number.isFinite(parsed)) {
+        lastTimestamp = parsed;
+      }
+    }
   }
 
   await streamProgress({
@@ -288,7 +294,10 @@ async function streamProgress(params: {
           try {
             const event = JSON.parse(payload) as Record<string, unknown>;
             if (event.type === 'stream.reconnect') {
-              lastTs = Number(event.last_timestamp) ?? lastTs;
+              const parsed = Number(event.last_timestamp);
+              if (Number.isFinite(parsed)) {
+                lastTs = parsed;
+              }
               shouldReconnect = true;
               break;
             }
