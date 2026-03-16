@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from ..trace.models import FileOperation, ToolCall, TraceMetrics
+from ..trace.models import FileOperation, ToolCall, TraceMetrics, TokenUsage
 
 logger = logging.getLogger(__name__)
 

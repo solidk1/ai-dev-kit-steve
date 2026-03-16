@@ -566,7 +566,7 @@ def optimize_skill(
     agent_baseline_si = None
 
     if agent_eval or agent_eval_full:
-        from .agent_evaluator import create_agent_evaluator
+        from .agent_evaluator import create_agent_evaluator, build_agent_eval_background
 
         print("Agent evaluation: ENABLED")
         # Load tool_modules from manifest for eval criteria filtering
