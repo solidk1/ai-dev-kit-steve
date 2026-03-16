@@ -20,5 +20,19 @@ export default defineConfig({
   },
   build: {
     outDir: 'out',
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return;
+          if (id.includes("react-markdown") || id.includes("remark-gfm")) {
+            return "vendor-markdown";
+          }
+          if (id.includes("@radix-ui") || id.includes("lucide-react") || id.includes("class-variance-authority")) {
+            return "vendor-ui";
+          }
+          return;
+        },
+      },
+    },
   },
 });
