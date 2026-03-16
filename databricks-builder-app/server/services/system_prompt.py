@@ -5,7 +5,7 @@ from .skills_manager import get_available_skills
 # Mapping of user request patterns to skill names for the selection guide.
 # Only entries whose skill is enabled will be included in the prompt.
 _SKILL_GUIDE_ENTRIES = [
-  ('Generate data, synthetic data, fake data, test data', 'databricks-synthetic-data-generation'),
+  ('Generate data, synthetic data, fake data, test data', 'databricks-synthetic-data-gen'),
   ('Pipeline, ETL, bronze/silver/gold, data transformation', 'databricks-spark-declarative-pipelines'),
   ('Dashboard, visualization, BI, charts', 'databricks-aibi-dashboards'),
   ('Job, workflow, schedule, automation', 'databricks-jobs'),
@@ -107,7 +107,17 @@ Use the `Skill` tool to load skills. Available skills:
 """
 
   cluster_section = ''
-  if cluster_id:
+  if cluster_id == 'serverless' or cluster_id == '__serverless__':
+    cluster_section = """
+## Compute: Serverless
+
+You are configured to use **Databricks Serverless Compute** for code execution.
+
+When using `execute_databricks_command` or `run_python_file_on_databricks`:
+- **Do NOT pass a cluster_id parameter** — serverless compute is used automatically when no cluster is specified.
+- Serverless compute starts instantly with no cluster startup wait time.
+"""
+  elif cluster_id:
     cluster_section = f"""
 ## Selected Cluster
 
@@ -234,6 +244,7 @@ Use it as storage to track all the resources created in the project, and be able
 - MCP tool names use the format `mcp__databricks__<tool_name>` (e.g., `mcp__databricks__execute_sql`)
 - Use `upload_folder`/`upload_file` for file uploads, never manual steps
 - Use `create_or_update_pipeline` for pipelines, never SDK code
+- **Do NOT use the AskUserQuestion tool.** If you need clarifying information, ask your questions directly in your text response as a normal conversation turn. The user will reply naturally.
 
 {skills_section}
 

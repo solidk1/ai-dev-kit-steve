@@ -1,7 +1,8 @@
 """User service for getting the current authenticated user and token.
 
 In production (Databricks Apps):
-- User email is available in the X-Forwarded-User header
+- X-Forwarded-Email header is checked first (M2M callers forwarding real user identity)
+- X-Forwarded-User header is used as fallback (browser users via Databricks Apps proxy)
 - Access token is available in the X-Forwarded-Access-Token header
 - Bearer tokens from other Databricks Apps (M2M OAuth) are also accepted
 
@@ -16,7 +17,7 @@ import time
 from typing import Optional
 
 from databricks.sdk import WorkspaceClient
-from databricks.sdk.credentials_provider import CredentialsStrategy
+from databricks_tools_core.identity import PRODUCT_NAME, PRODUCT_VERSION
 from fastapi import Request
 
 logger = logging.getLogger(__name__)
@@ -46,24 +47,28 @@ def _get_workspace_client() -> WorkspaceClient:
 
   In Databricks Apps, explicitly uses OAuth M2M to avoid conflicts with other auth methods.
   """
+  product_kwargs = dict(product=PRODUCT_NAME, product_version=PRODUCT_VERSION)
   if _has_oauth_credentials():
     # Explicitly configure OAuth M2M to prevent auth conflicts
     return WorkspaceClient(
       host=os.environ.get('DATABRICKS_HOST', ''),
       client_id=os.environ.get('DATABRICKS_CLIENT_ID', ''),
       client_secret=os.environ.get('DATABRICKS_CLIENT_SECRET', ''),
+      auth_type='oauth-m2m',
+      **product_kwargs,
     )
   # Development mode - use default SDK auth
-  return WorkspaceClient()
+  return WorkspaceClient(**product_kwargs)
 
 
 async def get_current_user(request: Request) -> str:
   """Get the current user's email from the request.
 
   Auth priority:
-    1. X-Forwarded-User header (browser users via Databricks Apps proxy)
-    2. Authorization: Bearer token (M2M OAuth from other Databricks Apps)
-    3. WorkspaceClient dev fallback (local development only)
+    1. X-Forwarded-Email header (M2M callers forwarding real user identity)
+    2. X-Forwarded-User header (browser users via Databricks Apps proxy)
+    3. Authorization: Bearer token (M2M OAuth from other Databricks Apps)
+    4. WorkspaceClient dev fallback (local development only)
 
   Args:
       request: FastAPI Request object
@@ -74,15 +79,22 @@ async def get_current_user(request: Request) -> str:
   Raises:
       ValueError: If user cannot be determined
   """
-  # 1. Try to get user from header first (production mode - browser users)
-  # X-Forwarded-Email contains the user's email address (preferred)
-  # X-Forwarded-User may contain a UUID or SP identifier (fallback)
-  user = request.headers.get('X-Forwarded-Email') or request.headers.get('X-Forwarded-User')
+  # 1. X-Forwarded-Email (M2M callers forwarding real user identity)
+  # Checked first so that when an M2M caller (e.g. Lemma) explicitly sets the
+  # real user's SCIM identity, it takes priority over X-Forwarded-User which
+  # the proxy overwrites with the service principal's identity.
+  forwarded_email = request.headers.get('X-Forwarded-Email')
+  if forwarded_email:
+    logger.debug(f'Got user from X-Forwarded-Email header: {forwarded_email}')
+    return forwarded_email
+
+  # 2. X-Forwarded-User (Databricks Apps proxy for browser users)
+  user = request.headers.get('X-Forwarded-User')
   if user:
-    logger.debug(f'Got user from forwarded header: {user}')
+    logger.debug(f'Got user from X-Forwarded-User header: {user}')
     return user
 
-  # 2. Try Bearer token (M2M OAuth from other Databricks Apps)
+  # 3. Bearer token (M2M OAuth from other Databricks Apps)
   auth_header = request.headers.get('Authorization', '')
   if auth_header.startswith('Bearer '):
     token = auth_header[7:]
@@ -95,14 +107,14 @@ async def get_current_user(request: Request) -> str:
         logger.warning(f'Bearer token identity resolution failed: {e}')
         # Fall through to dev fallback if in development mode
 
-  # 3. Fall back to WorkspaceClient for development
+  # 4. Fall back to WorkspaceClient for development
   if _is_local_development():
     return await _get_dev_user()
 
-  # Production without header - this shouldn't happen
+  # Production without any identity source
   raise ValueError(
-    'No X-Forwarded-User header found, no valid Bearer token, and not in development mode. '
-    'Ensure the app is deployed with user authentication enabled.'
+    'No X-Forwarded-User/X-Forwarded-Email header found, no valid Bearer token, '
+    'and not in development mode. Ensure the app is deployed with user authentication enabled.'
   )
 
 
@@ -233,16 +245,7 @@ def _fetch_bearer_identity(token: str) -> str:
   """
   try:
     host = os.environ.get('DATABRICKS_HOST', '')
-    bearer_token = token
-
-    class _BearerTokenStrategy(CredentialsStrategy):
-      def auth_type(self) -> str:
-        return 'pat'
-
-      def __call__(self, cfg):
-        return lambda: {'Authorization': f'Bearer {bearer_token}'}
-
-    client = WorkspaceClient(host=host, credentials_strategy=_BearerTokenStrategy())
+    client = WorkspaceClient(host=host, token=token)
     me = client.current_user.me()
     identity = me.user_name or me.display_name
     if not identity:
@@ -287,45 +290,6 @@ def _fetch_user_from_workspace() -> str:
   except Exception as e:
     logger.error(f'Failed to get current user from WorkspaceClient: {e}')
     raise ValueError(f'Could not determine current user: {e}') from e
-
-
-async def get_databricks_token(request: Request, user_email: str | None = None) -> str | None:
-  """Get the best available Databricks token for resource access.
-
-  Priority: stored PAT > forwarded user token > SP OAuth (None).
-
-  Args:
-      request: FastAPI Request object
-      user_email: Optional pre-resolved user email (avoids double lookup)
-
-  Returns:
-      Token string, or None to fall back to SP OAuth credentials
-  """
-  from .user_config import get_user_pat
-
-  if not user_email:
-    user_email = await get_current_user(request)
-  pat = await get_user_pat(user_email)
-  if pat:
-    return pat
-  return request.headers.get('X-Forwarded-Access-Token') or await get_current_token(request)
-
-
-def get_user_access_token(request) -> str | None:
-  """Get the user's personal Databricks access token from the request.
-
-  In Databricks Apps, the user's OAuth token is forwarded in the
-  X-Forwarded-Access-Token header. This is distinct from the SP OAuth
-  credentials and should be used for operations on the user's personal
-  workspace folder.
-
-  Args:
-      request: FastAPI Request object
-
-  Returns:
-      User's access token, or None if not available
-  """
-  return request.headers.get('X-Forwarded-Access-Token')
 
 
 def get_workspace_url() -> str:

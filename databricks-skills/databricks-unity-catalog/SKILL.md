@@ -17,6 +17,7 @@ Use this skill when:
 - Tracking **compute resources** (cluster usage, warehouse metrics)
 - Reviewing **job execution** (run history, success rates, failures)
 - Analyzing **query performance** (slow queries, warehouse utilization)
+- Profiling **data quality** (data profiling, drift detection, metric tables)
 
 ## Reference Files
 
@@ -24,6 +25,7 @@ Use this skill when:
 |-------|------|-------------|
 | System Tables | [5-system-tables.md](5-system-tables.md) | Lineage, audit, billing, compute, jobs, query history |
 | Volumes | [6-volumes.md](6-volumes.md) | Volume file operations, permissions, best practices |
+| Data Profiling | [7-data-profiling.md](7-data-profiling.md) | Data profiling, drift detection, profile metrics |
 
 ## Quick Start
 
@@ -108,7 +110,7 @@ mcp__databricks__execute_sql(
 
 - **[databricks-spark-declarative-pipelines](../databricks-spark-declarative-pipelines/SKILL.md)** - for pipelines that write to Unity Catalog tables
 - **[databricks-jobs](../databricks-jobs/SKILL.md)** - for job execution data visible in system tables
-- **[databricks-synthetic-data-generation](../databricks-synthetic-data-generation/SKILL.md)** - for generating data stored in Unity Catalog Volumes
+- **[databricks-synthetic-data-gen](../databricks-synthetic-data-gen/SKILL.md)** - for generating data stored in Unity Catalog Volumes
 - **[databricks-aibi-dashboards](../databricks-aibi-dashboards/SKILL.md)** - for building dashboards on top of Unity Catalog data
 
 ## Resources

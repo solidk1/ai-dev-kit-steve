@@ -1,235 +1,364 @@
-# Skill Testing Framework
+# Skill Evaluation & Optimization
 
-Test Databricks skills with real execution on serverless compute.
+Evaluate and optimize SKILL.md files using [GEPA](https://github.com/gepa-ai/gepa) and MLflow judges. Skills teach AI agents how to use Databricks features — this framework measures whether they actually help and uses evolutionary optimization to improve them.
 
-**Note:** This framework is for contributors only and is not distributed via install_skills.sh.
+For a deep technical explanation of the evaluation methodology, scoring, and architecture, see [TECHNICAL.md](TECHNICAL.md).
+
+---
 
 ## Setup
 
-```bash
-uv pip install -e ".test/[dev]"
-.test/install_skill_test.sh
-```
-
-Requires a Databricks workspace with serverless SQL/compute enabled.
-
----
-
-## New Skill Journey
-
-Complete workflow for testing a skill from scratch (e.g., `mlflow-evaluation`).
-
-### 1. Initialize Test Scaffolding
-
-```
-/skill-test <skill-name> init
-```
-
-Claude will:
-1. Read the skill's SKILL.md documentation
-2. Generate `manifest.yaml` with appropriate scorers
-3. Create empty `ground_truth.yaml` and `candidates.yaml` templates
-4. Recommend test prompts based on documentation
-
-### 2. Add Test Cases
-
-```
-/skill-test <skill-name> add
-```
-
-Run this with the recommended prompts from init. Claude will:
-1. Ask for your test prompt
-2. Invoke the skill to generate a response
-3. Execute code blocks on Databricks
-4. Auto-save passing tests to `ground_truth.yaml`
-5. Save failing tests to `candidates.yaml` for review
-
-Repeat for each recommended prompt.
-
-### 3. Review Candidates
-
-```
-/skill-test <skill-name> review
-```
-
-Review any tests that failed execution and were saved to candidates:
-1. Load pending tests from `candidates.yaml`
-2. Present each with prompt, response, and execution results
-3. Allow you to approve, reject, skip, or edit
-4. Promote approved candidates to `ground_truth.yaml`
-
-For batch approval of successful tests:
-```
-/skill-test <skill-name> review --batch --filter-success
-```
-
-### 4. Configure Scorers (Optional)
-
-```
-/skill-test <skill-name> scorers
-```
-
-View current scorer configuration. To update:
-
-```
-/skill-test <skill-name> scorers update --add-guideline "Must use CLUSTER BY"
-```
-
-Or edit `.test/skills/<skill-name>/manifest.yaml` directly to:
-- Add/remove scorers
-- Update default guidelines
-- Configure trace expectations
-
-### 5. Run Evaluation
-
-```
-/skill-test <skill-name> run
-```
-
-Executes code blocks on Databricks or locally (depends on SKILLS, MCP, etc.) and reports pass/fail for each test in `ground_truth.yaml`.
-
-**Note:** Requires test cases in ground_truth.yaml (from steps 2-3).
-
-### 6. MLflow Evaluation (Optional)
-
-```
-/skill-test <skill-name> mlflow
-```
-
-Runs full evaluation with LLM judges and logs results to MLflow. Provides deeper quality assessment beyond pass/fail execution.
-
-### 7. Save Baseline
-
-```
-/skill-test <skill-name> baseline
-```
-
-Saves current metrics to `baselines/<skill-name>/baseline.yaml`.
-
-### 8. Check Regressions
-
-After skill changes:
-```
-/skill-test <skill-name> regression
-```
-
-Compares current pass rate against the saved baseline.
-
----
-
-## Trace Evaluation (In Progress)
-
-Capture Claude Code sessions and evaluate against skill expectations.
-
-### Enable MLflow Tracing
+### 1. Install dependencies
 
 ```bash
-export DATABRICKS_CONFIG_PROFILE=aws-apps
-export MLFLOW_EXPERIMENT_NAME="/Users/<your-email>/Claude Code Skill Traces"
+# Core + optimization
+uv pip install -e ".test/[all]"
 
-pip install mlflow[databricks]
-mlflow autolog claude -u databricks -n "$MLFLOW_EXPERIMENT_NAME" .
-```
-
-### Evaluate Traces
-
-**Local trace file:**
-```
-/skill-test <skill-name> trace-eval --trace ~/.claude/projects/.../session.jsonl
+# Agent evaluation only (optional)
+uv pip install -e ".test/[agent]"
 ```
 
-**From MLflow run ID** (from `mlflow.search_runs`):
-```
-/skill-test <skill-name> trace-eval --run-id abc123
+### 2. Configure authentication
+
+Pick one authentication method for the LLM endpoints used by the evaluator (generation, judging, reflection):
+
+**Databricks AI Gateway (recommended)**
+
+```bash
+export DATABRICKS_API_KEY="dapi..."
+export DATABRICKS_API_BASE="https://<account-id>.ai-gateway.cloud.databricks.com/mlflow/v1/serving-endpoints"
+# MLflow judges and litellm read OPENAI_API_KEY for auth
+export OPENAI_API_KEY="$DATABRICKS_API_KEY"
 ```
 
-**From MLflow trace ID** (from `mlflow.get_trace`):
-```
-/skill-test <skill-name> trace-eval --trace-id tr-d416fccdab46e2dea6bad1d0bd8aaaa8
+**Databricks direct**
+
+```bash
+export DATABRICKS_API_KEY="dapi..."
+export DATABRICKS_API_BASE="https://<workspace>.cloud.databricks.com/serving-endpoints"
 ```
 
-**List available traces:**
-```
-/skill-test <skill-name> list-traces --local
-/skill-test <skill-name> list-traces --experiment "$MLFLOW_EXPERIMENT_NAME"
+**OpenAI**
+
+```bash
+export OPENAI_API_KEY="sk-..."
+export GEPA_REFLECTION_LM="openai/gpt-4o"
+export GEPA_GEN_LM="openai/gpt-4o"
 ```
 
-### Configure Expectations
+### 3. Configure the Claude Code agent (for `--agent-eval`)
 
-In `manifest.yaml`:
+Agent evaluation runs a real Claude Code instance via the [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python). The agent's environment is configured in `.test/claude_agent_settings.json`:
+
+```json
+{
+    "env": {
+        "ANTHROPIC_MODEL": "databricks-claude-opus-4-6",
+        "ANTHROPIC_BASE_URL": "https://<account-id>.ai-gateway.cloud.databricks.com/anthropic",
+        "ANTHROPIC_AUTH_TOKEN": "${DATABRICKS_TOKEN:-dapi...}",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "databricks-claude-opus-4-6",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "databricks-claude-sonnet-4-6",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "databricks-claude-haiku-4-5",
+        "ANTHROPIC_CUSTOM_HEADERS": "x-databricks-use-coding-agent-mode: true",
+        "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1",
+        "DATABRICKS_CONFIG_PROFILE": "${DATABRICKS_CONFIG_PROFILE:-e2-demo-field-eng}",
+        "DATABRICKS_API_KEY": "${DATABRICKS_TOKEN:-dapi...}"
+    }
+}
+```
+
+| Field | Purpose |
+|-------|---------|
+| `ANTHROPIC_MODEL` | Default model the agent uses |
+| `ANTHROPIC_BASE_URL` | Claude API endpoint (Databricks AI Gateway or direct) |
+| `ANTHROPIC_AUTH_TOKEN` | Auth token — supports `${VAR:-default}` interpolation |
+| `ANTHROPIC_CUSTOM_HEADERS` | Extra headers (e.g., coding agent mode for Databricks) |
+| `DATABRICKS_CONFIG_PROFILE` | Databricks CLI profile for MCP tools |
+| `DATABRICKS_API_KEY` | Databricks token for MCP tool calls |
+
+The `${VAR:-default}` syntax lets you reference environment variables with fallbacks. The agent runs with `bypassPermissions` mode so it doesn't prompt for tool approval.
+
+---
+
+## Quick Start
+
+```bash
+# Check baseline scores (no optimization)
+uv run python .test/scripts/optimize.py databricks-metric-views --dry-run
+
+# Optimize with a quick pass (15 iterations)
+uv run python .test/scripts/optimize.py databricks-metric-views --preset quick
+
+# Optimize and immediately apply
+uv run python .test/scripts/optimize.py databricks-metric-views --preset quick --apply
+
+# Review a previous run's output, then apply
+diff databricks-skills/databricks-metric-views/SKILL.md \
+     .test/skills/databricks-metric-views/optimized_SKILL.md
+uv run python .test/scripts/optimize.py databricks-metric-views --apply-last
+```
+
+### With agent evaluation
+
+```bash
+# Hybrid: agent for baseline + validation, proxy for GEPA iterations
+uv run python .test/scripts/optimize.py databricks-metric-views --agent-eval --preset quick
+
+# Dry run with agent baseline scoring
+uv run python .test/scripts/optimize.py databricks-metric-views --agent-eval --dry-run
+
+# Full agent mode (agent for ALL iterations — slow but most accurate)
+uv run python .test/scripts/optimize.py databricks-metric-views --agent-eval-full --preset quick
+```
+
+### With MLflow assessment feedback
+
+```bash
+# Inject real-world behavioral feedback from an MLflow experiment
+uv run python .test/scripts/optimize.py databricks-metric-views \
+    --mlflow-assessments <EXPERIMENT_ID> --preset quick
+```
+
+### Tool optimization
+
+`--tools-only` runs a single global optimization pass using a cross-skill dataset. No per-skill loop is needed — tool descriptions are shared across all skills.
+
+```bash
+# Optimize all tool descriptions (single global pass)
+uv run python .test/scripts/optimize.py --tools-only --preset quick
+
+# Optimize specific tool modules only
+uv run python .test/scripts/optimize.py --tools-only --tool-modules sql serving --preset quick
+
+# Limit tasks per skill (useful with --agent-eval to reduce cost)
+uv run python .test/scripts/optimize.py --tools-only --tool-modules sql --max-per-skill 2 --preset quick
+
+# Dry run — score baseline without optimizing
+uv run python .test/scripts/optimize.py --tools-only --preset quick --dry-run
+
+# --all is accepted but has no effect (tools-only always runs a single pass)
+uv run python .test/scripts/optimize.py --tools-only --all --preset quick
+
+# Co-optimize skill + tool descriptions (per-skill, not global)
+uv run python .test/scripts/optimize.py databricks-metric-views --include-tools \
+    --tool-modules sql --preset quick
+```
+
+#### Cross-skill dataset filtering with `--tool-modules`
+
+When `--tool-modules` is specified, both tool stats and the cross-skill dataset are filtered:
+
+- **Tool stats** report only the requested modules (e.g., `Tool modules: 1, tools: 5` for `--tool-modules sql`).
+- **Cross-skill dataset** includes only skills whose `tool_modules` in `manifest.yaml` overlap with the requested modules. Skills that *don't declare* `tool_modules` are always included as a safe fallback (e.g., `databricks-config`, `databricks-docs`). This means the dataset won't shrink to *only* SQL skills — general-purpose skills without the field are kept so the evaluator still has broad coverage.
+
+To reduce the dataset further, add `tool_modules` to any remaining skills that should be excluded for certain module filters. Without `--tool-modules`, all skills are included regardless (no regression).
+
+### Optimize all skills
+
+```bash
+uv run python .test/scripts/optimize.py --all --preset quick
+```
+
+---
+
+## CLI Reference
+
+```
+uv run python .test/scripts/optimize.py <skill_name> [options]
+```
+
+### Core Options
+
+| Flag | Description |
+|------|-------------|
+| `--preset quick\|standard\|thorough` | Optimization budget: 15 / 50 / 150 iterations per pass (default: `standard`) |
+| `--dry-run` | Score baseline without optimizing |
+| `--apply` | Optimize and immediately apply the result |
+| `--apply-last` | Apply a previously saved result without re-running |
+| `--all` | Optimize all skills that have `ground_truth.yaml` |
+| `--max-passes N` | Max optimization passes (default: 5). Early stops if improvement < 0.0005 |
+| `--max-metric-calls N` | Override auto-scaled metric calls per pass |
+| `--token-budget N` | Hard token ceiling — candidates over this are penalized |
+| `--run-dir DIR` | Checkpoint directory. Resumes from last state if dir exists |
+
+### Model Selection
+
+| Flag | Env Var | Default | Purpose |
+|------|---------|---------|---------|
+| `--gen-model` | `GEPA_GEN_LM` | `databricks/databricks-claude-sonnet-4-6` | Generates responses in proxy evaluator |
+| `--reflection-lm` | `GEPA_REFLECTION_LM` | `databricks/databricks-claude-opus-4-6` | GEPA's reflection/mutation model |
+| `--judge-model` | `GEPA_JUDGE_LM` | `databricks/databricks-claude-sonnet-4-6` | MLflow quality/regression judges |
+
+Proxy evaluator models use [litellm provider prefixes](https://docs.litellm.ai/docs/providers): `databricks/`, `openai/`, `anthropic/`.
+
+### Tool Optimization
+
+| Flag | Description |
+|------|-------------|
+| `--include-tools` | Include MCP tool docstrings as GEPA components alongside SKILL.md |
+| `--tools-only` | Optimize only tool descriptions in a single global pass (no per-skill loop) |
+| `--tool-modules sql serving ...` | Limit which tool modules are optimized (default: all) |
+| `--max-per-skill N` | Max tasks per skill in the cross-skill dataset for `--tools-only` (default: 5) |
+
+Available modules: `agent_bricks`, `aibi_dashboards`, `apps`, `compute`, `file`, `genie`, `jobs`, `lakebase`, `manifest`, `pipelines`, `serving`, `sql`, `unity_catalog`, `user`, `vector_search`, `volume_files`
+
+### Agent Evaluation
+
+| Flag | Description |
+|------|-------------|
+| `--agent-eval` | Hybrid mode: real agent for baseline + validation, proxy for GEPA |
+| `--agent-eval-full` | Real agent for ALL GEPA iterations (slow but most accurate) |
+| `--agent-model MODEL` | Model for agent (default: `ANTHROPIC_MODEL` env var) |
+| `--agent-timeout N` | Timeout per agent run in seconds (default: 300) |
+| `--mlflow-experiment NAME` | MLflow experiment for agent traces (default: `/Shared/skill-tests`) |
+
+### MLflow Feedback
+
+| Flag | Description |
+|------|-------------|
+| `--mlflow-assessments EXPERIMENT_ID` | Fetch `ToolCallCorrectness` / `ToolCallEfficiency` assessments from an MLflow experiment and inject them into GEPA's reflection context |
+
+### Test Case Generation
+
+| Flag | Description |
+|------|-------------|
+| `--generate-from FILE` | Generate test cases from a requirements file before optimizing |
+| `--requirement "..."` | Inline requirement (repeatable) |
+
+---
+
+## Writing Test Cases
+
+Test cases live at `.test/skills/<skill-name>/ground_truth.yaml`. Each test case defines what the skill should teach.
+
 ```yaml
-scorers:
-  trace_expectations:
-    tool_limits:
-      Bash: 15
-      mcp__databricks__execute_sql: 10
-    token_budget:
-      max_total: 150000
-    required_tools:
-      - Read
-    banned_tools:
-      - "DROP DATABASE"
-```
+metadata:
+  skill_name: databricks-metric-views
+  version: "1.0"
 
----
-
-## Command Reference
-
-| Command | Description |
-|---------|-------------|
-| `run` | Execute tests against ground truth (default) |
-| `init` | Generate test scaffolding from skill docs |
-| `add` | Add test cases interactively |
-| `review` | Review and promote candidates |
-| `baseline` | Save current results as baseline |
-| `regression` | Compare against baseline |
-| `mlflow` | Full evaluation with LLM judges |
-| `trace-eval` | Evaluate session traces |
-| `list-traces` | List available traces |
-| `scorers` | View/update scorer config |
-
----
-
-## Files
-
-```
-.test/skills/<skill-name>/
-├── manifest.yaml       # Scorers, guidelines, trace expectations
-├── ground_truth.yaml   # Verified test cases
-└── candidates.yaml     # Pending review
-
-.test/baselines/<skill-name>/
-└── baseline.yaml       # Regression baseline
-```
-
----
-
-## Test Case Format
-
-```yaml
 test_cases:
-  - id: "eval_basic_001"
+  - id: metric-views_create_sql_001
     inputs:
-      prompt: "Create a scorer for response length"
+      prompt: "Create a metric view for order analytics with revenue measures"
     outputs:
-      response: |
-        ```python
-        @scorer
-        def response_length(outputs):
-            return Feedback(name="length", value=len(outputs["response"]))
+      response: |  # Optional reference answer (not exact-matched)
+        ```sql
+        CREATE OR REPLACE VIEW main.default.order_metrics
+        WITH METRICS LANGUAGE YAML
+        $$
+        source: main.default.orders
+        measures:
+          - name: Total Revenue
+            expr: SUM(amount)
+        $$
         ```
-      execution_success: true
     expectations:
-      expected_facts: ["@scorer", "Feedback"]
-      guidelines: ["Must use mlflow.genai.scorers"]
+      expected_facts:
+        - "Uses CREATE OR REPLACE VIEW with WITH METRICS LANGUAGE YAML"
+        - "Defines measures with name and expr using aggregate functions"
+      expected_patterns:
+        - pattern: "WITH METRICS LANGUAGE YAML"
+          description: "Metric view DDL syntax"
+        - pattern: "MEASURE\\("
+          description: "MEASURE() function for querying"
+      guidelines:
+        - "Must use WITH METRICS LANGUAGE YAML syntax"
+      trace_expectations:  # Only used with --agent-eval
+        required_tools:
+          - mcp__databricks__execute_sql
+        banned_tools:
+          - Bash
+        tool_limits:
+          mcp__databricks__execute_sql: 3
+    metadata:
+      category: happy_path  # Used for stratified train/val splitting
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `inputs.prompt` | Yes | The user question |
+| `expectations.expected_facts` | Yes | Facts the response must contain (checked by quality judge) |
+| `expectations.expected_patterns` | No | Regex patterns checked deterministically |
+| `expectations.guidelines` | No | Soft rules for the quality judge |
+| `expectations.trace_expectations` | No | Agent behavioral validation (only with `--agent-eval`) |
+| `outputs.response` | No | Reference answer for judge comparison |
+| `metadata.category` | Recommended | Stratified splitting (5+ test cases enables train/val split) |
+
+### `manifest.yaml` — Scorer configuration
+
+```yaml
+skill_name: databricks-metric-views
+tool_modules: [sql]  # Optional: MCP tool modules this skill uses
+
+scorers:
+  enabled: [sql_syntax, pattern_adherence, expected_facts_present]
+  llm_scorers: [Safety, guidelines_from_expectations]
+  default_guidelines:
+    - "Responses must use Databricks-specific syntax"
+
+quality_gates:
+  syntax_valid: 1.0
+  pattern_adherence: 0.9
+```
+
+The `tool_modules` field lists which MCP tool modules are relevant to the skill. When `--tools-only --tool-modules` is used, only skills whose `tool_modules` overlap with the requested modules are included in the cross-skill dataset. Behavior by value:
+
+- **`tool_modules: [sql, compute]`** — included when `--tool-modules` contains `sql` or `compute`
+- **`tool_modules: []`** — excluded from all `--tool-modules` filtered runs (no MCP tool dependency)
+- **Field omitted** — always included (backward compatible fallback)
+
+Without `--tool-modules`, all skills are included regardless. Available modules: `agent_bricks`, `aibi_dashboards`, `apps`, `compute`, `file`, `genie`, `jobs`, `lakebase`, `manifest`, `pipelines`, `serving`, `sql`, `unity_catalog`, `user`, `vector_search`, `volume_files`, `workspace`.
+
+---
+
+## Project Structure
+
+```
+.test/
+├── scripts/
+│   └── optimize.py              # CLI entry point
+├── claude_agent_settings.json   # Claude Code agent environment config
+├── src/skill_test/
+│   ├── agent/
+│   │   └── executor.py          # Claude Agent SDK wrapper + MLflow tracing
+│   └── optimize/
+│       ├── runner.py            # Multi-pass GEPA orchestrator
+│       ├── skillbench_evaluator.py  # Fast proxy evaluator (WITH vs WITHOUT)
+│       ├── agent_evaluator.py   # Real Claude Code agent evaluator
+│       ├── assessment_fetcher.py # MLflow assessment injection
+│       ├── judges.py            # MLflow judge factories + fallback chain
+│       ├── config.py            # Presets, model registration
+│       ├── splitter.py          # Train/val dataset splitting
+│       ├── tools.py             # MCP tool description extraction
+│       └── utils.py             # Token counting, path resolution
+└── skills/<skill-name>/
+    ├── ground_truth.yaml        # Test cases
+    ├── manifest.yaml            # Scorer configuration
+    ├── optimized_SKILL.md       # Last optimization output
+    └── last_optimization.json   # Metadata for --apply-last
 ```
 
 ---
 
-## CI/CD
+## Troubleshooting
 
+**MLflow evaluation hangs**: Run with debug logging:
 ```bash
-uv pip install -e ".test/"
-uv run pytest .test/tests/
-uv run python .test/scripts/regression.py <skill-name>
+MLFLOW_LOG_LEVEL=DEBUG uv run python .test/scripts/mlflow_eval.py <skill-name>
+```
+
+**Rate limits**: The framework automatically falls back through alternative models (GPT-5-2, Gemini-3-1-Pro, Claude Opus 4.5, etc.) with exponential backoff when rate-limited.
+
+**Agent eval fails**: Check that `.test/claude_agent_settings.json` has valid credentials and the model endpoint is accessible. The agent runs with a 300s default timeout — increase with `--agent-timeout`.
+
+**Resuming interrupted runs**: Use `--run-dir` for checkpointing:
+```bash
+# Start with checkpointing
+uv run python .test/scripts/optimize.py databricks-metric-views --preset standard --run-dir ./opt_runs/mv
+
+# Resume after interruption (same command)
+uv run python .test/scripts/optimize.py databricks-metric-views --preset standard --run-dir ./opt_runs/mv
+
+# Graceful stop mid-pass
+touch ./opt_runs/mv/pass_1/gepa.stop
 ```

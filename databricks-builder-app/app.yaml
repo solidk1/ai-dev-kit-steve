@@ -55,6 +55,8 @@ env:
     value: "steve-pg-provisioned"
   - name: LAKEBASE_DATABASE_NAME
     value: "databricks_postgres"
+  - name: LAKEBASE_SCHEMA_NAME
+    value: "builder_app"
   
   # =============================================================================
   # LLM Provider Configuration

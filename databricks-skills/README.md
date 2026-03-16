@@ -36,6 +36,7 @@ cp -r ai-dev-kit/databricks-skills/databricks-agent-bricks .claude/skills/
 - **databricks-agent-bricks** - Knowledge Assistants, Genie Spaces, Supervisor Agents
 - **databricks-genie** - Genie Spaces: create, curate, and query via Conversation API
 - **databricks-model-serving** - Deploy MLflow models and AI agents to endpoints
+- **databricks-parsing** - Parse documents (PDF, DOCX, images) with ai_parse_document for custom RAG pipelines
 - **databricks-unstructured-pdf-generation** - Generate synthetic PDFs for RAG
 - **databricks-vector-search** - Vector similarity search for RAG and semantic search
 
@@ -57,7 +58,7 @@ cp -r ai-dev-kit/databricks-skills/databricks-agent-bricks .claude/skills/
 - **databricks-iceberg** - Apache Iceberg tables (Managed/Foreign), UniForm, Iceberg REST Catalog, Iceberg Clients Interoperability
 - **databricks-spark-declarative-pipelines** - SDP (formerly DLT) in SQL/Python
 - **databricks-jobs** - Multi-task workflows, triggers, schedules
-- **databricks-synthetic-data-generation** - Realistic test data with Faker
+- **databricks-synthetic-data-gen** - Realistic test data with Faker
 
 ### 🚀 Development & Deployment
 - **databricks-asset-bundles** - DABs for multi-environment deployments

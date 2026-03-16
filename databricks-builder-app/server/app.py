@@ -1,4 +1,6 @@
 """FastAPI app for the Claude Code MCP application."""
+
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -21,7 +23,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.cors import CORSMiddleware
 
 from .db import is_postgres_configured, is_dynamic_token_mode, run_migrations, init_database, start_token_refresh, stop_token_refresh
-from .routers import agent_router, anthropic_proxy_router, clusters_router, config_router, conversations_router, files_router, personal_workspace_router, projects_router, skills_router, warehouses_router
+from .routers import agent_router, clusters_router, config_router, conversations_router, projects_router, skills_router, warehouses_router
 from .services.backup_manager import start_backup_worker, stop_backup_worker
 from .services.skills_manager import copy_skills_to_app
 
@@ -57,9 +59,8 @@ async def lifespan(app: FastAPI):
       if is_dynamic_token_mode():
         await start_token_refresh()
 
-      # Run migrations synchronously during startup so schema is ready before
-      # serving requests. Deployment also runs migrations explicitly.
-      run_migrations()
+      # Run migrations in background thread (non-blocking)
+      asyncio.create_task(asyncio.to_thread(run_migrations))
 
       # Start backup worker
       start_backup_worker()
@@ -117,15 +118,12 @@ app.add_middleware(
 API_PREFIX = '/api'
 
 # Include routers
-app.include_router(anthropic_proxy_router, prefix='/anthropic-proxy', tags=['anthropic-proxy'])
 app.include_router(config_router, prefix=f'{API_PREFIX}/config', tags=['configuration'])
 app.include_router(clusters_router, prefix=API_PREFIX, tags=['clusters'])
 app.include_router(warehouses_router, prefix=API_PREFIX, tags=['warehouses'])
 app.include_router(projects_router, prefix=API_PREFIX, tags=['projects'])
 app.include_router(conversations_router, prefix=API_PREFIX, tags=['conversations'])
 app.include_router(agent_router, prefix=API_PREFIX, tags=['agent'])
-app.include_router(files_router, prefix=API_PREFIX, tags=['files'])
-app.include_router(personal_workspace_router, prefix=API_PREFIX, tags=['personal-workspace'])
 app.include_router(skills_router, prefix=API_PREFIX, tags=['skills'])
 
 # Production: Serve Vite static build

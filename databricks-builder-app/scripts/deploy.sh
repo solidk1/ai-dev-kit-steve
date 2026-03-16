@@ -269,6 +269,40 @@ if [ -n "${LAKEBASE_PG_URL:-}" ] || [ -n "${LAKEBASE_INSTANCE_NAME:-}" ]; then
     exit 1
   fi
   echo -e "  ${GREEN}✓${NC} Database migrations applied"
+
+  # Grant the app's service principal permissions on all tables.
+  # Migrations run as the deploying user who owns the tables, but the app
+  # connects as its SP at runtime and needs explicit grants.
+  if [ -n "${LAKEBASE_PG_URL:-}" ]; then
+    export APP_NAME_FOR_GRANT="${APP_NAME}"
+    python3 - <<'GRANT_PY'
+import os, psycopg
+
+url = os.environ["LAKEBASE_PG_URL"]
+app_name = os.environ["APP_NAME_FOR_GRANT"]
+
+try:
+    from databricks.sdk import WorkspaceClient
+    w = WorkspaceClient()
+    app = w.apps.get(app_name)
+    sp_role = app.service_principal_client_id
+    if not sp_role:
+        raise SystemExit(0)
+
+    conn = psycopg.connect(url, autocommit=True)
+    cur = conn.cursor()
+    cur.execute(f'GRANT USAGE ON SCHEMA public TO "{sp_role}"')
+    cur.execute(f'GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO "{sp_role}"')
+    cur.execute(f'GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO "{sp_role}"')
+    cur.execute(f'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON TABLES TO "{sp_role}"')
+    cur.execute(f'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON SEQUENCES TO "{sp_role}"')
+    cur.close()
+    conn.close()
+    print(f"  \033[0;32m✓\033[0m Granted SP ({sp_role[:8]}...) database permissions")
+except Exception as e:
+    print(f"  \033[1;33mWarning: Could not grant SP permissions: {e}\033[0m")
+GRANT_PY
+  fi
 else
   echo -e "  ${YELLOW}Warning: No Lakebase configuration found in env or app.yaml; skipping migrations${NC}"
 fi
@@ -310,6 +344,11 @@ echo "  Copying server code..."
 cp -r server "$STAGING_DIR/"
 cp app.yaml "$STAGING_DIR/"
 cp requirements.txt "$STAGING_DIR/"
+cp alembic.ini "$STAGING_DIR/"
+cp -r alembic "$STAGING_DIR/"
+
+# Copy Alembic migrations
+echo "  Copying Alembic migrations..."
 cp alembic.ini "$STAGING_DIR/"
 cp -r alembic "$STAGING_DIR/"
 
