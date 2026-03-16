@@ -401,7 +401,7 @@ def optimize_skill(
     agent_baseline_si = None
 
     if agent_eval or agent_eval_full:
-        from .agent_evaluator import create_agent_evaluator, build_agent_eval_background
+        from .agent_evaluator import create_agent_evaluator
 
         print("Agent evaluation: ENABLED")
         agent_evaluator = create_agent_evaluator(
