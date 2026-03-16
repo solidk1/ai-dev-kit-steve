@@ -9,6 +9,10 @@ export interface UserInfo {
   lakebase_configured: boolean;
   lakebase_project_id: string | null;
   lakebase_error: string | null;
+  app_name: string | null;
+  app_version: string | null;
+  model: string | null;
+  model_mini: string | null;
 }
 
 /** Project from API (projects list/detail) */
@@ -18,6 +22,8 @@ export interface Project {
   user_email: string;
   created_at: string | null;
   conversation_count: number;
+  custom_system_prompt: string | null;
+  claude_md: string | null;
 }
 
 /** Conversation summary (list) or full (detail with messages) */
@@ -44,6 +50,12 @@ export interface Message {
   content: string;
   timestamp: string | null;
   is_error: boolean;
+  duration_ms?: number | null;
+  num_turns?: number | null;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  cache_read_tokens?: number | null;
+  cache_creation_tokens?: number | null;
 }
 
 /** Databricks cluster from GET /api/clusters */
@@ -76,6 +88,36 @@ export interface AvailableSkill {
   name: string;
   description: string;
   enabled: boolean;
+}
+
+/** Personal skill from GET /api/personal/skills */
+export interface PersonalSkill {
+  name: string;
+  description: string;
+  workspace_path: string;
+}
+
+/** MCP tool descriptor from GET /api/mcp/tools */
+export interface McpToolDescriptor {
+  server: string;
+  name: string;
+  description: string;
+  arguments: Record<string, unknown>;
+  output_schema?: Record<string, unknown> | null;
+}
+
+/** Per-user saved settings from GET /api/settings */
+export interface UserSettings {
+  user: string;
+  workspace_url: string | null;
+  server_model: string | null;
+  server_model_mini: string | null;
+  default_catalog: string | null;
+  default_schema: string | null;
+  workspace_folder: string | null;
+  model: string | null;
+  model_mini: string | null;
+  databricks_pat: string | null;
 }
 
 /** Active or recent execution from GET .../executions */
