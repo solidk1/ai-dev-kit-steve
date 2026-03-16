@@ -835,15 +835,18 @@ export default function ProjectPage() {
             conversationId = newConvId;
             // Update streamingConvIds from old key to new key
             setStreamingConvIds(prev => prev.filter(id => id !== oldKey).concat(newConvId));
-            // Set currentConversation immediately so UI stays consistent
-            setCurrentConversation((prev) => prev ?? {
-              id: newConvId,
-              project_id: projectId,
-              title: 'New Chat',
-              created_at: new Date().toISOString(),
-              conversation_count: 0,
-            } as unknown as Conversation);
-            currentConvIdRef.current = newConvId;
+            // Only bind UI to the newly-created conversation when the user
+            // is still viewing the conversation that initiated this run.
+            if (currentConvIdRef.current === oldKey || !currentConvIdRef.current) {
+              setCurrentConversation((prev) => prev ?? {
+                id: newConvId,
+                project_id: projectId,
+                title: 'New Chat',
+                created_at: new Date().toISOString(),
+                conversation_count: 0,
+              } as unknown as Conversation);
+              currentConvIdRef.current = newConvId;
+            }
             fetchConversations(projectId).then(setConversations);
           } else if (type === 'text_delta') {
             const text = event.text as string;
