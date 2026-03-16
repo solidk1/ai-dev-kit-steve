@@ -189,15 +189,9 @@ class AgentEvaluator:
         )
 
         # --- Field-based judges (fallback — when mlflow_trace is None) ---
-        self._field_correctness_judge = create_correctness_judge(
-            skill_guidelines, judge_model=judge_model
-        )
-        self._field_completeness_judge = create_completeness_judge(
-            judge_model=judge_model
-        )
-        self._field_guideline_judge = create_guideline_adherence_judge(
-            skill_guidelines, judge_model=judge_model
-        )
+        self._field_correctness_judge = create_correctness_judge(skill_guidelines, judge_model=judge_model)
+        self._field_completeness_judge = create_completeness_judge(judge_model=judge_model)
+        self._field_guideline_judge = create_guideline_adherence_judge(skill_guidelines, judge_model=judge_model)
 
         self._regression_judge = create_regression_judge(judge_model=judge_model)
 
@@ -300,8 +294,7 @@ class AgentEvaluator:
         facts_str = "\n".join(f"- {f}" for f in facts) if facts else "None specified"
         patterns_str = (
             "\n".join(
-                f"- {p}" if isinstance(p, str) else f"- {p.get('description', p.get('pattern', ''))}"
-                for p in patterns
+                f"- {p}" if isinstance(p, str) else f"- {p.get('description', p.get('pattern', ''))}" for p in patterns
             )
             if patterns
             else "None specified"
@@ -321,8 +314,12 @@ class AgentEvaluator:
         # Circuit breaker: after first failure, skip trace judges entirely
         # to avoid wasting API calls on a model that can't handle them.
         def _judge_with_fallback(
-            trace_judge, field_judge, *,
-            mlflow_trace, response_text, judge_name,
+            trace_judge,
+            field_judge,
+            *,
+            mlflow_trace,
+            response_text,
+            judge_name,
         ) -> JudgeFeedback:
             """Try trace-based judge, fall back to field-based on failure."""
             with self._cache_lock:
@@ -357,7 +354,8 @@ class AgentEvaluator:
 
         # Correctness: WITH + WITHOUT (WITHOUT cached)
         correctness_with_fb = _judge_with_fallback(
-            self._trace_correctness_judge, self._field_correctness_judge,
+            self._trace_correctness_judge,
+            self._field_correctness_judge,
             mlflow_trace=with_result.mlflow_trace,
             response_text=with_response,
             judge_name="correctness_with",
@@ -366,7 +364,8 @@ class AgentEvaluator:
             need_correctness_baseline = baseline_key not in self._baseline_correctness_cache
         if need_correctness_baseline:
             fb = _judge_with_fallback(
-                self._trace_correctness_judge, self._field_correctness_judge,
+                self._trace_correctness_judge,
+                self._field_correctness_judge,
                 mlflow_trace=without_mlflow_trace,
                 response_text=without_response,
                 judge_name="correctness_without",
@@ -379,7 +378,8 @@ class AgentEvaluator:
 
         # Completeness: WITH + WITHOUT (WITHOUT cached)
         completeness_with_fb = _judge_with_fallback(
-            self._trace_completeness_judge, self._field_completeness_judge,
+            self._trace_completeness_judge,
+            self._field_completeness_judge,
             mlflow_trace=with_result.mlflow_trace,
             response_text=with_response,
             judge_name="completeness_with",
@@ -388,7 +388,8 @@ class AgentEvaluator:
             need_completeness_baseline = baseline_key not in self._baseline_completeness_cache
         if need_completeness_baseline:
             fb = _judge_with_fallback(
-                self._trace_completeness_judge, self._field_completeness_judge,
+                self._trace_completeness_judge,
+                self._field_completeness_judge,
                 mlflow_trace=without_mlflow_trace,
                 response_text=without_response,
                 judge_name="completeness_without",
@@ -401,7 +402,8 @@ class AgentEvaluator:
 
         # Guideline adherence: WITH only
         guideline_adherence_fb = _judge_with_fallback(
-            self._trace_guideline_judge, self._field_guideline_judge,
+            self._trace_guideline_judge,
+            self._field_guideline_judge,
             mlflow_trace=with_result.mlflow_trace,
             response_text=with_response,
             judge_name="guideline_adherence",
@@ -481,16 +483,20 @@ class AgentEvaluator:
         quality_composite = (correctness_with + completeness_with + guideline_adherence_score) / 3.0
         assertion_coverage = 0.5 * fact_score + 0.5 * pattern_score
 
-        final_score = max(0.0, min(1.0,
-            0.25 * effectiveness_delta
-            + 0.20 * correctness_with
-            + 0.15 * completeness_with
-            + 0.15 * guideline_adherence_score
-            + 0.10 * assertion_coverage
-            + 0.05 * execution_success
-            + 0.05 * token_efficiency
-            - 0.05 * regression_penalty
-        ))
+        final_score = max(
+            0.0,
+            min(
+                1.0,
+                0.25 * effectiveness_delta
+                + 0.20 * correctness_with
+                + 0.15 * completeness_with
+                + 0.15 * guideline_adherence_score
+                + 0.10 * assertion_coverage
+                + 0.05 * execution_success
+                + 0.05 * token_efficiency
+                - 0.05 * regression_penalty,
+            ),
+        )
 
         # Build rich side_info for GEPA reflection
         side_info: dict[str, Any] = {}

@@ -197,8 +197,7 @@ def _load_mcp_config() -> dict[str, Any]:
                 resolved_cfg[key] = val.replace("${CLAUDE_PLUGIN_ROOT}", str(repo_root))
             elif isinstance(val, list):
                 resolved_cfg[key] = [
-                    v.replace("${CLAUDE_PLUGIN_ROOT}", str(repo_root)) if isinstance(v, str) else v
-                    for v in val
+                    v.replace("${CLAUDE_PLUGIN_ROOT}", str(repo_root)) if isinstance(v, str) else v for v in val
                 ]
             else:
                 resolved_cfg[key] = val

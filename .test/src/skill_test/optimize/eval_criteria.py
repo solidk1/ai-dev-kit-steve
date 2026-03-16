@@ -92,11 +92,7 @@ class EvalCriteriaSet:
 
         Criteria with empty ``applies_to`` are always included (general-purpose).
         """
-        filtered = [
-            s
-            for s in self.skills
-            if not s.applies_to or any(m in s.applies_to for m in tool_modules)
-        ]
+        filtered = [s for s in self.skills if not s.applies_to or any(m in s.applies_to for m in tool_modules)]
         result = EvalCriteriaSet.__new__(EvalCriteriaSet)
         result.skills = filtered
         result._by_name = {s.name: s for s in filtered}
@@ -134,8 +130,7 @@ class EvalCriteriaSet:
             lines.append(f"- **{s.name}**: {s.description}")
         lines.append("")
         lines.append(
-            "Use the read_eval_criteria tool to load relevant criteria. "
-            "Use read_eval_reference for detailed rubrics."
+            "Use the read_eval_criteria tool to load relevant criteria. Use read_eval_reference for detailed rubrics."
         )
         return "\n".join(lines)
 
@@ -184,9 +179,7 @@ def discover_eval_criteria(
     if not base.is_dir():
         logger.debug("Eval criteria directory not found: %s", base)
         return EvalCriteriaSet([])
-    paths = sorted(
-        d for d in base.iterdir() if d.is_dir() and (d / "SKILL.md").exists()
-    )
+    paths = sorted(d for d in base.iterdir() if d.is_dir() and (d / "SKILL.md").exists())
     if paths:
         logger.info(
             "Discovered %d eval criteria: %s",

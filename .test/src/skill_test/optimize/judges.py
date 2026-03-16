@@ -87,6 +87,7 @@ def _is_rate_limit_error(exc: Exception) -> bool:
 # AI Gateway support
 # ---------------------------------------------------------------------------
 
+
 def _get_gateway_base_url() -> str | None:
     """Return the AI Gateway base URL if configured, else None.
 
@@ -803,25 +804,15 @@ def create_trace_correctness_judge(
             CLI flag, ``GEPA_JUDGE_LM`` env var, or default.
     """
     criteria_block = eval_criteria.to_prompt(judge_model) if eval_criteria else ""
-    instructions = (
-        _TRACE_CORRECTNESS_INSTRUCTIONS_PREFIX
-        + criteria_block
-        + _TRACE_CORRECTNESS_INSTRUCTIONS_BODY
-    )
+    instructions = _TRACE_CORRECTNESS_INSTRUCTIONS_PREFIX + criteria_block + _TRACE_CORRECTNESS_INSTRUCTIONS_BODY
 
     if skill_guidelines:
-        filtered = [
-            g
-            for g in skill_guidelines
-            if any(kw in g.lower() for kw in _CORRECTNESS_KEYWORDS)
-        ]
+        filtered = [g for g in skill_guidelines if any(kw in g.lower() for kw in _CORRECTNESS_KEYWORDS)]
         if filtered:
             principles = "\n".join(f"- {g}" for g in filtered)
             instructions += f"\n\n## Domain Correctness Principles\n{principles}\n"
 
-    model_uri, inference_params = _to_judge_model_and_params(
-        judge_model or DEFAULT_JUDGE_LM
-    )
+    model_uri, inference_params = _to_judge_model_and_params(judge_model or DEFAULT_JUDGE_LM)
     return make_judge(
         name="trace_correctness",
         model=model_uri,
@@ -844,15 +835,9 @@ def create_trace_completeness_judge(
         judge_model: LLM model for the judge.
     """
     criteria_block = eval_criteria.to_prompt(judge_model) if eval_criteria else ""
-    instructions = (
-        _TRACE_COMPLETENESS_INSTRUCTIONS_PREFIX
-        + criteria_block
-        + _TRACE_COMPLETENESS_INSTRUCTIONS_BODY
-    )
+    instructions = _TRACE_COMPLETENESS_INSTRUCTIONS_PREFIX + criteria_block + _TRACE_COMPLETENESS_INSTRUCTIONS_BODY
 
-    model_uri, inference_params = _to_judge_model_and_params(
-        judge_model or DEFAULT_JUDGE_LM
-    )
+    model_uri, inference_params = _to_judge_model_and_params(judge_model or DEFAULT_JUDGE_LM)
     return make_judge(
         name="trace_completeness",
         model=model_uri,
@@ -879,19 +864,13 @@ def create_trace_guideline_judge(
         judge_model: LLM model for the judge.
     """
     criteria_block = eval_criteria.to_prompt(judge_model) if eval_criteria else ""
-    instructions = (
-        _TRACE_GUIDELINE_INSTRUCTIONS_PREFIX
-        + criteria_block
-        + _TRACE_GUIDELINE_INSTRUCTIONS_BODY
-    )
+    instructions = _TRACE_GUIDELINE_INSTRUCTIONS_PREFIX + criteria_block + _TRACE_GUIDELINE_INSTRUCTIONS_BODY
 
     if skill_guidelines:
         principles = "\n".join(f"- {g}" for g in skill_guidelines)
         instructions += f"\n\n## Required Guidelines\n{principles}\n"
 
-    model_uri, inference_params = _to_judge_model_and_params(
-        judge_model or DEFAULT_JUDGE_LM
-    )
+    model_uri, inference_params = _to_judge_model_and_params(judge_model or DEFAULT_JUDGE_LM)
     return make_judge(
         name="trace_guideline_adherence",
         model=model_uri,
