@@ -51,12 +51,7 @@ def _is_clear_workspace_path(path: str) -> bool:
     """Return True when path is an explicit workspace path (not inferred)."""
     if not path:
         return False
-    return (
-        path.startswith("/Workspace/")
-        or path.startswith("/Users/")
-        or path.startswith("/Shared/")
-        or path.startswith("/Repos/")
-    )
+    return path.startswith(("/Workspace/", "/Users/", "/Shared/", "/Repos/"))
 
 
 # ============================================================================

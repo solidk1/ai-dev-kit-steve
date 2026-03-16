@@ -185,7 +185,7 @@ def _normalize_workspace_source_path(source_code_path: str) -> str:
     if path.startswith("/Workspace/"):
         return path
     # Accept common workspace-root shortcuts and normalize.
-    if path.startswith("/Users/") or path.startswith("/Shared/") or path.startswith("/Repos/"):
+    if path.startswith(("/Users/", "/Shared/", "/Repos/")):
         return f"/Workspace{path}"
     return path
 
