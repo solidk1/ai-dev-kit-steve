@@ -74,6 +74,7 @@ interface QueuedMessage {
 interface InProgressConversationState {
   userMessage?: Message;
   streamingText: string;
+  activityItems?: ActivityItem[];
   queuedMessages?: Message[];
 }
 
@@ -189,6 +190,39 @@ function mergeTraceHistories(
   return merged;
 }
 
+function improveReadabilityForStreaming(text: string): string {
+  if (!text) return text;
+  // Some stream chunks arrive glued together (e.g. "done.Still ...").
+  // Add paragraph breaks at likely sentence boundaries for better readability.
+  return text.replace(/([.!?…])([A-Z])/g, '$1\n\n$2');
+}
+
+function applyThinkingEventToItems(
+  items: ActivityItem[],
+  eventType: 'thinking' | 'thinking_delta',
+  thinking: string
+): ActivityItem[] {
+  if (!thinking) return items;
+  const lastItem = items.length > 0 ? items[items.length - 1] : null;
+  if (lastItem?.type === 'thinking') {
+    const updated = [...items];
+    updated[updated.length - 1] = {
+      ...lastItem,
+      content: eventType === 'thinking_delta' ? lastItem.content + thinking : thinking,
+    };
+    return updated;
+  }
+  return [
+    ...items,
+    {
+      id: `thinking-${Date.now()}`,
+      type: 'thinking',
+      content: thinking,
+      timestamp: Date.now(),
+    },
+  ];
+}
+
 // Minimal activity indicator - shows only current tool being executed (non-verbose)
 function ActivitySection({
   items,
@@ -246,6 +280,7 @@ function VerboseItem({ item }: { item: ActivityItem }) {
   const [expanded, setExpanded] = useState(item.type === 'thinking');
 
   if (item.type === 'thinking') {
+    const readableThinking = improveReadabilityForStreaming(item.content);
     return (
       <div className="border-b border-[var(--color-border)]/20 last:border-0">
         <button
@@ -255,14 +290,14 @@ function VerboseItem({ item }: { item: ActivityItem }) {
           <Brain className="h-3 w-3 flex-shrink-0 text-purple-400" />
           <span className="text-[11px] text-[var(--color-text-muted)] flex-1 truncate">
             {expanded
-              ? `Thinking · ${item.content.length} chars`
-              : item.content.slice(0, 220).replace(/\n/g, ' ')}
+              ? `Thinking · ${readableThinking.length} chars`
+              : readableThinking.slice(0, 220).replace(/\n/g, ' ')}
           </span>
           <ChevronDown className={cn('h-3 w-3 flex-shrink-0 text-[var(--color-text-muted)] transition-transform', expanded && 'rotate-180')} />
         </button>
         {expanded && (
           <div className="px-3 pb-2 ml-5 font-mono text-[10px] text-[var(--color-text-muted)] whitespace-pre-wrap leading-relaxed max-h-96 overflow-y-auto">
-            {item.content}
+            {readableThinking}
           </div>
         )}
       </div>
@@ -1263,6 +1298,10 @@ export default function ProjectPage() {
       const executionState = await fetchExecutions(projectId, conversationId).catch(() => ({ active: null, recent: [] }));
       const persistedTraceHistory = buildTraceHistoryFromExecutions(executionState.recent);
       const inProgress = inProgressByConversationRef.current[conversationId];
+      const isConvStreaming = streamingConversationIdsRef.current.has(conversationId);
+      const activeExecutionItems = executionState.active
+        ? buildActivityItemsFromExecutionEvents(executionState.active.events || [])
+        : [];
       const baseMessages = conv.messages || [];
       const viewMessages = inProgress?.userMessage
         ? [...baseMessages, inProgress.userMessage, ...(inProgress.queuedMessages || [])]
@@ -1275,7 +1314,13 @@ export default function ProjectPage() {
           ? inProgress.streamingText
           : ''
       );
-      setActivityItems([]);
+      setActivityItems(
+        isConvStreaming
+          ? (inProgress?.activityItems && inProgress.activityItems.length > 0
+              ? inProgress.activityItems
+              : activeExecutionItems)
+          : []
+      );
       const cachedTraceHistory = traceHistoryByConversationRef.current[conversationId] || [];
       const runTraceHistory = mergeTraceHistories(persistedTraceHistory, cachedTraceHistory);
       if (runTraceHistory.length > 0) {
@@ -1290,10 +1335,13 @@ export default function ProjectPage() {
       setDefaultCatalog(conv.default_catalog || userConfig?.default_catalog || '');
       setDefaultSchema(conv.default_schema || userConfig?.default_schema || '');
       setWorkspaceFolder(conv.workspace_folder || userConfig?.workspace_folder || '');
-      const isConvStreaming = streamingConversationIdsRef.current.has(conversationId);
       setIsStreaming(isConvStreaming);
       activeStreamingConversationIdRef.current = isConvStreaming ? conversationId : null;
-      setActiveExecutionId(isConvStreaming ? (executionIdByConversationRef.current[conversationId] ?? null) : null);
+      setActiveExecutionId(
+        isConvStreaming
+          ? (executionIdByConversationRef.current[conversationId] ?? executionState.active?.id ?? null)
+          : null
+      );
     } catch (error) {
       console.error('Failed to load conversation:', error);
       toast.error('Failed to load conversation');
@@ -1421,6 +1469,7 @@ export default function ProjectPage() {
       const existing = inProgressByConversationRef.current[progressKey] ?? { streamingText: '' };
       inProgressByConversationRef.current[progressKey] = {
         ...existing,
+        activityItems: existing.activityItems ?? [],
         userMessage: tempUserMessage,
       };
 
@@ -1543,31 +1592,21 @@ export default function ProjectPage() {
             // thinking event from AssistantMessage. We must not add a second item —
             // instead replace the delta-built item with the authoritative complete block.
             const thinking = (event.thinking as string) || '';
-            if (thinking && currentConversationIdRef.current === conversationId) {
-              setActivityItems((prev) => {
-                const lastItem = prev.length > 0 ? prev[prev.length - 1] : null;
-                if (lastItem?.type === 'thinking') {
-                  const updated = [...prev];
-                  if (type === 'thinking_delta') {
-                    // Append delta token to existing thinking item
-                    updated[updated.length - 1] = { ...lastItem, content: lastItem.content + thinking };
-                  } else {
-                    // Complete block: replace delta-built item (prevents duplication)
-                    updated[updated.length - 1] = { ...lastItem, content: thinking };
-                  }
-                  return updated;
-                }
-                // No existing thinking item — create a new one
-                return [
-                  ...prev,
-                  {
-                    id: `thinking-${Date.now()}`,
-                    type: 'thinking',
-                    content: thinking,
-                    timestamp: Date.now(),
-                  },
-                ];
-              });
+            if (thinking) {
+              const progressKey = conversationId ?? PENDING_CONVERSATION_KEY;
+              const existing = inProgressByConversationRef.current[progressKey] ?? { streamingText: '' };
+              const nextItems = applyThinkingEventToItems(
+                existing.activityItems ?? [],
+                type as 'thinking' | 'thinking_delta',
+                thinking
+              );
+              inProgressByConversationRef.current[progressKey] = {
+                ...existing,
+                activityItems: nextItems,
+              };
+              if (currentConversationIdRef.current === conversationId) {
+                setActivityItems(nextItems);
+              }
             }
           } else if (type === 'tool_use') {
             if (currentConversationIdRef.current === conversationId) {
@@ -1870,6 +1909,25 @@ export default function ProjectPage() {
           };
           if (currentConversationIdRef.current === conversationId) {
             setStreamingText(buildDisplayText());
+          }
+          return;
+        }
+
+        if (type === 'thinking' || type === 'thinking_delta') {
+          const thinking = (event.thinking as string) || '';
+          if (!thinking) return;
+          const existing = inProgressByConversationRef.current[conversationId] ?? { streamingText: '' };
+          const nextItems = applyThinkingEventToItems(
+            existing.activityItems ?? [],
+            type as 'thinking' | 'thinking_delta',
+            thinking
+          );
+          inProgressByConversationRef.current[conversationId] = {
+            ...existing,
+            activityItems: nextItems,
+          };
+          if (currentConversationIdRef.current === conversationId) {
+            setActivityItems(nextItems);
           }
           return;
         }
@@ -2532,7 +2590,7 @@ export default function ProjectPage() {
                   <div className="max-w-[85%] rounded-lg px-3 py-2 shadow-sm bg-[var(--color-bg-secondary)] border border-[var(--color-border)]/50">
                     <div className="prose prose-xs max-w-none text-[var(--color-text-primary)] text-[13px] leading-relaxed">
                       <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                        {streamingText}
+                        {improveReadabilityForStreaming(streamingText)}
                       </ReactMarkdown>
                     </div>
                   </div>
@@ -2566,7 +2624,7 @@ export default function ProjectPage() {
                       <div className="max-w-[85%] rounded-lg px-3 py-2 shadow-sm bg-[var(--color-bg-secondary)] border border-[var(--color-border)]/50">
                         <div className="prose prose-xs max-w-none text-[var(--color-text-primary)] text-[13px] leading-relaxed">
                           <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                            {streamingText}
+                            {improveReadabilityForStreaming(streamingText)}
                           </ReactMarkdown>
                         </div>
                       </div>
