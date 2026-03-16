@@ -317,6 +317,12 @@ class ConversationStorage:
     role: str,
     content: str,
     is_error: bool = False,
+    duration_ms: int | None = None,
+    num_turns: int | None = None,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+    cache_read_tokens: int | None = None,
+    cache_creation_tokens: int | None = None,
   ) -> Optional[Message]:
     """Add a message to a conversation.
 
@@ -344,6 +350,12 @@ class ConversationStorage:
         role=role,
         content=content,
         is_error=is_error,
+        duration_ms=duration_ms,
+        num_turns=num_turns,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cache_read_tokens=cache_read_tokens,
+        cache_creation_tokens=cache_creation_tokens,
       )
       session.add(message)
 

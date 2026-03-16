@@ -9,6 +9,7 @@ execution continues in background and returns an operation ID for polling.
 """
 
 import asyncio
+import concurrent.futures
 import json
 import logging
 import threading
@@ -52,6 +53,15 @@ def load_databricks_tools():
 # Cached SDK tools (loaded once, reused for filtered server creation)
 _all_sdk_tools = None
 _all_tool_names = None
+
+# Cache filtered MCP servers by the allowed tool-set key.
+_filtered_server_cache: dict[tuple[str, ...], tuple[Any, list[str]]] = {}
+
+# Shared executor for tool calls to avoid per-call thread pool creation overhead.
+_TOOL_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=16,
+    thread_name_prefix='databricks-mcp-tool',
+)
 
 
 def _get_all_sdk_tools():
@@ -103,6 +113,11 @@ def create_filtered_databricks_server(allowed_tool_names: list[str]):
     Returns:
         Tuple of (server_config, filtered_tool_names)
     """
+    cache_key = tuple(sorted(allowed_tool_names))
+    cached = _filtered_server_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     all_sdk_tools, all_tool_names = _get_all_sdk_tools()
 
     allowed_set = set(allowed_tool_names)
@@ -120,7 +135,13 @@ def create_filtered_databricks_server(allowed_tool_names: list[str]):
     )
 
     server = create_sdk_mcp_server(name='databricks', tools=filtered_tools)
-    return server, filtered_names
+    result = (server, filtered_names)
+
+    # Bound cache growth in case many distinct skill combinations are used.
+    if len(_filtered_server_cache) >= 32:
+        _filtered_server_cache.clear()
+    _filtered_server_cache[cache_key] = result
+    return result
 
 
 def _create_check_operation_status_tool():
@@ -253,7 +274,6 @@ def _make_wrapper(name: str, description: str, schema: dict, fn):
     async def wrapper(args: dict[str, Any]) -> dict[str, Any]:
         import sys
         import traceback
-        import concurrent.futures
 
         start_time = time.time()
         print(f'[MCP TOOL] {name} called with args: {args}', file=sys.stderr, flush=True)
@@ -287,8 +307,7 @@ def _make_wrapper(name: str, description: str, schema: dict, fn):
             # Use executor.submit() to get a concurrent.futures.Future (thread-safe)
             # instead of loop.run_in_executor() which returns an asyncio.Future
             loop = asyncio.get_event_loop()
-            executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-            cf_future = executor.submit(run_in_context)  # concurrent.futures.Future
+            cf_future = _TOOL_EXECUTOR.submit(run_in_context)  # concurrent.futures.Future
             # Wrap in asyncio.Future for async waiting
             future = asyncio.wrap_future(cf_future, loop=loop)
 
@@ -328,7 +347,7 @@ def _make_wrapper(name: str, description: str, schema: dict, fn):
                         # Start background thread to complete the operation
                         # We use threading.Thread instead of asyncio.create_task because
                         # the fresh event loop pattern may not keep tasks alive
-                        def complete_in_background(op_id, cf_future, executor):
+                        def complete_in_background(op_id, cf_future):
                             """Background thread to wait for completion and store result."""
                             try:
                                 # Block until the future completes (it's already running)
@@ -354,12 +373,10 @@ def _make_wrapper(name: str, description: str, schema: dict, fn):
                                     file=sys.stderr,
                                     flush=True,
                                 )
-                            finally:
-                                executor.shutdown(wait=False)
 
                         bg_thread = threading.Thread(
                             target=complete_in_background,
-                            args=(op_id, cf_future, executor),
+                            args=(op_id, cf_future),
                             daemon=True,
                         )
                         bg_thread.start()

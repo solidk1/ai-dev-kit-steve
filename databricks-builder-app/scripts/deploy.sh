@@ -26,6 +26,8 @@ WORKSPACE_PATH=""
 STAGING_DIR=""
 SKIP_BUILD="${SKIP_BUILD:-false}"
 FULL_UPLOAD="${FULL_UPLOAD:-false}"
+SKIP_MIGRATIONS="${SKIP_MIGRATIONS:-false}"
+NO_WAIT="${NO_WAIT:-false}"
 
 # Usage information
 usage() {
@@ -38,6 +40,8 @@ usage() {
   echo ""
   echo "Options:"
   echo "  --skip-build          Skip frontend build (use existing build)"
+  echo "  --skip-migrations     Skip database migrations and SP grants"
+  echo "  --no-wait             Don't wait for deployment to complete"
   echo "  --full-upload         Force full workspace import"
   echo "  --staging-dir DIR     Custom staging directory (default: /tmp/<app-name>-deploy)"
   echo "  -h, --help            Show this help message"
@@ -63,6 +67,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-build)
       SKIP_BUILD=true
+      shift
+      ;;
+    --skip-migrations)
+      SKIP_MIGRATIONS=true
+      shift
+      ;;
+    --no-wait)
+      NO_WAIT=true
       shift
       ;;
     --full-upload)
@@ -109,10 +121,12 @@ echo ""
 echo -e "  App Name:     ${GREEN}${APP_NAME}${NC}"
 echo -e "  Staging Dir:  ${STAGING_DIR}"
 echo -e "  Skip Build:   ${SKIP_BUILD}"
+echo -e "  Skip Migrate: ${SKIP_MIGRATIONS}"
+echo -e "  No Wait:      ${NO_WAIT}"
 echo -e "  Full Upload:  ${FULL_UPLOAD}"
 echo ""
 
-# Check prerequisites
+# Check prerequisites (parallel API calls for speed)
 echo -e "${YELLOW}[1/7] Checking prerequisites...${NC}"
 
 # Check Databricks CLI
@@ -121,72 +135,65 @@ if ! command -v databricks &> /dev/null; then
   exit 1
 fi
 
-# Check Databricks CLI version
 cli_version=$(databricks --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
 if [ -n "$cli_version" ]; then
   if printf '%s\n%s' "$MIN_CLI_VERSION" "$cli_version" | sort -V -C; then
     echo -e "  ${GREEN}✓${NC} Databricks CLI v${cli_version}"
   else
     echo -e "  ${YELLOW}Warning: Databricks CLI v${cli_version} is outdated (minimum: v${MIN_CLI_VERSION})${NC}"
-    echo -e "  ${BOLD}Upgrade:${NC} curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh"
   fi
-else
-  echo -e "  ${YELLOW}Warning: Could not determine Databricks CLI version${NC}"
 fi
 
-# Check if authenticated
-if ! databricks auth describe &> /dev/null; then
-  echo -e "${RED}Error: Not authenticated with Databricks. Run: databricks auth login${NC}"
-  exit 1
-fi
+# Run auth, user, and app-check API calls in parallel
+_tmp_auth=$(mktemp)
+_tmp_user=$(mktemp)
+_tmp_app=$(mktemp)
 
-# Get workspace info (handle both old and new Databricks CLI JSON formats)
-WORKSPACE_HOST=$(databricks auth describe --output json 2>/dev/null | python3 -c "
+databricks auth describe --output json > "$_tmp_auth" 2>/dev/null &
+_pid_auth=$!
+databricks current-user me --output json > "$_tmp_user" 2>/dev/null &
+_pid_user=$!
+databricks apps get "$APP_NAME" > "$_tmp_app" 2>/dev/null &
+_pid_app=$!
+
+wait $_pid_auth || { echo -e "${RED}Error: Not authenticated with Databricks. Run: databricks auth login${NC}"; exit 1; }
+wait $_pid_user || { echo -e "${RED}Error: Could not determine current user.${NC}"; exit 1; }
+wait $_pid_app || { echo -e "${RED}Error: App '${APP_NAME}' does not exist. Create with: databricks apps create ${APP_NAME}${NC}"; exit 1; }
+
+WORKSPACE_HOST=$(python3 -c "
 import sys, json
-data = json.load(sys.stdin)
-# New CLI format has host under details.host, old format has it at root
+data = json.load(open('$_tmp_auth'))
 host = data.get('host', '') or data.get('details', {}).get('host', '')
 print(host)
 " 2>/dev/null || echo "")
-if [ -z "$WORKSPACE_HOST" ]; then
-  echo -e "${RED}Error: Could not determine Databricks workspace. Check your authentication.${NC}"
-  echo -e "${YELLOW}Tip: Try setting DATABRICKS_CONFIG_PROFILE=<profile-name> before running this script${NC}"
-  echo -e "${YELLOW}     Run 'databricks auth profiles' to see available profiles${NC}"
-  exit 1
-fi
 
-# Get current user for workspace path
-CURRENT_USER=$(databricks current-user me --output json 2>/dev/null | python3 -c "
+CURRENT_USER=$(python3 -c "
 import sys, json
-data = json.load(sys.stdin)
-# Handle both formats
+data = json.load(open('$_tmp_user'))
 print(data.get('userName', data.get('user_name', '')))
 " 2>/dev/null || echo "")
-if [ -z "$CURRENT_USER" ]; then
-  echo -e "${RED}Error: Could not determine current user.${NC}"
+
+rm -f "$_tmp_auth" "$_tmp_user" "$_tmp_app"
+
+if [ -z "$WORKSPACE_HOST" ] || [ -z "$CURRENT_USER" ]; then
+  echo -e "${RED}Error: Could not determine workspace or user.${NC}"
   exit 1
 fi
 
 WORKSPACE_PATH="/Workspace/Users/${CURRENT_USER}/apps/${APP_NAME}"
-echo -e "  Workspace:    ${WORKSPACE_HOST}"
-echo -e "  User:         ${CURRENT_USER}"
-echo -e "  Deploy Path:  ${WORKSPACE_PATH}"
-echo ""
-
-# Check if app exists
-echo -e "${YELLOW}[2/7] Verifying app exists...${NC}"
-if ! databricks apps get "$APP_NAME" &> /dev/null; then
-  echo -e "${RED}Error: App '${APP_NAME}' does not exist.${NC}"
-  echo -e "Create it first with: ${GREEN}databricks apps create ${APP_NAME}${NC}"
-  exit 1
-fi
+echo -e "  ${GREEN}✓${NC} Workspace: ${WORKSPACE_HOST}"
+echo -e "  ${GREEN}✓${NC} User: ${CURRENT_USER}"
 echo -e "  ${GREEN}✓${NC} App '${APP_NAME}' exists"
 echo ""
 
 # Run database migrations synchronously (blocking) before packaging/deploy.
-# Do not background this step; deploy must fail fast on migration errors.
 echo -e "${YELLOW}[3/7] Applying database migrations...${NC}"
 cd "$PROJECT_DIR"
+
+if [ "$SKIP_MIGRATIONS" = true ]; then
+  echo -e "  ${GREEN}✓${NC} Skipped (--skip-migrations)"
+  echo ""
+elif true; then
 
 # If LAKEBASE_* vars are not present in shell, derive from app.yaml.
 if [ -z "${LAKEBASE_PG_URL:-}" ] && [ -z "${LAKEBASE_INSTANCE_NAME:-}" ]; then
@@ -312,6 +319,8 @@ else
 fi
 echo ""
 
+fi # end SKIP_MIGRATIONS guard
+
 # Build frontend
 echo -e "${YELLOW}[4/7] Building frontend...${NC}"
 cd "$PROJECT_DIR/client"
@@ -343,16 +352,11 @@ echo -e "${YELLOW}[5/7] Preparing deployment package...${NC}"
 rm -rf "$STAGING_DIR"
 mkdir -p "$STAGING_DIR"
 
-# Copy server code
+# Copy server code + alembic
 echo "  Copying server code..."
 cp -r server "$STAGING_DIR/"
 cp app.yaml "$STAGING_DIR/"
 cp requirements.txt "$STAGING_DIR/"
-cp alembic.ini "$STAGING_DIR/"
-cp -r alembic "$STAGING_DIR/"
-
-# Copy Alembic migrations
-echo "  Copying Alembic migrations..."
 cp alembic.ini "$STAGING_DIR/"
 cp -r alembic "$STAGING_DIR/"
 
@@ -414,11 +418,14 @@ if [ "$FULL_UPLOAD" = true ] || [ ! -f "$MANIFEST_FILE" ]; then
   databricks workspace import-dir "$STAGING_DIR" "$WORKSPACE_PATH" --overwrite 2>&1 | tail -5
 
   mkdir -p "$MANIFEST_DIR"
+  FIND_LIST_FILE="$(mktemp)"
+  find "$STAGING_DIR" -type f -print0 > "$FIND_LIST_FILE"
   while IFS= read -r -d '' local_file; do
     rel_path="${local_file#$STAGING_DIR/}"
     checksum="$(shasum -a 256 "$local_file" | awk '{print $1}')"
     printf "%s\t%s\n" "$checksum" "$rel_path" >> "$NEW_MANIFEST_FILE"
-  done < <(find "$STAGING_DIR" -type f -print0)
+  done < "$FIND_LIST_FILE"
+  rm -f "$FIND_LIST_FILE"
   mv "$NEW_MANIFEST_FILE" "$MANIFEST_FILE"
   echo -e "  ${GREEN}✓${NC} Upload complete (full)"
 else
@@ -429,11 +436,14 @@ else
   deleted_count=0
 
   # Build current manifest from staging
+  FIND_LIST_FILE="$(mktemp)"
+  find "$STAGING_DIR" -type f -print0 > "$FIND_LIST_FILE"
   while IFS= read -r -d '' local_file; do
     rel_path="${local_file#$STAGING_DIR/}"
     checksum="$(shasum -a 256 "$local_file" | awk '{print $1}')"
     printf "%s\t%s\n" "$checksum" "$rel_path" >> "$NEW_MANIFEST_FILE"
-  done < <(find "$STAGING_DIR" -type f -print0)
+  done < "$FIND_LIST_FILE"
+  rm -f "$FIND_LIST_FILE"
 
   CHANGED_LIST="$(mktemp)"
   DELETED_LIST="$(mktemp)"
@@ -484,28 +494,34 @@ echo ""
 
 # Deploy the app
 echo -e "${YELLOW}[7/7] Deploying app...${NC}"
-DEPLOY_OUTPUT=$(databricks apps deploy "$APP_NAME" --source-code-path "$WORKSPACE_PATH" 2>&1)
+DEPLOY_ARGS=("$APP_NAME" --source-code-path "$WORKSPACE_PATH")
+if [ "$NO_WAIT" = true ]; then
+  DEPLOY_ARGS+=(--no-wait)
+fi
+DEPLOY_OUTPUT=$(databricks apps deploy "${DEPLOY_ARGS[@]}" 2>&1)
 echo "$DEPLOY_OUTPUT"
 
+# Get app URL
+APP_INFO=$(databricks apps get "$APP_NAME" --output json 2>/dev/null)
+APP_URL=$(echo "$APP_INFO" | python3 -c "import sys, json; print(json.load(sys.stdin).get('url', 'N/A'))" 2>/dev/null || echo "N/A")
+
 # Check deployment status
-if echo "$DEPLOY_OUTPUT" | grep -q '"state":"SUCCEEDED"'; then
+if [ "$NO_WAIT" = true ]; then
+  echo ""
+  echo -e "${GREEN}╔════════════════════════════════════════════════════════════╗${NC}"
+  echo -e "${GREEN}║              Deployment Submitted (no-wait)               ║${NC}"
+  echo -e "${GREEN}╚════════════════════════════════════════════════════════════╝${NC}"
+  echo ""
+  echo -e "  App URL: ${GREEN}${APP_URL}${NC}"
+  echo -e "  ${YELLOW}Check status:${NC} databricks apps get ${APP_NAME}"
+  echo ""
+elif echo "$DEPLOY_OUTPUT" | grep -q '"state":"SUCCEEDED"'; then
   echo ""
   echo -e "${GREEN}╔════════════════════════════════════════════════════════════╗${NC}"
   echo -e "${GREEN}║                 Deployment Successful!                     ║${NC}"
   echo -e "${GREEN}╚════════════════════════════════════════════════════════════╝${NC}"
   echo ""
-  
-  # Get app URL
-  APP_INFO=$(databricks apps get "$APP_NAME" --output json 2>/dev/null)
-  APP_URL=$(echo "$APP_INFO" | python3 -c "import sys, json; print(json.load(sys.stdin).get('url', 'N/A'))" 2>/dev/null || echo "N/A")
-  
   echo -e "  App URL: ${GREEN}${APP_URL}${NC}"
-  echo ""
-  echo "  Next steps:"
-  echo "    1. Open the app URL in your browser"
-  echo "    2. If this is first deployment, add Lakebase as an app resource:"
-  echo "       databricks apps add-resource $APP_NAME --resource-type database \\"
-  echo "         --resource-name lakebase --database-instance <instance-name>"
   echo ""
 else
   echo ""

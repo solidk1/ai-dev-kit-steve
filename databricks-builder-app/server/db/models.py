@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, List, Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, LargeBinary, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, LargeBinary, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -145,6 +145,13 @@ class Message(Base):
   )
   is_error: Mapped[bool] = mapped_column(Boolean, default=False)
 
+  duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+  num_turns: Mapped[int | None] = mapped_column(Integer, nullable=True)
+  input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+  output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+  cache_read_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+  cache_creation_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
   # Relationships
   conversation: Mapped['Conversation'] = relationship('Conversation', back_populates='messages')
 
@@ -152,7 +159,7 @@ class Message(Base):
 
   def to_dict(self) -> dict[str, Any]:
     """Convert to dictionary."""
-    return {
+    result = {
       'id': self.id,
       'conversation_id': self.conversation_id,
       'role': self.role,
@@ -160,6 +167,14 @@ class Message(Base):
       'timestamp': self.timestamp.isoformat() if self.timestamp else None,
       'is_error': self.is_error,
     }
+    if self.role == 'assistant':
+      result['duration_ms'] = self.duration_ms
+      result['num_turns'] = self.num_turns
+      result['input_tokens'] = self.input_tokens
+      result['output_tokens'] = self.output_tokens
+      result['cache_read_tokens'] = self.cache_read_tokens
+      result['cache_creation_tokens'] = self.cache_creation_tokens
+    return result
 
 
 class UserConfig(Base):

@@ -3,24 +3,33 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useUser } from '@/contexts/UserContext';
 import {
   ArrowUp,
+  Brain,
   Check,
   ChevronDown,
-  ClipboardCopy,
   ExternalLink,
+  FileText,
+  Image as ImageIcon,
   Loader2,
+  Paperclip,
+  Pencil,
+  Send,
   Settings2,
-  Square,
   Sparkles,
+  Square,
+  Trash2,
   Wrench,
   X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { SkillsExplorer } from '@/components/SkillsExplorer';
 import { FunLoader } from '@/components/FunLoader';
+import { Button } from '@/components/ui/Button';
 import {
   createConversation,
   deleteConversation,
@@ -29,18 +38,68 @@ import {
   fetchConversations,
   fetchExecutions,
   fetchProject,
+  fetchUserSettings,
   fetchWarehouses,
   invokeAgent,
   reconnectToExecution,
   stopExecution,
+  uploadProjectFile,
 } from '@/lib/api';
-import type { Cluster, Conversation, Message, Project, Warehouse, TodoItem } from '@/lib/types';
+import type { Cluster, Conversation, Execution, Message, Project, UserSettings, Warehouse, TodoItem } from '@/lib/types';
+import type { ImageAttachment } from '@/lib/api';
 import { cn } from '@/lib/utils';
+
+// Local attachment types
+interface AttachedImage {
+  id: string;
+  file: File;
+  preview: string;    // ObjectURL for display
+  data: string;       // base64 for API
+  mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+}
+
+interface AttachedFile {
+  id: string;
+  file: File;
+}
+
+interface QueuedMessage {
+  conversationId: string | null;
+  userMessage: string;
+  displayContent: string;
+  imagesToSend: ImageAttachment[];
+  queuedMessageId?: string;
+}
+
+interface InProgressConversationState {
+  userMessage?: Message;
+  streamingText: string;
+  queuedMessages?: Message[];
+}
+
+const PENDING_CONVERSATION_KEY = '__pending__';
+
+const SUPPORTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+const MAX_IMAGE_SIZE = 20 * 1024 * 1024; // 20MB
+
+async function readImageAsBase64(file: File): Promise<{ data: string; mediaType: AttachedImage['mediaType'] }> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target?.result as string;
+      const [prefix, data] = dataUrl.split(',');
+      const mediaType = prefix.split(':')[1].split(';')[0] as AttachedImage['mediaType'];
+      resolve({ data, mediaType });
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 
 // Combined activity item for display
 interface ActivityItem {
   id: string;
-  type: 'thinking' | 'tool_use' | 'tool_result';
+  type: 'thinking' | 'tool_use' | 'tool_result' | 'keepalive';
   content: string;
   toolName?: string;
   toolInput?: Record<string, unknown>;
@@ -48,74 +107,92 @@ interface ActivityItem {
   timestamp: number;
 }
 
-// Databricks logo mark SVG
-function DatabricksLogo({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}>
-      <path d="M18 2L3 10.5V12.5L18 21L33 12.5V10.5L18 2Z" fill="currentColor" />
-      <path d="M18 24.5L3 16V18L18 27L33 18V16L18 24.5Z" fill="currentColor" />
-      <path d="M18 30.5L3 22V24L18 33L33 24V22L18 30.5Z" fill="currentColor" opacity="0.7" />
-    </svg>
-  );
+function buildActivityItemsFromExecutionEvents(events: unknown[]): ActivityItem[] {
+  const items: ActivityItem[] = [];
+  for (const rawEvent of events) {
+    if (!rawEvent || typeof rawEvent !== 'object') continue;
+    const event = rawEvent as Record<string, unknown>;
+    const type = String(event.type ?? '');
+    if (!type) continue;
+
+    if (type === 'thinking' || type === 'thinking_delta') {
+      const thinking = String(event.thinking ?? '');
+      if (!thinking) continue;
+      const last = items[items.length - 1];
+      if (last?.type === 'thinking') {
+        last.content = type === 'thinking_delta' ? last.content + thinking : thinking;
+      } else {
+        items.push({
+          id: `thinking-${items.length}`,
+          type: 'thinking',
+          content: thinking,
+          timestamp: Date.now(),
+        });
+      }
+      continue;
+    }
+
+    if (type === 'tool_use') {
+      items.push({
+        id: String(event.tool_id ?? `tool-${items.length}`),
+        type: 'tool_use',
+        content: '',
+        toolName: String(event.tool_name ?? ''),
+        toolInput: (event.tool_input as Record<string, unknown> | undefined) ?? {},
+        timestamp: Date.now(),
+      });
+      continue;
+    }
+
+    if (type === 'tool_result') {
+      const toolUseId = String(event.tool_use_id ?? '');
+      const resultItem: ActivityItem = {
+        id: `result-${toolUseId || items.length}`,
+        type: 'tool_result',
+        content: typeof event.content === 'string' ? event.content : JSON.stringify(event.content),
+        isError: Boolean(event.is_error),
+        timestamp: Date.now(),
+      };
+      const existingIdx = items.findIndex((item) => item.id === resultItem.id);
+      if (existingIdx >= 0) items[existingIdx] = resultItem;
+      else items.push(resultItem);
+      continue;
+    }
+  }
+  return items;
 }
 
-// Expandable tools list for a message
-function ToolsUsedBadge({ tools }: { tools: string[] }) {
-  const [expanded, setExpanded] = useState(false);
-
-  if (tools.length === 0) return null;
-
-  // Deduplicate and clean tool names
-  const uniqueTools = [...new Set(tools.map(t => t.replace('mcp__databricks__', '').replace(/_/g, ' ')))];
-
-  return (
-    <div className="mt-2">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="inline-flex items-center gap-1.5 text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
-      >
-        <Wrench className="h-3 w-3" />
-        <span>{uniqueTools.length} tool{uniqueTools.length !== 1 ? 's' : ''} used</span>
-        <ChevronDown className={cn('h-3 w-3 transition-transform', expanded && 'rotate-180')} />
-      </button>
-      {expanded && (
-        <div className="mt-1.5 flex flex-wrap gap-1.5">
-          {uniqueTools.map((tool, i) => (
-            <span
-              key={i}
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--color-bg-secondary)] border border-[var(--color-border)]/40 text-[11px] text-[var(--color-text-muted)] capitalize"
-            >
-              <Wrench className="h-2.5 w-2.5" />
-              {tool}
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+function buildTraceHistoryFromExecutions(executions: Execution[]): ActivityItem[][] {
+  return [...executions]
+    .reverse()
+    .map((e) => buildActivityItemsFromExecutionEvents(e.events ?? []))
+    .filter((items) => items.length > 0);
 }
 
-// Copy button for code blocks
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <button
-      onClick={() => {
-        navigator.clipboard.writeText(text);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      }}
-      className="absolute top-2 right-2 p-1.5 rounded-md bg-[var(--color-bg-secondary)]/80 border border-[var(--color-border)]/50 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-secondary)] opacity-0 group-hover/code:opacity-100 transition-all"
-      title={copied ? 'Copied!' : 'Copy code'}
-    >
-      {copied ? <Check className="h-3.5 w-3.5 text-[var(--color-success)]" /> : <ClipboardCopy className="h-3.5 w-3.5" />}
-    </button>
-  );
+function tracesEqual(a: ActivityItem[], b: ActivityItem[]): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
 }
 
-// Activity indicator - shows current tool with animated dots
+function mergeTraceHistories(
+  persisted: ActivityItem[][],
+  cached: ActivityItem[][]
+): ActivityItem[][] {
+  if (persisted.length === 0) return cached;
+  if (cached.length === 0) return persisted;
+
+  const merged = [...persisted];
+  for (const trace of cached) {
+    if (!merged.some((existing) => tracesEqual(existing, trace))) {
+      merged.push(trace);
+    }
+  }
+  return merged;
+}
+
+// Minimal activity indicator - shows only current tool being executed (non-verbose)
 function ActivitySection({
   items,
+  isStreaming,
 }: {
   items: ActivityItem[];
   isStreaming: boolean;
@@ -125,29 +202,358 @@ function ActivitySection({
   const currentTool = [...items].reverse().find((item) => item.type === 'tool_use');
   if (!currentTool) return null;
 
-  const toolName = currentTool.toolName?.replace('mcp__databricks__', '').replace(/_/g, ' ') || 'working';
-
   return (
-    <div className="flex items-start gap-3 max-w-3xl">
-      <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-[var(--color-accent-primary)] to-[var(--color-accent-secondary)] flex items-center justify-center shadow-sm mt-0.5">
-        <DatabricksLogo className="h-4 w-4 text-white" />
-      </div>
-      <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-[var(--color-bg-secondary)]/60 border border-[var(--color-border)]/30">
-        <Wrench className="h-3.5 w-3.5 text-[var(--color-accent-primary)] animate-pulse" />
-        <span className="text-xs text-[var(--color-text-muted)] capitalize">
-          {toolName}
-        </span>
-        <span className="flex gap-0.5">
-          <span className="w-1 h-1 rounded-full bg-[var(--color-text-muted)] animate-bounce" style={{ animationDelay: '0ms' }} />
-          <span className="w-1 h-1 rounded-full bg-[var(--color-text-muted)] animate-bounce" style={{ animationDelay: '150ms' }} />
-          <span className="w-1 h-1 rounded-full bg-[var(--color-text-muted)] animate-bounce" style={{ animationDelay: '300ms' }} />
-        </span>
-      </div>
+    <div className="mb-2 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
+      <Wrench className={cn('h-3 w-3 text-[var(--color-accent-primary)]', isStreaming && 'animate-pulse')} />
+      <span className="truncate">
+        Using {currentTool.toolName?.replace('mcp__databricks__', '')}...
+      </span>
     </div>
   );
 }
 
-// Custom dropdown for cluster/warehouse selection with status indicators
+// Extract code and language from tool inputs for the 3 code-execution MCP tools.
+function getCodeFromToolInput(
+  toolName: string | undefined,
+  toolInput: Record<string, unknown> | undefined,
+): { code: string; language: string; params?: Record<string, unknown> } | null {
+  if (!toolName || !toolInput) return null;
+  const name = toolName.replace('mcp__databricks__', '');
+  if (name === 'execute_sql') {
+    const code = toolInput.sql_query as string;
+    if (code) {
+      const { sql_query, ...params } = toolInput;
+      return { code, language: 'sql', params: Object.keys(params).length > 0 ? params : undefined };
+    }
+  } else if (name === 'execute_sql_multi') {
+    const code = toolInput.sql_content as string;
+    if (code) {
+      const { sql_content, ...params } = toolInput;
+      return { code, language: 'sql', params: Object.keys(params).length > 0 ? params : undefined };
+    }
+  } else if (name === 'execute_databricks_command') {
+    const code = toolInput.code as string;
+    if (code) {
+      const { code: _code, language: lang, ...params } = toolInput;
+      return { code, language: (lang as string) || 'python', params: Object.keys(params).length > 0 ? params : undefined };
+    }
+  }
+  return null;
+}
+
+// Single item in the verbose trace
+function VerboseItem({ item }: { item: ActivityItem }) {
+  const [expanded, setExpanded] = useState(item.type === 'thinking');
+
+  if (item.type === 'thinking') {
+    return (
+      <div className="border-b border-[var(--color-border)]/20 last:border-0">
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-[var(--color-bg-secondary)]/40 transition-colors"
+        >
+          <Brain className="h-3 w-3 flex-shrink-0 text-purple-400" />
+          <span className="text-[11px] text-[var(--color-text-muted)] flex-1 truncate">
+            {expanded
+              ? `Thinking · ${item.content.length} chars`
+              : item.content.slice(0, 220).replace(/\n/g, ' ')}
+          </span>
+          <ChevronDown className={cn('h-3 w-3 flex-shrink-0 text-[var(--color-text-muted)] transition-transform', expanded && 'rotate-180')} />
+        </button>
+        {expanded && (
+          <div className="px-3 pb-2 ml-5 font-mono text-[10px] text-[var(--color-text-muted)] whitespace-pre-wrap leading-relaxed max-h-96 overflow-y-auto">
+            {item.content}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (item.type === 'tool_use') {
+    const toolName = item.toolName?.replace('mcp__databricks__', '') ?? '';
+    const codeInfo = getCodeFromToolInput(item.toolName, item.toolInput);
+    const inputStr = !codeInfo && item.toolInput ? JSON.stringify(item.toolInput, null, 2) : '';
+    const hasExpandable = !!(codeInfo || inputStr);
+    return (
+      <div className="border-b border-[var(--color-border)]/20 last:border-0">
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-[var(--color-bg-secondary)]/40 transition-colors"
+        >
+          <Wrench className="h-3 w-3 flex-shrink-0 text-[var(--color-accent-primary)]" />
+          <span className="font-mono text-[11px] text-[var(--color-text-primary)]">{toolName}</span>
+          {codeInfo && (
+            <span className="ml-1 px-1 py-0.5 rounded text-[9px] font-mono uppercase tracking-wide bg-[var(--color-accent-primary)]/10 text-[var(--color-accent-primary)]">
+              {codeInfo.language}
+            </span>
+          )}
+          {hasExpandable && (
+            <ChevronDown className={cn('h-3 w-3 ml-auto flex-shrink-0 text-[var(--color-text-muted)] transition-transform', expanded && 'rotate-180')} />
+          )}
+        </button>
+        {expanded && codeInfo?.params && (
+          <div className="flex flex-wrap gap-1 mx-3 mb-1.5">
+            {Object.entries(codeInfo.params).map(([key, val]) => (
+              <span key={key} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono bg-[var(--color-bg-secondary)]/60 text-[var(--color-text-muted)] border border-[var(--color-border)]/30">
+                <span className="text-[var(--color-text-muted)]/70">{key}:</span>
+                <span className="text-[var(--color-text-primary)]">{String(val)}</span>
+              </span>
+            ))}
+          </div>
+        )}
+        {expanded && codeInfo && (
+          <div className="mx-3 mb-2 max-h-64 overflow-y-auto rounded text-[10px]">
+            <SyntaxHighlighter
+              language={codeInfo.language}
+              style={oneDark}
+              customStyle={{ margin: 0, borderRadius: '0.25rem', fontSize: '10px', lineHeight: '1.5' }}
+              wrapLongLines
+            >
+              {codeInfo.code}
+            </SyntaxHighlighter>
+          </div>
+        )}
+        {expanded && inputStr && (
+          <div className="px-3 pb-2 ml-5 font-mono text-[10px] text-[var(--color-text-muted)] whitespace-pre-wrap leading-relaxed max-h-32 overflow-y-auto bg-[var(--color-bg-secondary)]/30 rounded mx-3 mb-1 p-1.5">
+            {inputStr}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (item.type === 'tool_result') {
+    const preview = item.content.slice(0, 120).replace(/\n/g, ' ');
+    const hasMore = item.content.length > 120;
+    return (
+      <div className={cn('border-b border-[var(--color-border)]/20 last:border-0', item.isError && 'bg-[var(--color-error)]/5')}>
+        <button
+          onClick={() => (hasMore ? setExpanded(!expanded) : undefined)}
+          className={cn(
+            'w-full flex items-start gap-2 px-3 py-1.5 text-left transition-colors',
+            hasMore && 'hover:bg-[var(--color-bg-secondary)]/40 cursor-pointer',
+            !hasMore && 'cursor-default',
+          )}
+        >
+          <span className={cn('text-[10px] flex-shrink-0 mt-0.5 font-mono', item.isError ? 'text-[var(--color-error)]' : 'text-[var(--color-success)]')}>
+            {item.isError ? '✕' : '✓'}
+          </span>
+          <span className="font-mono text-[10px] text-[var(--color-text-muted)] flex-1 truncate">{preview}</span>
+          {hasMore && (
+            <ChevronDown className={cn('h-3 w-3 flex-shrink-0 text-[var(--color-text-muted)] transition-transform', expanded && 'rotate-180')} />
+          )}
+        </button>
+        {expanded && (
+          <div className="px-3 pb-2 ml-5 font-mono text-[10px] text-[var(--color-text-muted)] whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto bg-[var(--color-bg-secondary)]/30 rounded mx-3 mb-1 p-1.5">
+            {item.content}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (item.type === 'keepalive') {
+    return (
+      <div className="border-b border-[var(--color-border)]/20 last:border-0">
+        <div className="w-full flex items-center gap-2 px-3 py-1.5 text-left">
+          <Loader2 className="h-3 w-3 flex-shrink-0 animate-spin text-[var(--color-accent-primary)]" />
+          <span className="text-[10px] font-mono text-[var(--color-text-muted)]">{item.content}</span>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+}
+
+// Full verbose trace panel (thinking + tool calls + results in order)
+function VerboseActivityLog({
+  items,
+  isStreaming,
+}: {
+  items: ActivityItem[];
+  isStreaming: boolean;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+
+  if (items.length === 0) return null;
+
+  const currentTool = isStreaming ? [...items].reverse().find((i) => i.type === 'tool_use') : null;
+
+  return (
+    <div className="mb-2 max-w-[85%] rounded-lg border border-[var(--color-border)]/50 bg-[var(--color-bg-secondary)]/20 overflow-hidden text-xs">
+      <button
+        onClick={() => setCollapsed(!collapsed)}
+        className="w-full flex items-center gap-2 px-3 py-2 text-[var(--color-text-muted)] hover:bg-[var(--color-bg-secondary)]/50 transition-colors"
+      >
+        <Wrench className={cn('h-3 w-3 text-[var(--color-accent-primary)]', isStreaming && currentTool && 'animate-pulse')} />
+        <span className="font-medium text-[var(--color-text-muted)]">
+          {isStreaming && currentTool
+            ? `Using ${currentTool.toolName?.replace('mcp__databricks__', '')}…`
+            : `Agent trace · ${items.length} step${items.length !== 1 ? 's' : ''}`}
+        </span>
+        <ChevronDown className={cn('h-3 w-3 ml-auto transition-transform', !collapsed && 'rotate-180')} />
+      </button>
+      {!collapsed && (
+        <div className="border-t border-[var(--color-border)]/30 max-h-96 overflow-y-auto">
+          {items.map((item) => (
+            <VerboseItem key={item.id} item={item} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Determine the proxy URL for a Databricks file path
+function toDatabricksProxyUrl(path: string): string {
+  return `/api/workspace/file?path=${encodeURIComponent(path)}`;
+}
+
+function isDatabricksFilePath(src: string): boolean {
+  return (
+    src.startsWith('/Workspace/') ||
+    src.startsWith('/Users/') ||
+    src.startsWith('/Shared/') ||
+    src.startsWith('dbfs:/') ||
+    src.startsWith('/dbfs/') ||
+    src.startsWith('/Volumes/')
+  );
+}
+
+// Renders a Databricks-hosted image via the workspace proxy.
+// Fetches via JS (not <img src>) so we can capture server error details.
+function DatabricksImage({
+  path,
+  alt,
+  className,
+}: {
+  path: string;
+  alt?: string;
+  className?: string;
+}) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const proxyUrl = toDatabricksProxyUrl(path);
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    fetch(proxyUrl, { credentials: 'include' })
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error((body as Record<string, string>).detail || res.statusText);
+        }
+        return res.blob();
+      })
+      .then((blob) => {
+        if (!cancelled) {
+          objectUrl = URL.createObjectURL(blob);
+          setBlobUrl(objectUrl);
+          setError(null);
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [proxyUrl]);
+
+  if (error) {
+    return (
+      <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)] bg-[var(--color-bg-secondary)] rounded-md px-3 py-2 my-2 border border-[var(--color-border)]/30">
+        <ImageIcon className="h-4 w-4 flex-shrink-0" />
+        <span className="truncate">Image error ({path}): {error}</span>
+      </div>
+    );
+  }
+  if (!blobUrl) return null; // Loading
+
+  return (
+    <img
+      src={blobUrl}
+      alt={alt ?? ''}
+      className={className ?? 'max-w-full rounded-md border border-[var(--color-border)]/30 my-2'}
+    />
+  );
+}
+
+// Image component for ReactMarkdown — proxies Databricks paths, falls back to
+// a fetch()-based loader so errors are visible rather than silent broken icons.
+function MarkdownImg({
+  src,
+  alt,
+}: {
+  src?: string;
+  alt?: string;
+}) {
+  if (!src) return null;
+
+  // All Databricks paths go through the proxy with error visibility
+  if (isDatabricksFilePath(src) || src.startsWith('/api/workspace/file')) {
+    const path = src.startsWith('/api/workspace/file')
+      ? decodeURIComponent(new URL(src, window.location.origin).searchParams.get('path') ?? src)
+      : src;
+    return <DatabricksImage path={path} alt={alt} />;
+  }
+
+  // Regular URLs — plain img, retry via proxy on error
+  return (
+    <img
+      src={src}
+      alt={alt ?? ''}
+      className="max-w-full rounded-md border border-[var(--color-border)]/30 my-2"
+      loading="lazy"
+      onError={(e) => {
+        const img = e.currentTarget;
+        if (!img.src.includes('/api/workspace/file')) {
+          img.src = toDatabricksProxyUrl(src);
+        }
+      }}
+    />
+  );
+}
+
+// Shared ReactMarkdown component overrides for all chat bubbles
+const markdownComponents: React.ComponentProps<typeof ReactMarkdown>['components'] = {
+  a: ({ href, children }) => (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="text-[var(--color-accent-primary)] underline hover:text-[var(--color-accent-secondary)]"
+    >
+      {children}
+    </a>
+  ),
+  table: ({ children }) => (
+    <div className="overflow-x-auto w-full my-2">
+      <table className="min-w-max w-full border-collapse text-[13px]">
+        {children}
+      </table>
+    </div>
+  ),
+  thead: ({ children }) => (
+    <thead className="bg-[var(--color-bg-secondary)]">{children}</thead>
+  ),
+  th: ({ children }) => (
+    <th className="border border-[var(--color-border)] px-3 py-1.5 text-left font-semibold text-[var(--color-text-heading)] whitespace-nowrap">
+      {children}
+    </th>
+  ),
+  td: ({ children }) => (
+    <td className="border border-[var(--color-border)] px-3 py-1.5 text-[var(--color-text-primary)] whitespace-nowrap">
+      {children}
+    </td>
+  ),
+  img: ({ src, alt }) => <MarkdownImg src={src} alt={alt} />,
+};
+
 function ResourceDropdown<T extends { state: string }>({
   label,
   items,
@@ -230,7 +636,6 @@ function ResourceDropdown<T extends { state: string }>({
   );
 }
 
-// Configuration panel component
 function ConfigPanel({
   isOpen,
   onClose,
@@ -279,7 +684,6 @@ function ConfigPanel({
         </button>
       </div>
       <div className="p-5 space-y-5">
-        {/* Catalog & Schema - stacked for more room */}
         <div>
           <label className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Catalog / Schema</label>
           <div className="mt-1.5 flex items-center gap-0 rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] overflow-hidden focus-within:ring-2 focus-within:ring-[var(--color-accent-primary)]/30 focus-within:border-[var(--color-accent-primary)]/50">
@@ -312,7 +716,6 @@ function ConfigPanel({
           </div>
         </div>
 
-        {/* Cluster - custom dropdown */}
         {clusters.length > 0 && (
           <ResourceDropdown
             label="Cluster"
@@ -324,7 +727,6 @@ function ConfigPanel({
           />
         )}
 
-        {/* Warehouse - custom dropdown */}
         {warehouses.length > 0 && (
           <ResourceDropdown
             label="SQL Warehouse"
@@ -336,7 +738,6 @@ function ConfigPanel({
           />
         )}
 
-        {/* Workspace Folder */}
         <div>
           <label className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">Workspace Folder</label>
           <input
@@ -348,7 +749,6 @@ function ConfigPanel({
           />
         </div>
 
-        {/* MLflow Experiment */}
         <div>
           <label className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">MLflow Experiment</label>
           <input
@@ -364,21 +764,6 @@ function ConfigPanel({
   );
 }
 
-// Sanitize string for schema name: only a-z, 0-9, _ allowed
-function sanitizeForSchema(str: string): string {
-  return str.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
-}
-
-// Convert email + project name to schema name: quentin.ambard@databricks.com + "My Project" -> quentin_ambard_my_project
-function toSchemaName(email: string | null, projectName: string | null): string {
-  if (!email) return '';
-  const localPart = email.split('@')[0];
-  const emailPart = sanitizeForSchema(localPart);
-  if (!projectName) return emailPart;
-  const projectPart = sanitizeForSchema(projectName);
-  return `${emailPart}_${projectPart}`;
-}
-
 export default function ProjectPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
@@ -391,7 +776,7 @@ export default function ProjectPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(true);
-  const [streamingConvIds, setStreamingConvIds] = useState<string[]>([]);
+  const [isStreaming, setIsStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState('');
   const [activityItems, setActivityItems] = useState<ActivityItem[]>([]);
   const [todos, setTodos] = useState<TodoItem[]>([]);
@@ -399,38 +784,150 @@ export default function ProjectPage() {
   const [selectedClusterId, setSelectedClusterId] = useState<string | undefined>();
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string | undefined>();
-  const [defaultCatalog, setDefaultCatalog] = useState<string>('ai_dev_kit');
+  const [userConfig, setUserConfig] = useState<UserSettings | null>(null);
+  const [defaultCatalog, setDefaultCatalog] = useState<string>('');
   const [defaultSchema, setDefaultSchema] = useState<string>('');
   const [workspaceFolder, setWorkspaceFolder] = useState<string>('');
   const [mlflowExperimentName, setMlflowExperimentName] = useState<string>('');
   const [skillsExplorerOpen, setSkillsExplorerOpen] = useState(false);
   const [activeExecutionId, setActiveExecutionId] = useState<string | null>(null);
   const [isReconnecting, setIsReconnecting] = useState(false);
-  const [messageTools, setMessageTools] = useState<Record<string, string[]>>({});
-
-  // Calculate default schema from user email + project name once available
-  const userDefaultSchema = useMemo(() => toSchemaName(user, project?.name ?? null), [user, project?.name]);
+  const [verbose, setVerbose] = useState(true);
+  const [configPanelOpen, setConfigPanelOpen] = useState(false);
+  const [traceHistoryItems, setTraceHistoryItems] = useState<ActivityItem[][]>([]);
+  const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
 
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const reconnectAttemptedRef = useRef<string | null>(null);
-  const currentConvIdRef = useRef<string | undefined>(undefined);
-  // Per-conversation streaming data (supports concurrent streams)
-  const allStreamsRef = useRef<Record<string, {
-    fullText: string;
-    activityItems: ActivityItem[];
-    todos: TodoItem[];
-    tools: string[];
-    executionId: string | null;
-    abortController: AbortController | null;
-    isReconnecting: boolean;
-    pendingMessages: Message[]; // messages not yet saved to DB (user msg + partial assistant)
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const queuedMessagesRef = useRef<QueuedMessage[]>([]);
+  const currentConversationIdRef = useRef<string | null>(null);
+  const activeStreamingConversationIdRef = useRef<string | null>(null);
+  const streamingConversationIdsRef = useRef<Set<string>>(new Set());
+  const executionIdByConversationRef = useRef<Record<string, string>>({});
+  const inProgressByConversationRef = useRef<Record<string, InProgressConversationState>>({});
+  const traceHistoryByConversationRef = useRef<Record<string, ActivityItem[][]>>({});
+  const activeQueuedMessageIdRef = useRef<string | null>(null);
+  const configPanelRef = useRef<HTMLDivElement>(null);
+  const reconnectAttemptedRef = useRef<string | null>(null); // Track which conversation we've checked
+  // True when current conversation was auto-selected (not explicitly chosen by user).
+  // If true, first prompt should start a new conversation by default.
+  const shouldAutoCreateOnNextSendRef = useRef(false);
+  // Accumulates inline image paths during streaming; images are appended after text in the final message.
+  const streamingImagesRef = useRef<string[]>([]);
+  // Set to true when user sends a new message while streaming (interrupt-and-resend), suppresses cancel toast.
+  const isInterruptingRef = useRef(false);
+  const [streamingConversationIds, setStreamingConversationIds] = useState<string[]>([]);
+  // Stores response stats (duration, tokens, cost) keyed by assistant message ID.
+  const responseStatsRef = useRef<Record<string, {
+    duration_ms?: number;
+    num_turns?: number;
+    total_cost_usd?: number;
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_read_tokens?: number;
+    cache_creation_tokens?: number;
   }>>({});
+  // Pending result event data captured during streaming, associated in onDone.
+  const pendingResultRef = useRef<Record<string, unknown> | null>(null);
 
-  // Keep currentConvIdRef in sync with state
-  useEffect(() => { currentConvIdRef.current = currentConversation?.id; }, [currentConversation?.id]);
+  const formatTokenCount = useCallback((n: number | undefined): string => {
+    if (n == null) return '';
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+    return String(n);
+  }, []);
 
+  const formatDuration = useCallback((ms: number | undefined): string => {
+    if (ms == null) return '';
+    if (ms < 1_000) return `${ms}ms`;
+    const s = ms / 1_000;
+    if (s < 60) return `${s.toFixed(1)}s`;
+    const m = Math.floor(s / 60);
+    const rem = Math.round(s % 60);
+    return `${m}m ${rem}s`;
+  }, []);
+
+  const formatTimestamp = useCallback((ts: string | null): string => {
+    if (!ts) return '';
+    const d = new Date(ts);
+    return d.toLocaleString([], {
+      year: 'numeric',
+      month: 'short',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }, []);
+
+  const appendTraceHistoryForConversation = useCallback((conversationId: string, trace: ActivityItem[]) => {
+    if (trace.length === 0) return;
+    const existing = traceHistoryByConversationRef.current[conversationId] || [];
+    const last = existing[existing.length - 1];
+    const next = last && tracesEqual(last, trace)
+      ? existing
+      : [...existing, trace].slice(-50);
+    traceHistoryByConversationRef.current[conversationId] = next;
+    if (currentConversationIdRef.current === conversationId) {
+      setTraceHistoryItems(next);
+    }
+  }, []);
+
+  const setConversationStreamingState = useCallback((
+    conversationId: string,
+    streaming: boolean,
+    executionId?: string | null
+  ) => {
+    if (!conversationId) return;
+    if (streaming) {
+      streamingConversationIdsRef.current.add(conversationId);
+      if (executionId) {
+        executionIdByConversationRef.current[conversationId] = executionId;
+      }
+    } else {
+      streamingConversationIdsRef.current.delete(conversationId);
+      delete executionIdByConversationRef.current[conversationId];
+    }
+    setStreamingConversationIds(Array.from(streamingConversationIdsRef.current));
+
+    if (currentConversationIdRef.current === conversationId) {
+      setIsStreaming(streaming);
+      if (streaming) {
+        activeStreamingConversationIdRef.current = conversationId;
+        setActiveExecutionId(executionId ?? executionIdByConversationRef.current[conversationId] ?? null);
+      } else {
+        if (activeStreamingConversationIdRef.current === conversationId) {
+          activeStreamingConversationIdRef.current = null;
+        }
+        setActiveExecutionId(null);
+      }
+    }
+  }, []);
+
+  // Keep queued user messages visually below the response that is currently finishing.
+  const insertAssistantBeforeQueued = useCallback(
+    (prev: Message[], assistant: Message, conversationId: string | null): Message[] => {
+      const activeQueuedMessageId = activeQueuedMessageIdRef.current;
+      if (activeQueuedMessageId) {
+        const queuedIdx = prev.findIndex((m) => m.id === activeQueuedMessageId);
+        if (queuedIdx >= 0) {
+          return [...prev.slice(0, queuedIdx), assistant, ...prev.slice(queuedIdx)];
+        }
+      }
+      if (!conversationId) return [...prev, assistant];
+      const pendingForConversation = queuedMessagesRef.current.filter(
+        (m) => m.conversationId === conversationId
+      ).length;
+      if (pendingForConversation <= 0) return [...prev, assistant];
+      const insertAt = Math.max(prev.length - pendingForConversation, 0);
+      return [...prev.slice(0, insertAt), assistant, ...prev.slice(insertAt)];
+    },
+    []
+  );
   // Load project and conversations
   useEffect(() => {
     if (!projectId) return;
@@ -438,22 +935,53 @@ export default function ProjectPage() {
     const loadData = async () => {
       try {
         setIsLoading(true);
-        const [projectData, conversationsData, clustersData, warehousesData] = await Promise.all([
+        const [projectData, conversationsData, clustersData, warehousesData, userSettingsData] = await Promise.all([
           fetchProject(projectId),
           fetchConversations(projectId),
           fetchClusters().catch(() => []), // Don't fail if clusters can't be loaded
           fetchWarehouses().catch(() => []), // Don't fail if warehouses can't be loaded
+          fetchUserSettings().catch(() => null),
         ]);
         setProject(projectData);
         setConversations(conversationsData);
         setClusters(clustersData);
         setWarehouses(warehousesData);
+        setUserConfig(userSettingsData);
 
-        // Load first conversation if available
+        // Load first conversation by default, but prefer one with an active execution
+        // so refresh restores the in-progress thread immediately.
         if (conversationsData.length > 0) {
-          const conv = await fetchConversation(projectId, conversationsData[0].id);
+          let preferredConversationId = conversationsData[0].id;
+          let preferredExecutionState: { active: Execution | null; recent: Execution[] } | null = null;
+
+          for (const summary of conversationsData.slice(0, 20)) {
+            const state = await fetchExecutions(projectId, summary.id).catch(() => null);
+            if (!state) continue;
+            if (summary.id === preferredConversationId && !preferredExecutionState) {
+              preferredExecutionState = state;
+            }
+            if (state.active) {
+              preferredConversationId = summary.id;
+              preferredExecutionState = state;
+              break;
+            }
+          }
+
+          const conv = await fetchConversation(projectId, preferredConversationId);
+          const executionState = preferredExecutionState
+            ?? await fetchExecutions(projectId, conv.id).catch(() => ({ active: null, recent: [] }));
+          const persistedTraceHistory = buildTraceHistoryFromExecutions(executionState.recent);
           setCurrentConversation(conv);
           setMessages(conv.messages || []);
+          const cachedTraceHistory = traceHistoryByConversationRef.current[conv.id] || [];
+          const runTraceHistory = mergeTraceHistories(persistedTraceHistory, cachedTraceHistory);
+          if (runTraceHistory.length > 0) {
+            traceHistoryByConversationRef.current[conv.id] = runTraceHistory;
+          }
+          setTraceHistoryItems(runTraceHistory);
+          // Keep sending in the selected conversation by default.
+          // Previously we auto-created a new conversation on first send.
+          shouldAutoCreateOnNextSendRef.current = false;
           // Restore cluster selection from conversation, or default to first cluster
           if (conv.cluster_id) {
             setSelectedClusterId(conv.cluster_id);
@@ -466,25 +994,22 @@ export default function ProjectPage() {
           } else if (warehousesData.length > 0) {
             setSelectedWarehouseId(warehousesData[0].warehouse_id);
           }
-          // Restore catalog/schema from conversation
-          if (conv.default_catalog) {
-            setDefaultCatalog(conv.default_catalog);
-          }
-          if (conv.default_schema) {
-            setDefaultSchema(conv.default_schema);
-          }
-          // Restore workspace folder from conversation
-          if (conv.workspace_folder) {
-            setWorkspaceFolder(conv.workspace_folder);
-          }
+          // Restore catalog/schema/folder from conversation, then user config, then empty
+          setDefaultCatalog(conv.default_catalog || userSettingsData?.default_catalog || '');
+          setDefaultSchema(conv.default_schema || userSettingsData?.default_schema || '');
+          setWorkspaceFolder(conv.workspace_folder || userSettingsData?.workspace_folder || '');
         } else {
-          // No conversation yet, but still select first cluster/warehouse
+          shouldAutoCreateOnNextSendRef.current = false;
+          // No conversation yet — apply user config defaults
           if (clustersData.length > 0) {
             setSelectedClusterId(clustersData[0].cluster_id);
           }
           if (warehousesData.length > 0) {
             setSelectedWarehouseId(warehousesData[0].warehouse_id);
           }
+          setDefaultCatalog(userSettingsData?.default_catalog || '');
+          setDefaultSchema(userSettingsData?.default_schema || '');
+          setWorkspaceFolder(userSettingsData?.workspace_folder || '');
         }
       } catch (error) {
         console.error('Failed to load project:', error);
@@ -498,9 +1023,40 @@ export default function ProjectPage() {
     loadData();
   }, [projectId, navigate]);
 
+  // Keep selected conversation ID available to async stream callbacks.
+  useEffect(() => {
+    currentConversationIdRef.current = currentConversation?.id ?? null;
+  }, [currentConversation?.id]);
+
+  useEffect(() => {
+    const conversationId = currentConversation?.id;
+    if (!conversationId) {
+      setIsStreaming(false);
+      activeStreamingConversationIdRef.current = null;
+      setActiveExecutionId(null);
+      return;
+    }
+    const isActive = streamingConversationIdsRef.current.has(conversationId);
+    setIsStreaming(isActive);
+    activeStreamingConversationIdRef.current = isActive ? conversationId : null;
+    setActiveExecutionId(isActive ? (executionIdByConversationRef.current[conversationId] ?? null) : null);
+  }, [currentConversation?.id]);
+
+  // Keep left sidebar conversation title in sync with the chat header.
+  useEffect(() => {
+    if (!currentConversation?.id || !currentConversation.title) return;
+    setConversations((prev) =>
+      prev.map((conv) =>
+        conv.id === currentConversation.id && conv.title !== currentConversation.title
+          ? { ...conv, title: currentConversation.title }
+          : conv
+      )
+    );
+  }, [currentConversation?.id, currentConversation?.title]);
+
   // Check for active execution when conversation loads and reconnect if needed
   useEffect(() => {
-    if (!projectId || !currentConversation?.id || isLoading || allStreamsRef.current[currentConversation.id]) return;
+    if (!projectId || !currentConversation?.id || isLoading || isStreaming) return;
 
     // Skip if we've already checked this conversation
     if (reconnectAttemptedRef.current === currentConversation.id) return;
@@ -512,564 +1068,174 @@ export default function ProjectPage() {
 
         if (active && active.status === 'running') {
           console.log('[RECONNECT] Found active execution:', active.id);
-          const reconConvId = currentConversation.id;
-          const controller = new AbortController();
-          allStreamsRef.current[reconConvId] = {
-            fullText: '',
-            activityItems: [],
-            todos: [],
-            tools: [],
-            executionId: active.id,
-            abortController: controller,
-            isReconnecting: true,
-            pendingMessages: [],
-          };
-          setStreamingConvIds(prev => [...prev, reconConvId]);
           setIsReconnecting(true);
+          setIsStreaming(true);
+          activeStreamingConversationIdRef.current = currentConversation.id;
           setActiveExecutionId(active.id);
 
-          let fullText = '';
+          // Create abort controller for reconnection
+          abortControllerRef.current = new AbortController();
+
+          let confirmedText = '';
+          let deltaText = '';
+
+          const buildDisplayText = () => {
+            const base = !confirmedText ? deltaText
+              : !deltaText ? confirmedText
+              : confirmedText + (confirmedText.endsWith('\n') || deltaText.startsWith('\n') ? '' : '\n\n') + deltaText;
+            const imgs = streamingImagesRef.current.map(p => `\n\n![](${p})`).join('');
+            return base + imgs;
+          };
 
           await reconnectToExecution({
             executionId: active.id,
             storedEvents: active.events,
-            signal: controller.signal,
+            signal: abortControllerRef.current.signal,
             onEvent: (event) => {
               const type = event.type as string;
-              const stream = allStreamsRef.current[reconConvId];
-              const isForeground = currentConvIdRef.current === reconConvId;
 
               if (type === 'text_delta') {
                 const text = event.text as string;
-                fullText += text;
-                if (stream) stream.fullText = fullText;
-                if (isForeground) setStreamingText(fullText);
+                deltaText += text;
+                setStreamingText(buildDisplayText());
               } else if (type === 'text') {
                 const text = event.text as string;
                 if (text) {
-                  if (fullText && !fullText.endsWith('\n') && !text.startsWith('\n')) {
-                    fullText += '\n\n';
+                  if (confirmedText && !confirmedText.endsWith('\n') && !text.startsWith('\n')) {
+                    confirmedText += '\n\n';
                   }
-                  fullText += text;
-                  if (stream) stream.fullText = fullText;
-                  if (isForeground) setStreamingText(fullText);
+                  confirmedText += text;
+                  deltaText = '';
+                  setStreamingText(buildDisplayText());
                 }
               } else if (type === 'tool_use') {
-                const newItem: ActivityItem = {
-                  id: event.tool_id as string,
-                  type: 'tool_use',
-                  content: '',
-                  toolName: event.tool_name as string,
-                  toolInput: event.tool_input as Record<string, unknown>,
-                  timestamp: Date.now(),
-                };
-                if (stream) {
-                  stream.activityItems = [...stream.activityItems, newItem];
-                  stream.tools = [...stream.tools, event.tool_name as string];
-                }
-                if (isForeground) setActivityItems(prev => [...prev, newItem]);
+                setActivityItems((prev) => [
+                  ...prev,
+                  {
+                    id: event.tool_id as string,
+                    type: 'tool_use',
+                    content: '',
+                    toolName: event.tool_name as string,
+                    toolInput: event.tool_input as Record<string, unknown>,
+                    timestamp: Date.now(),
+                  },
+                ]);
               } else if (type === 'tool_result') {
-                const newItem: ActivityItem = {
+                const resultItem = {
                   id: `result-${event.tool_use_id}`,
-                  type: 'tool_result',
+                  type: 'tool_result' as const,
                   content: typeof event.content === 'string' ? event.content : JSON.stringify(event.content),
                   isError: event.is_error as boolean,
                   timestamp: Date.now(),
                 };
-                if (stream) stream.activityItems = [...stream.activityItems, newItem];
-                if (isForeground) setActivityItems(prev => [...prev, newItem]);
+                setActivityItems((prev) => {
+                  const idx = prev.findIndex((i) => i.id === resultItem.id);
+                  if (idx >= 0) { const u = [...prev]; u[idx] = resultItem; return u; }
+                  return [...prev, resultItem];
+                });
+              } else if (type === 'inline_image') {
+                const path = event.path as string;
+                if (!streamingImagesRef.current.includes(path)) {
+                  streamingImagesRef.current = [...streamingImagesRef.current, path];
+                  setStreamingText(buildDisplayText());
+                }
               } else if (type === 'todos') {
                 const todoItems = event.todos as TodoItem[];
                 if (todoItems) {
-                  if (stream) stream.todos = todoItems;
-                  if (isForeground) setTodos(todoItems);
+                  setTodos(todoItems);
                 }
+              } else if (type === 'keepalive') {
+                const elapsed = Number(event.elapsed_since_last_event ?? 0);
+                const keepaliveItem: ActivityItem = {
+                  id: 'keepalive-latest',
+                  type: 'keepalive',
+                  content: `Waiting on long-running step... ${Math.max(0, Math.round(elapsed))}s since last update`,
+                  timestamp: Date.now(),
+                };
+                setActivityItems((prev) => {
+                  const idx = prev.findIndex((i) => i.id === keepaliveItem.id);
+                  if (idx >= 0) {
+                    const updated = [...prev];
+                    updated[idx] = keepaliveItem;
+                    return updated;
+                  }
+                  return [...prev, keepaliveItem];
+                });
+              } else if (type === 'result') {
+                pendingResultRef.current = event;
               } else if (type === 'error') {
                 toast.error(event.error as string, { duration: 8000 });
               }
             },
             onError: (error) => {
               console.error('Reconnect error:', error);
-              toast.error('Failed to reconnect to execution');
+              setIsStreaming(false);
+              activeStreamingConversationIdRef.current = null;
+              setIsReconnecting(false);
+              setActiveExecutionId(null);
+              setStreamingText('');
+              setActivityItems([]);
+              const msg = error.message ?? '';
+              if (!msg.includes('Stream not found') && !msg.includes('404')) {
+                toast.error('Lost connection to agent execution', { duration: 5000 });
+              }
             },
             onDone: async () => {
-              delete allStreamsRef.current[reconConvId];
-              setStreamingConvIds(prev => prev.filter(id => id !== reconConvId));
-
-              const conv = await fetchConversation(projectId, reconConvId);
-              if (currentConvIdRef.current === reconConvId) {
+              try {
+                const conv = await fetchConversation(projectId, currentConversation.id);
                 setCurrentConversation(conv);
+                if (pendingResultRef.current) {
+                  const r = pendingResultRef.current;
+                  const lastAssistant = (conv.messages || []).filter(m => m.role === 'assistant').pop();
+                  if (lastAssistant) {
+                    responseStatsRef.current[lastAssistant.id] = {
+                      duration_ms: r.duration_ms as number | undefined,
+                      num_turns: r.num_turns as number | undefined,
+                      total_cost_usd: r.total_cost_usd as number | undefined,
+                      input_tokens: r.input_tokens as number | undefined,
+                      output_tokens: r.output_tokens as number | undefined,
+                      cache_read_tokens: r.cache_read_tokens as number | undefined,
+                      cache_creation_tokens: r.cache_creation_tokens as number | undefined,
+                    };
+                  }
+                  pendingResultRef.current = null;
+                }
                 setMessages(conv.messages || []);
-                setStreamingText('');
-                setIsReconnecting(false);
-                setActiveExecutionId(null);
-                setActivityItems([]);
-                setTodos([]);
+              } catch (e) {
+                console.error('Failed to reload conversation after reconnect:', e);
               }
-              fetchConversations(projectId).then(setConversations);
+              setStreamingText('');
+              setIsStreaming(false);
+              setIsReconnecting(false);
+              setActiveExecutionId(null);
+              setActivityItems((current) => {
+                if (currentConversation.id) {
+                  appendTraceHistoryForConversation(currentConversation.id, current);
+                }
+                return [];
+              });
             },
           });
         }
       } catch (error) {
         console.error('Failed to check for active executions:', error);
-        // Don't show error toast - this is a background check
+        // Always clean up streaming state so UI doesn't get stuck
+        setIsStreaming(false);
+        activeStreamingConversationIdRef.current = null;
+        setIsReconnecting(false);
+        setActiveExecutionId(null);
+        setStreamingText('');
+        setActivityItems([]);
       }
     };
 
     checkAndReconnect();
-  }, [projectId, currentConversation?.id, isLoading]);
+  }, [projectId, currentConversation?.id, isLoading, isStreaming]);
 
   // Scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, streamingText, activityItems]);
-
-  // Set default schema from user email once when first available
-  const schemaDefaultApplied = useRef(false);
-  useEffect(() => {
-    if (userDefaultSchema && !schemaDefaultApplied.current && !defaultSchema) {
-      setDefaultSchema(userDefaultSchema);
-      schemaDefaultApplied.current = true;
-    }
-  }, [userDefaultSchema]);
-
-  // Set default workspace folder from user email and project name once when first available
-  const folderDefaultApplied = useRef(false);
-  useEffect(() => {
-    if (user && project?.name && !folderDefaultApplied.current && !workspaceFolder) {
-      const projectFolder = sanitizeForSchema(project.name);
-      setWorkspaceFolder(`/Workspace/Users/${user}/ai_dev_kit/${projectFolder}`);
-      folderDefaultApplied.current = true;
-    }
-  }, [user, project?.name]);
-
-  // Select a conversation
-  const handleSelectConversation = async (conversationId: string) => {
-    if (!projectId || currentConversation?.id === conversationId) return;
-
-    // Update ref immediately so stream callbacks target the right conversation
-    currentConvIdRef.current = conversationId;
-    // Reset reconnect tracking for the new conversation
-    reconnectAttemptedRef.current = null;
-
-    try {
-      const conv = await fetchConversation(projectId, conversationId);
-      setCurrentConversation(conv);
-
-      // Sync streaming UI state for the new conversation
-      const stream = allStreamsRef.current[conversationId];
-      if (stream) {
-        // Merge API messages with pending messages not yet saved to DB
-        const apiMessages = conv.messages || [];
-        const pending = stream.pendingMessages || [];
-        const apiIds = new Set(apiMessages.map(m => m.content + m.role));
-        const missingPending = pending.filter(m => !apiIds.has(m.content + m.role));
-        setMessages([...missingPending, ...apiMessages]);
-        setStreamingText(stream.fullText);
-        setActivityItems([...stream.activityItems]);
-        setTodos([...stream.todos]);
-        setActiveExecutionId(stream.executionId);
-        setIsReconnecting(stream.isReconnecting);
-      } else {
-        setMessages(conv.messages || []);
-        setStreamingText('');
-        setActivityItems([]);
-        setTodos([]);
-        setActiveExecutionId(null);
-        setIsReconnecting(false);
-      }
-      // Restore cluster selection from conversation, or default to first cluster
-      setSelectedClusterId(conv.cluster_id || (clusters.length > 0 ? clusters[0].cluster_id : undefined));
-      // Restore warehouse selection from conversation, or default to first warehouse
-      setSelectedWarehouseId(conv.warehouse_id || (warehouses.length > 0 ? warehouses[0].warehouse_id : undefined));
-      // Restore catalog/schema from conversation, or use defaults
-      setDefaultCatalog(conv.default_catalog || 'ai_dev_kit');
-      setDefaultSchema(conv.default_schema || userDefaultSchema);
-      // Restore workspace folder from conversation, or use default
-      const projectFolder = project?.name ? sanitizeForSchema(project.name) : projectId;
-      setWorkspaceFolder(conv.workspace_folder || (user ? `/Workspace/Users/${user}/ai_dev_kit/${projectFolder}` : ''));
-    } catch (error) {
-      console.error('Failed to load conversation:', error);
-      toast.error('Failed to load conversation');
-    }
-  };
-
-  // Create new conversation
-  const handleNewConversation = async () => {
-    if (!projectId) return;
-
-    try {
-      const conv = await createConversation(projectId);
-      currentConvIdRef.current = conv.id; // Update ref immediately
-      setConversations((prev) => [conv, ...prev]);
-      setCurrentConversation(conv);
-      setMessages([]);
-      // Clear streaming UI (new conv isn't streaming yet)
-      setStreamingText('');
-      setActivityItems([]);
-      setTodos([]);
-      setActiveExecutionId(null);
-      setIsReconnecting(false);
-      inputRef.current?.focus();
-    } catch (error) {
-      console.error('Failed to create conversation:', error);
-      toast.error('Failed to create conversation');
-    }
-  };
-
-  // Delete conversation
-  const handleDeleteConversation = async (conversationId: string) => {
-    if (!projectId) return;
-
-    try {
-      await deleteConversation(projectId, conversationId);
-      setConversations((prev) => prev.filter((c) => c.id !== conversationId));
-
-      // Clean up any active stream for this conversation
-      const stream = allStreamsRef.current[conversationId];
-      if (stream) {
-        stream.abortController?.abort();
-        delete allStreamsRef.current[conversationId];
-        setStreamingConvIds(prev => prev.filter(id => id !== conversationId));
-      }
-
-      if (currentConversation?.id === conversationId) {
-        const remaining = conversations.filter((c) => c.id !== conversationId);
-        if (remaining.length > 0) {
-          const conv = await fetchConversation(projectId, remaining[0].id);
-          setCurrentConversation(conv);
-          setMessages(conv.messages || []);
-        } else {
-          setCurrentConversation(null);
-          setMessages([]);
-        }
-        setStreamingText('');
-        setActivityItems([]);
-        setTodos([]);
-        setActiveExecutionId(null);
-      }
-      toast.success('Conversation deleted');
-    } catch (error) {
-      console.error('Failed to delete conversation:', error);
-      toast.error('Failed to delete conversation');
-    }
-  };
-
-  // Send message
-  const handleSendMessage = useCallback(async () => {
-    if (!projectId || !input.trim()) return;
-    const convId = currentConversation?.id;
-    // Block only if THIS conversation is already streaming
-    if (convId && allStreamsRef.current[convId]) return;
-
-    const userMessage = input.trim();
-    setInput('');
-    setStreamingText('');
-    setActivityItems([]);
-    setTodos([]);
-
-    // Add user message to UI immediately
-    const tempUserMessage: Message = {
-      id: `temp-${Date.now()}`,
-      conversation_id: convId || '',
-      role: 'user',
-      content: userMessage,
-      timestamp: new Date().toISOString(),
-      is_error: false,
-    };
-    setMessages((prev) => [...prev, tempUserMessage]);
-
-    // Create abort controller and initialize stream tracking
-    const abortController = new AbortController();
-    const effectiveConvId = convId || '';
-    let streamKey = effectiveConvId;
-    allStreamsRef.current[streamKey] = {
-      fullText: '',
-      activityItems: [],
-      todos: [],
-      tools: [],
-      executionId: null,
-      abortController,
-      isReconnecting: false,
-      pendingMessages: [tempUserMessage],
-    };
-    setStreamingConvIds(prev => [...prev, effectiveConvId]);
-
-    try {
-      let conversationId = convId;
-      let fullText = '';
-
-      await invokeAgent({
-        projectId,
-        conversationId,
-        message: userMessage,
-        clusterId: selectedClusterId,
-        defaultCatalog,
-        defaultSchema,
-        warehouseId: selectedWarehouseId,
-        workspaceFolder,
-        mlflowExperimentName: mlflowExperimentName || null,
-        signal: abortController.signal,
-        onExecutionId: (executionId) => {
-          const stream = allStreamsRef.current[streamKey];
-          if (stream) stream.executionId = executionId;
-          if (currentConvIdRef.current === streamKey) setActiveExecutionId(executionId);
-        },
-        onEvent: (event) => {
-          const type = event.type as string;
-          const stream = allStreamsRef.current[streamKey];
-          const isForeground = currentConvIdRef.current === streamKey;
-
-          if (type === 'conversation.created') {
-            const newConvId = event.conversation_id as string;
-            // Move stream entry from old key to new key
-            const oldStream = allStreamsRef.current[streamKey];
-            delete allStreamsRef.current[streamKey];
-            const oldKey = streamKey;
-            streamKey = newConvId;
-            allStreamsRef.current[newConvId] = oldStream || {
-              fullText: '', activityItems: [], todos: [], tools: [],
-              executionId: null, abortController, isReconnecting: false,
-              pendingMessages: [],
-            };
-            conversationId = newConvId;
-            // Update streamingConvIds from old key to new key
-            setStreamingConvIds(prev => prev.filter(id => id !== oldKey).concat(newConvId));
-            // Set currentConversation immediately so UI stays consistent
-            setCurrentConversation((prev) => prev ?? {
-              id: newConvId,
-              project_id: projectId,
-              title: 'New Chat',
-              created_at: new Date().toISOString(),
-              conversation_count: 0,
-            } as unknown as Conversation);
-            currentConvIdRef.current = newConvId;
-            fetchConversations(projectId).then(setConversations);
-          } else if (type === 'text_delta') {
-            const text = event.text as string;
-            fullText += text;
-            if (stream) stream.fullText = fullText;
-            if (isForeground) setStreamingText(fullText);
-          } else if (type === 'text') {
-            const text = event.text as string;
-            if (text) {
-              if (fullText && !fullText.endsWith('\n') && !text.startsWith('\n')) {
-                fullText += '\n\n';
-              }
-              fullText += text;
-              if (stream) stream.fullText = fullText;
-              if (isForeground) setStreamingText(fullText);
-            }
-          } else if (type === 'thinking' || type === 'thinking_delta') {
-            const thinking = (event.thinking as string) || '';
-            if (thinking) {
-              const updateThinking = (prev: ActivityItem[]) => {
-                if (type === 'thinking_delta' && prev.length > 0 && prev[prev.length - 1].type === 'thinking') {
-                  const updated = [...prev];
-                  updated[updated.length - 1] = {
-                    ...updated[updated.length - 1],
-                    content: updated[updated.length - 1].content + thinking,
-                  };
-                  return updated;
-                }
-                return [
-                  ...prev,
-                  {
-                    id: `thinking-${Date.now()}`,
-                    type: 'thinking' as const,
-                    content: thinking,
-                    timestamp: Date.now(),
-                  },
-                ];
-              };
-              if (stream) stream.activityItems = updateThinking(stream.activityItems);
-              if (isForeground) setActivityItems(updateThinking);
-            }
-          } else if (type === 'tool_use') {
-            const toolName = event.tool_name as string;
-            const newItem: ActivityItem = {
-              id: event.tool_id as string,
-              type: 'tool_use',
-              content: '',
-              toolName,
-              toolInput: event.tool_input as Record<string, unknown>,
-              timestamp: Date.now(),
-            };
-            if (stream) {
-              stream.tools = [...stream.tools, toolName];
-              stream.activityItems = [...stream.activityItems, newItem];
-            }
-            if (isForeground) setActivityItems(prev => [...prev, newItem]);
-          } else if (type === 'tool_result') {
-            let content = event.content as string;
-
-            if (event.is_error && typeof content === 'string') {
-              const errorMatch = content.match(/<tool_use_error>(.*?)<\/tool_use_error>/s);
-              if (errorMatch) {
-                content = errorMatch[1].trim();
-              }
-              if (content === 'Stream closed' || content.includes('Stream closed')) {
-                content = 'Tool execution interrupted: The operation took too long or the connection was lost. This may happen when operations exceed the 50-second timeout window. Check backend logs for details.';
-              }
-            }
-
-            const newItem: ActivityItem = {
-              id: `result-${event.tool_use_id}`,
-              type: 'tool_result',
-              content: typeof content === 'string' ? content : JSON.stringify(content),
-              isError: event.is_error as boolean,
-              timestamp: Date.now(),
-            };
-            if (stream) stream.activityItems = [...stream.activityItems, newItem];
-            if (isForeground) setActivityItems(prev => [...prev, newItem]);
-          } else if (type === 'error') {
-            let errorMsg = event.error as string;
-            if (errorMsg === 'Stream closed' || errorMsg.includes('Stream closed')) {
-              errorMsg = 'Execution interrupted: The operation took too long or the connection was lost. Operations exceeding 50 seconds may be interrupted. Check backend logs for details.';
-            }
-            toast.error(errorMsg, { duration: 8000 });
-          } else if (type === 'cancelled') {
-            toast.info('Generation stopped');
-          } else if (type === 'todos') {
-            const todoItems = event.todos as TodoItem[];
-            if (todoItems) {
-              if (stream) stream.todos = todoItems;
-              if (isForeground) setTodos(todoItems);
-            }
-          }
-        },
-        onError: (error) => {
-          console.error('Stream error:', error);
-          const errorMessage = error.message || 'Failed to get response';
-          toast.error(errorMessage, { duration: 8000 });
-        },
-        onDone: async () => {
-          const finalStreamKey = streamKey;
-          const stream = allStreamsRef.current[finalStreamKey];
-          const tools = stream?.tools || [];
-
-          if (fullText) {
-            const msgId = `msg-${Date.now()}`;
-            const assistantMessage: Message = {
-              id: msgId,
-              conversation_id: conversationId || '',
-              role: 'assistant',
-              content: fullText,
-              timestamp: new Date().toISOString(),
-              is_error: false,
-            };
-            // Only update messages if user is viewing this conversation
-            if (currentConvIdRef.current === finalStreamKey) {
-              setMessages((prev) => [...prev, assistantMessage]);
-            }
-            if (tools.length > 0) {
-              setMessageTools((prev) => ({ ...prev, [msgId]: tools }));
-            }
-          }
-
-          // Clean up stream
-          delete allStreamsRef.current[finalStreamKey];
-          setStreamingConvIds(prev => prev.filter(id => id !== finalStreamKey));
-
-          if (currentConvIdRef.current === finalStreamKey) {
-            setStreamingText('');
-            setActiveExecutionId(null);
-            setActivityItems([]);
-            setTodos([]);
-          }
-
-          // Fetch full conversation to get updated title and messages
-          if (conversationId) {
-            const conv = await fetchConversation(projectId, conversationId);
-            if (currentConvIdRef.current === finalStreamKey) {
-              setCurrentConversation(conv);
-            }
-            fetchConversations(projectId).then(setConversations);
-          }
-        },
-      });
-    } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') return;
-      console.error('Failed to send message:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Failed to send message';
-      toast.error(errorMessage, { duration: 8000 });
-      // Clean up stream on error
-      delete allStreamsRef.current[streamKey];
-      setStreamingConvIds(prev => prev.filter(id => id !== streamKey));
-      if (currentConvIdRef.current === streamKey) {
-        setStreamingText('');
-        setActiveExecutionId(null);
-        setActivityItems([]);
-        setTodos([]);
-      }
-    }
-  }, [projectId, input, currentConversation?.id, selectedClusterId, defaultCatalog, defaultSchema, selectedWarehouseId, workspaceFolder, mlflowExperimentName]);
-
-  // Stop generation - abort client stream AND tell backend to cancel
-  const handleStopGeneration = useCallback(async () => {
-    const targetId = currentConversation?.id;
-    if (!targetId) return;
-
-    const stream = allStreamsRef.current[targetId];
-    if (!stream) return;
-
-    // Abort the fetch
-    stream.abortController?.abort();
-
-    // Tell the backend to cancel the agent execution
-    if (stream.executionId) {
-      try {
-        await stopExecution(stream.executionId);
-      } catch (error) {
-        console.error('Failed to stop execution on backend:', error);
-      }
-    }
-
-    // Save partial response
-    if (stream.fullText) {
-      const msgId = `msg-stopped-${Date.now()}`;
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: msgId,
-          conversation_id: targetId,
-          role: 'assistant' as const,
-          content: stream.fullText,
-          timestamp: new Date().toISOString(),
-          is_error: false,
-        },
-      ]);
-      if (stream.tools.length > 0) {
-        setMessageTools((prev) => ({ ...prev, [msgId]: stream.tools }));
-      }
-    }
-
-    // Clean up stream
-    delete allStreamsRef.current[targetId];
-    setStreamingConvIds(prev => prev.filter(id => id !== targetId));
-    setStreamingText('');
-    setActiveExecutionId(null);
-    setActivityItems([]);
-    setTodos([]);
-  }, [currentConversation?.id]);
-
-  // Handle keyboard submit (skip during IME composition so Enter confirms
-  // the conversion instead of sending the message)
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-      e.preventDefault();
-      handleSendMessage();
-    }
-  };
-
-  // Open skills explorer
-  const handleViewSkills = () => {
-    setSkillsExplorerOpen(true);
-  };
-
-  // Config panel state
-  const [configPanelOpen, setConfigPanelOpen] = useState(false);
-  const configPanelRef = useRef<HTMLDivElement>(null);
 
   // Close config panel on outside click
   useEffect(() => {
@@ -1084,77 +1250,1017 @@ export default function ProjectPage() {
     }
   }, [configPanelOpen]);
 
-  // Auto-resize textarea
-  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setInput(e.target.value);
-    const el = e.target;
-    el.style.height = 'auto';
-    el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+  // Select a conversation
+  const handleSelectConversation = async (conversationId: string) => {
+    if (!projectId || currentConversation?.id === conversationId) return;
+
+    // Reset reconnect tracking for the new conversation
+    reconnectAttemptedRef.current = null;
+
+    try {
+      shouldAutoCreateOnNextSendRef.current = false;
+      const conv = await fetchConversation(projectId, conversationId);
+      const executionState = await fetchExecutions(projectId, conversationId).catch(() => ({ active: null, recent: [] }));
+      const persistedTraceHistory = buildTraceHistoryFromExecutions(executionState.recent);
+      const inProgress = inProgressByConversationRef.current[conversationId];
+      const baseMessages = conv.messages || [];
+      const viewMessages = inProgress?.userMessage
+        ? [...baseMessages, inProgress.userMessage, ...(inProgress.queuedMessages || [])]
+        : baseMessages;
+
+      setCurrentConversation(conv);
+      setMessages(viewMessages);
+      setStreamingText(
+        inProgress && streamingConversationIdsRef.current.has(conversationId)
+          ? inProgress.streamingText
+          : ''
+      );
+      setActivityItems([]);
+      const cachedTraceHistory = traceHistoryByConversationRef.current[conversationId] || [];
+      const runTraceHistory = mergeTraceHistories(persistedTraceHistory, cachedTraceHistory);
+      if (runTraceHistory.length > 0) {
+        traceHistoryByConversationRef.current[conversationId] = runTraceHistory;
+      }
+      setTraceHistoryItems(runTraceHistory);
+      // Restore cluster selection from conversation, or default to first cluster
+      setSelectedClusterId(conv.cluster_id || (clusters.length > 0 ? clusters[0].cluster_id : undefined));
+      // Restore warehouse selection from conversation, or default to first warehouse
+      setSelectedWarehouseId(conv.warehouse_id || (warehouses.length > 0 ? warehouses[0].warehouse_id : undefined));
+      // Restore catalog/schema/folder from conversation, then user config, then empty
+      setDefaultCatalog(conv.default_catalog || userConfig?.default_catalog || '');
+      setDefaultSchema(conv.default_schema || userConfig?.default_schema || '');
+      setWorkspaceFolder(conv.workspace_folder || userConfig?.workspace_folder || '');
+      const isConvStreaming = streamingConversationIdsRef.current.has(conversationId);
+      setIsStreaming(isConvStreaming);
+      activeStreamingConversationIdRef.current = isConvStreaming ? conversationId : null;
+      setActiveExecutionId(isConvStreaming ? (executionIdByConversationRef.current[conversationId] ?? null) : null);
+    } catch (error) {
+      console.error('Failed to load conversation:', error);
+      toast.error('Failed to load conversation');
+    }
   };
 
-  // Markdown components shared between messages and streaming
-  const markdownComponents = useMemo(() => ({
-    a: ({ href, children }: { href?: string; children?: React.ReactNode }) => (
-      <a
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-[var(--color-accent-primary)] underline decoration-[var(--color-accent-primary)]/30 hover:decoration-[var(--color-accent-primary)] hover:text-[var(--color-accent-secondary)] transition-colors"
-      >
-        {children}
-      </a>
-    ),
-    pre: ({ children }: { children?: React.ReactNode }) => {
-      // Extract text content from children for copy button
-      const getTextContent = (node: React.ReactNode): string => {
-        if (typeof node === 'string') return node;
-        if (!node) return '';
-        if (Array.isArray(node)) return node.map(getTextContent).join('');
-        if (typeof node === 'object' && 'props' in (node as React.ReactElement)) {
-          return getTextContent((node as React.ReactElement).props.children);
+  // Create new conversation
+  const handleNewConversation = async () => {
+    if (!projectId) return;
+
+    try {
+      shouldAutoCreateOnNextSendRef.current = false;
+      const conv = await createConversation(projectId);
+      setConversations((prev) => [conv, ...prev]);
+      setCurrentConversation(conv);
+      setMessages([]);
+      setActivityItems([]);
+      setTraceHistoryItems([]);
+      // Reset to user config defaults for new conversations
+      setDefaultCatalog(userConfig?.default_catalog || '');
+      setDefaultSchema(userConfig?.default_schema || '');
+      setWorkspaceFolder(userConfig?.workspace_folder || '');
+      inputRef.current?.focus();
+    } catch (error) {
+      console.error('Failed to create conversation:', error);
+      toast.error('Failed to create conversation');
+    }
+  };
+
+  // Delete conversation
+  const handleDeleteConversation = async (conversationId: string) => {
+    if (!projectId) return;
+
+    try {
+      await deleteConversation(projectId, conversationId);
+      setConversations((prev) => prev.filter((c) => c.id !== conversationId));
+      delete traceHistoryByConversationRef.current[conversationId];
+
+      if (currentConversation?.id === conversationId) {
+        const remaining = conversations.filter((c) => c.id !== conversationId);
+        if (remaining.length > 0) {
+          const conv = await fetchConversation(projectId, remaining[0].id);
+          const executionState = await fetchExecutions(projectId, remaining[0].id).catch(() => ({ active: null, recent: [] }));
+          const persistedTraceHistory = buildTraceHistoryFromExecutions(executionState.recent);
+          setCurrentConversation(conv);
+          setMessages(conv.messages || []);
+          const cachedTraceHistory = traceHistoryByConversationRef.current[conv.id] || [];
+          const runTraceHistory = mergeTraceHistories(persistedTraceHistory, cachedTraceHistory);
+          if (runTraceHistory.length > 0) {
+            traceHistoryByConversationRef.current[conv.id] = runTraceHistory;
+          }
+          setTraceHistoryItems(runTraceHistory);
+          // After deleting the active conversation, continue in the newly selected one.
+          shouldAutoCreateOnNextSendRef.current = false;
+        } else {
+          setCurrentConversation(null);
+          setMessages([]);
+          setTraceHistoryItems([]);
+          shouldAutoCreateOnNextSendRef.current = false;
         }
-        return '';
-      };
-      const text = getTextContent(children);
-      return (
-        <div className="relative group/code my-3">
-          <pre className="!bg-[var(--color-bg-tertiary)] !rounded-lg !border !border-[var(--color-border)]/50 !p-4 overflow-x-auto">
-            {children}
-          </pre>
-          <CopyButton text={text} />
-        </div>
+        setActivityItems([]);
+      }
+      toast.success('Conversation deleted');
+    } catch (error) {
+      console.error('Failed to delete conversation:', error);
+      toast.error('Failed to delete conversation');
+    }
+  };
+
+  const sendPreparedMessage = useCallback(async (
+    prepared: QueuedMessage,
+    addUserMessage: boolean = true,
+    queuedMessageId?: string
+  ) => {
+    const { conversationId: targetConversationId, userMessage, displayContent, imagesToSend } = prepared;
+    if (!projectId) return;
+
+    isInterruptingRef.current = false;
+    let activeQueuedMessageId = addUserMessage ? null : (queuedMessageId ?? null);
+    if (!addUserMessage && queuedMessageId) {
+      const runningQueuedMessageId = `temp-running-${Date.now()}`;
+      activeQueuedMessageId = runningQueuedMessageId;
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.id === queuedMessageId
+            ? { ...message, id: runningQueuedMessageId }
+            : message
+        )
       );
-    },
-    code: ({ children, className }: { children?: React.ReactNode; className?: string }) => {
-      // Inline code (no language class)
-      if (!className) {
-        return (
-          <code className="px-1.5 py-0.5 rounded-md bg-[var(--color-bg-tertiary)] border border-[var(--color-border)]/30 text-[0.875em] font-mono">
-            {children}
-          </code>
+      if (targetConversationId) {
+        const progressState = inProgressByConversationRef.current[targetConversationId];
+        if (progressState?.queuedMessages) {
+          inProgressByConversationRef.current[targetConversationId] = {
+            ...progressState,
+            queuedMessages: progressState.queuedMessages
+              .filter((message) => message.id !== queuedMessageId)
+              .map((message) =>
+                message.id === queuedMessageId
+                  ? { ...message, id: runningQueuedMessageId }
+                  : message
+              ),
+          };
+        }
+      }
+    }
+    activeQueuedMessageIdRef.current = activeQueuedMessageId;
+    activeStreamingConversationIdRef.current = targetConversationId;
+    setIsStreaming(true);
+    setStreamingText('');
+    setActivityItems([]);
+    streamingImagesRef.current = [];
+    setTodos([]);
+
+    if (addUserMessage) {
+      const tempUserMessage: Message = {
+        id: `temp-${Date.now()}`,
+        conversation_id: targetConversationId || '',
+        role: 'user',
+        content: displayContent,
+        timestamp: new Date().toISOString(),
+        is_error: false,
+      };
+      setMessages((prev) => [...prev, tempUserMessage]);
+      const progressKey = targetConversationId ?? PENDING_CONVERSATION_KEY;
+      const existing = inProgressByConversationRef.current[progressKey] ?? { streamingText: '' };
+      inProgressByConversationRef.current[progressKey] = {
+        ...existing,
+        userMessage: tempUserMessage,
+      };
+
+    }
+
+    abortControllerRef.current = new AbortController();
+
+    try {
+      let conversationId = targetConversationId;
+      let executionIdForRun: string | null = null;
+      // confirmedText: authoritative text from completed text events (with proper separators)
+      // deltaText: accumulated text_delta tokens for the current in-progress block
+      let confirmedText = '';
+      let deltaText = '';
+
+      const buildDisplayText = () => {
+        const base = !confirmedText ? deltaText
+          : !deltaText ? confirmedText
+          : confirmedText + (confirmedText.endsWith('\n') || deltaText.startsWith('\n') ? '' : '\n\n') + deltaText;
+        const imgs = streamingImagesRef.current.map(p => `\n\n![](${p})`).join('');
+        return base + imgs;
+      };
+
+      await invokeAgent({
+        projectId,
+        conversationId,
+        message: userMessage,
+        images: imagesToSend.length > 0 ? imagesToSend : null,
+        clusterId: selectedClusterId,
+        defaultCatalog,
+        defaultSchema,
+        warehouseId: selectedWarehouseId,
+        workspaceFolder,
+        mlflowExperimentName: mlflowExperimentName || null,
+        signal: abortControllerRef.current.signal,
+        onExecutionId: (executionId) => {
+          executionIdForRun = executionId;
+          setActiveExecutionId(executionId);
+          if (conversationId) {
+            setConversationStreamingState(conversationId, true, executionId);
+          }
+        },
+        onEvent: (event) => {
+          const type = event.type as string;
+
+          if (type === 'conversation.created') {
+            conversationId = event.conversation_id as string;
+            setConversationStreamingState(conversationId, true, executionIdForRun);
+            shouldAutoCreateOnNextSendRef.current = false;
+            // If this execution started before the conversation was created
+            // (conversationId was null), bind streaming ownership to the new ID
+            // so onDone/onError can clear streaming state correctly.
+            if (activeStreamingConversationIdRef.current === null) {
+              activeStreamingConversationIdRef.current = conversationId;
+            }
+            const pending = inProgressByConversationRef.current[PENDING_CONVERSATION_KEY];
+            if (pending) {
+              inProgressByConversationRef.current[conversationId] = pending;
+              delete inProgressByConversationRef.current[PENDING_CONVERSATION_KEY];
+            }
+            // Eagerly set currentConversation so that messages queued while
+            // streaming use the correct conversation ID for queueing.
+            currentConversationIdRef.current = conversationId;
+            setCurrentConversation({
+              id: conversationId,
+              project_id: projectId,
+              title: 'New Chat',
+              created_at: new Date().toISOString(),
+            });
+            // Rebind any queued messages that were created before the
+            // conversation existed (conversationId was null).
+            for (const qm of queuedMessagesRef.current) {
+              if (qm.conversationId === null) {
+                qm.conversationId = conversationId;
+              }
+            }
+            // Update temp-queued message objects in the message list too.
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id.startsWith('temp-queued-') && !m.conversation_id
+                  ? { ...m, conversation_id: conversationId }
+                  : m
+              )
+            );
+          } else if (type === 'text_delta') {
+            // Token-by-token streaming - accumulate delta for current block
+            const text = event.text as string;
+            deltaText += text;
+            if (conversationId) {
+              const existing = inProgressByConversationRef.current[conversationId] ?? { streamingText: '' };
+              inProgressByConversationRef.current[conversationId] = {
+                ...existing,
+                streamingText: buildDisplayText(),
+              };
+            }
+            if (currentConversationIdRef.current === conversationId) setStreamingText(buildDisplayText());
+          } else if (type === 'text') {
+            // Complete text block from AssistantMessage - authoritative content for one block.
+            // Add it to confirmedText (with separator) and reset the delta so that
+            // future text_delta events for the NEXT block don't concatenate directly.
+            const text = event.text as string;
+            if (text) {
+              if (confirmedText && !confirmedText.endsWith('\n') && !text.startsWith('\n')) {
+                confirmedText += '\n\n';
+              }
+              confirmedText += text;
+              deltaText = '';  // Block confirmed - clear delta so next block starts fresh
+              if (conversationId) {
+                const existing = inProgressByConversationRef.current[conversationId] ?? { streamingText: '' };
+                inProgressByConversationRef.current[conversationId] = {
+                  ...existing,
+                  streamingText: buildDisplayText(),
+                };
+              }
+              if (currentConversationIdRef.current === conversationId) setStreamingText(buildDisplayText());
+            }
+          } else if (type === 'thinking' || type === 'thinking_delta') {
+            // Handle both complete thinking blocks and streaming thinking deltas.
+            // The SDK emits thinking_delta events first (streaming), then a complete
+            // thinking event from AssistantMessage. We must not add a second item —
+            // instead replace the delta-built item with the authoritative complete block.
+            const thinking = (event.thinking as string) || '';
+            if (thinking && currentConversationIdRef.current === conversationId) {
+              setActivityItems((prev) => {
+                const lastItem = prev.length > 0 ? prev[prev.length - 1] : null;
+                if (lastItem?.type === 'thinking') {
+                  const updated = [...prev];
+                  if (type === 'thinking_delta') {
+                    // Append delta token to existing thinking item
+                    updated[updated.length - 1] = { ...lastItem, content: lastItem.content + thinking };
+                  } else {
+                    // Complete block: replace delta-built item (prevents duplication)
+                    updated[updated.length - 1] = { ...lastItem, content: thinking };
+                  }
+                  return updated;
+                }
+                // No existing thinking item — create a new one
+                return [
+                  ...prev,
+                  {
+                    id: `thinking-${Date.now()}`,
+                    type: 'thinking',
+                    content: thinking,
+                    timestamp: Date.now(),
+                  },
+                ];
+              });
+            }
+          } else if (type === 'tool_use') {
+            if (currentConversationIdRef.current === conversationId) {
+              setActivityItems((prev) => [
+                ...prev,
+                {
+                  id: event.tool_id as string,
+                  type: 'tool_use',
+                  content: '',
+                  toolName: event.tool_name as string,
+                  toolInput: event.tool_input as Record<string, unknown>,
+                  timestamp: Date.now(),
+                },
+              ]);
+            }
+          } else if (type === 'tool_result') {
+            let content = event.content as string;
+
+            // Parse and improve error messages
+            if (event.is_error && typeof content === 'string') {
+              // Extract error from XML-style tags like <tool_use_error>...</tool_use_error>
+              const errorMatch = content.match(/<tool_use_error>(.*?)<\/tool_use_error>/s);
+              if (errorMatch) {
+                content = errorMatch[1].trim();
+              }
+
+              // Improve generic "Stream closed" errors
+              if (content === 'Stream closed' || content.includes('Stream closed')) {
+                content = 'Tool execution interrupted: The operation took too long or the connection was lost. This may happen when operations exceed the 50-second timeout window. Check backend logs for details.';
+              }
+            }
+
+            const resultItem = {
+              id: `result-${event.tool_use_id}`,
+              type: 'tool_result' as const,
+              content: typeof content === 'string' ? content : JSON.stringify(content),
+              isError: event.is_error as boolean,
+              timestamp: Date.now(),
+            };
+            if (currentConversationIdRef.current === conversationId) {
+              setActivityItems((prev) => {
+                const idx = prev.findIndex((i) => i.id === resultItem.id);
+                if (idx >= 0) { const u = [...prev]; u[idx] = resultItem; return u; }
+                return [...prev, resultItem];
+              });
+            }
+          } else if (type === 'error') {
+            let errorMsg = event.error as string;
+
+            // Improve generic error messages
+            if (errorMsg === 'Stream closed' || errorMsg.includes('Stream closed')) {
+              errorMsg = 'Execution interrupted: The operation took too long or the connection was lost. Operations exceeding 50 seconds may be interrupted. Check backend logs for details.';
+            }
+
+            toast.error(errorMsg, {
+              duration: 8000,
+            });
+          } else if (type === 'inline_image') {
+            const path = event.path as string;
+            if (!streamingImagesRef.current.includes(path)) {
+              streamingImagesRef.current = [...streamingImagesRef.current, path];
+              if (currentConversationIdRef.current === conversationId) setStreamingText(buildDisplayText());
+            }
+          } else if (type === 'cancelled') {
+            // Suppress toast when user cancelled by sending a new message
+            if (!isInterruptingRef.current) toast.info('Generation stopped');
+          } else if (type === 'todos') {
+            // Update todo list from agent
+            const todoItems = event.todos as TodoItem[];
+            if (todoItems && currentConversationIdRef.current === conversationId) {
+              setTodos(todoItems);
+            }
+          } else if (type === 'keepalive') {
+            const elapsed = Number(event.elapsed_since_last_event ?? 0);
+            if (currentConversationIdRef.current === conversationId) {
+              const keepaliveItem: ActivityItem = {
+                id: 'keepalive-latest',
+                type: 'keepalive',
+                content: `Waiting on long-running step... ${Math.max(0, Math.round(elapsed))}s since last update`,
+                timestamp: Date.now(),
+              };
+              setActivityItems((prev) => {
+                const idx = prev.findIndex((i) => i.id === keepaliveItem.id);
+                if (idx >= 0) {
+                  const updated = [...prev];
+                  updated[idx] = keepaliveItem;
+                  return updated;
+                }
+                return [...prev, keepaliveItem];
+              });
+            }
+          } else if (type === 'result') {
+            pendingResultRef.current = event;
+          }
+        },
+        onError: (error) => {
+          console.error('Stream error:', error);
+          // Show the actual error message instead of generic text
+          const errorMessage = error.message || 'Failed to get response';
+          toast.error(errorMessage, {
+            duration: 8000, // Show error for 8 seconds
+          });
+        },
+        onDone: async () => {
+          const fullText = confirmedText || deltaText;
+          const images = streamingImagesRef.current;
+          streamingImagesRef.current = [];
+          const imageMarkdown = images
+            .filter((p) => !fullText.includes(`](${p})`))
+            .map((p) => `![](${p})`)
+            .join('\n\n');
+          const content = [fullText, imageMarkdown].filter(Boolean).join('\n\n');
+          const assistantMsgId = `msg-${Date.now()}`;
+          if (content && currentConversationIdRef.current === conversationId) {
+            setMessages((prev) =>
+              insertAssistantBeforeQueued(
+                prev,
+                {
+                  id: assistantMsgId,
+                  conversation_id: conversationId || '',
+                  role: 'assistant',
+                  content,
+                  timestamp: new Date().toISOString(),
+                  is_error: false,
+                },
+                conversationId
+              )
+            );
+          }
+          if (pendingResultRef.current) {
+            const r = pendingResultRef.current;
+            responseStatsRef.current[assistantMsgId] = {
+              duration_ms: r.duration_ms as number | undefined,
+              num_turns: r.num_turns as number | undefined,
+              total_cost_usd: r.total_cost_usd as number | undefined,
+              input_tokens: r.input_tokens as number | undefined,
+              output_tokens: r.output_tokens as number | undefined,
+              cache_read_tokens: r.cache_read_tokens as number | undefined,
+              cache_creation_tokens: r.cache_creation_tokens as number | undefined,
+            };
+            pendingResultRef.current = null;
+          }
+          if (currentConversationIdRef.current === conversationId) setStreamingText('');
+          if (conversationId) setConversationStreamingState(conversationId, false);
+          activeQueuedMessageIdRef.current = null;
+          if (conversationId) {
+            delete inProgressByConversationRef.current[conversationId];
+          }
+          delete inProgressByConversationRef.current[PENDING_CONVERSATION_KEY];
+          setActiveExecutionId(null);
+          if (currentConversationIdRef.current === conversationId) {
+            setActivityItems((current) => {
+              if (conversationId) {
+                appendTraceHistoryForConversation(conversationId, current);
+              }
+              return [];
+            });
+          }
+
+          if (conversationId) {
+            const conv = await fetchConversation(projectId, conversationId);
+            setCurrentConversation(conv);
+          }
+
+          // Refresh conversations after the run finishes so sidebar updates
+          // follow the finalized header/title timing.
+          fetchConversations(projectId).then(setConversations).catch(() => undefined);
+
+          // Queue is per-conversation. Only continue queued messages for this chat.
+          const nextIdx = queuedMessagesRef.current.findIndex((m) => m.conversationId === conversationId);
+          const next = nextIdx >= 0 ? queuedMessagesRef.current.splice(nextIdx, 1)[0] : undefined;
+          if (next) {
+            toast.info(`Sending queued message (${queuedMessagesRef.current.length} remaining)...`);
+            void sendPreparedMessage(next, false, next.queuedMessageId);
+          }
+        },
+      });
+    } catch (error) {
+      // Ignore AbortError — handleStopGeneration handles cleanup for user-initiated stops
+      if (error instanceof Error && error.name === 'AbortError') return;
+      console.error('Failed to send message:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to send message';
+      toast.error(errorMessage, {
+        duration: 8000,
+      });
+      if (activeStreamingConversationIdRef.current === targetConversationId) {
+        if (targetConversationId) setConversationStreamingState(targetConversationId, false);
+      }
+      if (targetConversationId) {
+        delete inProgressByConversationRef.current[targetConversationId];
+      }
+      delete inProgressByConversationRef.current[PENDING_CONVERSATION_KEY];
+      activeQueuedMessageIdRef.current = null;
+
+      const nextIdx = queuedMessagesRef.current.findIndex((m) => m.conversationId === targetConversationId);
+      const next = nextIdx >= 0 ? queuedMessagesRef.current.splice(nextIdx, 1)[0] : undefined;
+      if (next) {
+        toast.info(`Sending queued message (${queuedMessagesRef.current.length} remaining)...`);
+        void sendPreparedMessage(next, false, next.queuedMessageId);
+      }
+    }
+  }, [projectId, currentConversation?.id, selectedClusterId, defaultCatalog, defaultSchema, selectedWarehouseId, workspaceFolder, mlflowExperimentName, appendTraceHistoryForConversation, setConversationStreamingState]);
+
+  // Start an execution in another conversation while keeping the current chat live.
+  const sendBackgroundMessage = useCallback(async (
+    prepared: QueuedMessage,
+    addUserMessage: boolean = true
+  ) => {
+    if (!projectId) return;
+    let { conversationId } = prepared;
+    const { userMessage, displayContent, imagesToSend } = prepared;
+    let executionIdForRun: string | null = null;
+    let confirmedText = '';
+    let deltaText = '';
+
+    const buildDisplayText = () =>
+      !confirmedText
+        ? deltaText
+        : !deltaText
+          ? confirmedText
+          : confirmedText + (confirmedText.endsWith('\n') || deltaText.startsWith('\n') ? '' : '\n\n') + deltaText;
+
+    if (addUserMessage && currentConversationIdRef.current === conversationId) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `temp-bg-${Date.now()}`,
+          conversation_id: conversationId || '',
+          role: 'user',
+          content: displayContent,
+          timestamp: new Date().toISOString(),
+          is_error: false,
+        },
+      ]);
+    }
+
+    await invokeAgent({
+      projectId,
+      conversationId,
+      message: userMessage,
+      images: imagesToSend.length > 0 ? imagesToSend : null,
+      clusterId: selectedClusterId,
+      defaultCatalog,
+      defaultSchema,
+      warehouseId: selectedWarehouseId,
+      workspaceFolder,
+      mlflowExperimentName: mlflowExperimentName || null,
+      onExecutionId: (executionId) => {
+        executionIdForRun = executionId;
+        if (conversationId) {
+          setConversationStreamingState(conversationId, true, executionId);
+        }
+      },
+      onEvent: (event) => {
+        const type = event.type as string;
+
+        if (type === 'conversation.created') {
+          conversationId = event.conversation_id as string;
+          setConversationStreamingState(conversationId, true, executionIdForRun);
+          setConversations((prev) =>
+            prev.some((conv) => conv.id === conversationId)
+              ? prev
+              : [{
+                  id: conversationId,
+                  project_id: projectId,
+                  title: 'New Chat',
+                  created_at: new Date().toISOString(),
+                }, ...prev]
+          );
+          return;
+        }
+
+        if (!conversationId) return;
+
+        if (type === 'text_delta') {
+          deltaText += (event.text as string) || '';
+          const existing = inProgressByConversationRef.current[conversationId] ?? { streamingText: '' };
+          inProgressByConversationRef.current[conversationId] = {
+            ...existing,
+            streamingText: buildDisplayText(),
+          };
+          if (currentConversationIdRef.current === conversationId) {
+            setStreamingText(buildDisplayText());
+          }
+          return;
+        }
+
+        if (type === 'text') {
+          const text = (event.text as string) || '';
+          if (!text) return;
+          if (confirmedText && !confirmedText.endsWith('\n') && !text.startsWith('\n')) {
+            confirmedText += '\n\n';
+          }
+          confirmedText += text;
+          deltaText = '';
+          const existing = inProgressByConversationRef.current[conversationId] ?? { streamingText: '' };
+          inProgressByConversationRef.current[conversationId] = {
+            ...existing,
+            streamingText: buildDisplayText(),
+          };
+          if (currentConversationIdRef.current === conversationId) {
+            setStreamingText(buildDisplayText());
+          }
+          return;
+        }
+
+        if (type === 'tool_use' && currentConversationIdRef.current === conversationId) {
+          setActivityItems((prev) => [
+            ...prev,
+            {
+              id: event.tool_id as string,
+              type: 'tool_use',
+              content: '',
+              toolName: event.tool_name as string,
+              toolInput: event.tool_input as Record<string, unknown>,
+              timestamp: Date.now(),
+            },
+          ]);
+          return;
+        }
+
+        if (type === 'tool_result' && currentConversationIdRef.current === conversationId) {
+          const resultItem = {
+            id: `result-${event.tool_use_id}`,
+            type: 'tool_result' as const,
+            content: typeof event.content === 'string' ? event.content : JSON.stringify(event.content),
+            isError: Boolean(event.is_error),
+            timestamp: Date.now(),
+          };
+          setActivityItems((prev) => {
+            const idx = prev.findIndex((i) => i.id === resultItem.id);
+            if (idx >= 0) { const u = [...prev]; u[idx] = resultItem; return u; }
+            return [...prev, resultItem];
+          });
+        }
+      },
+      onError: (error) => {
+        if (conversationId) {
+          setConversationStreamingState(conversationId, false);
+          delete inProgressByConversationRef.current[conversationId];
+        }
+        if (currentConversationIdRef.current === conversationId) {
+          setStreamingText('');
+        }
+        toast.error(error.message, { duration: 8000 });
+      },
+      onDone: async () => {
+        if (!conversationId) return;
+        setConversationStreamingState(conversationId, false);
+        delete inProgressByConversationRef.current[conversationId];
+        if (currentConversationIdRef.current === conversationId) {
+          setActivityItems((current) => {
+            appendTraceHistoryForConversation(conversationId!, current);
+            return current;
+          });
+          setStreamingText('');
+          const conv = await fetchConversation(projectId, conversationId);
+          setCurrentConversation(conv);
+          setMessages(conv.messages || []);
+        }
+        fetchConversations(projectId).then(setConversations).catch(() => undefined);
+      },
+    });
+  }, [projectId, selectedClusterId, defaultCatalog, defaultSchema, selectedWarehouseId, workspaceFolder, mlflowExperimentName, appendTraceHistoryForConversation, setConversationStreamingState]);
+
+  // Send message — allows new messages while streaming by queueing them.
+  const handleSendMessage = useCallback(async () => {
+    const hasContent = input.trim() || attachedImages.length > 0 || attachedFiles.length > 0;
+    if (!projectId || !hasContent) return;
+
+    const userText = input.trim();
+    setInput('');
+
+    // Capture and clear attachments
+    const imagesToSend = attachedImages.map((img): ImageAttachment => ({
+      type: 'base64',
+      media_type: img.mediaType,
+      data: img.data,
+    }));
+    const filesToSend = [...attachedFiles];
+    setAttachedImages([]);
+    setAttachedFiles([]);
+
+    // Upload attached files into project-local uploads folder and send paths only.
+    const uploadedFilePaths: string[] = [];
+    for (const attached of filesToSend) {
+      try {
+        const uploaded = await uploadProjectFile(projectId, attached.file);
+        uploadedFilePaths.push(uploaded.path);
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        toast.error(`Failed to upload "${attached.file.name}": ${msg}`);
+      }
+    }
+
+    // Build the actual message sent to the agent (text + uploaded local file paths)
+    let agentMessage = userText;
+    if (uploadedFilePaths.length > 0) {
+      agentMessage += `\n\n--- Attached local files (project paths) ---\n${uploadedFilePaths.map((p) => `- ${p}`).join('\n')}\nUse these file paths and read files by path when needed. Do not ask for file contents unless required.\n---`;
+    }
+
+    // Build the display message shown in chat
+    const attachmentParts: string[] = [];
+    if (imagesToSend.length > 0) attachmentParts.push(`📷 ${imagesToSend.length} image${imagesToSend.length > 1 ? 's' : ''}`);
+    if (uploadedFilePaths.length > 0) attachmentParts.push(`📎 ${uploadedFilePaths.join(', ')}`);
+    const displayContent = [userText, attachmentParts.join(' · ')].filter(Boolean).join('\n');
+    const userMessage = agentMessage.trim() || userText;
+    if (!userMessage && imagesToSend.length === 0) {
+      toast.error('No content to send (file upload failed)');
+      return;
+    }
+
+    const shouldCreateNewConversationNow =
+      shouldAutoCreateOnNextSendRef.current && !!currentConversation?.id;
+    if (shouldCreateNewConversationNow) {
+      // Clear the auto-selected conversation view; this prompt starts a new chat.
+      setCurrentConversation(null);
+      setMessages([]);
+      setActivityItems([]);
+      setTraceHistoryItems([]);
+      setStreamingText('');
+      shouldAutoCreateOnNextSendRef.current = false;
+    }
+
+    const prepared: QueuedMessage = {
+      conversationId: shouldCreateNewConversationNow ? null : (currentConversation?.id ?? null),
+      userMessage,
+      displayContent,
+      imagesToSend,
+    };
+
+    // If the same conversation is already streaming, queue in that conversation only.
+    if (isStreaming) {
+      const activeId = activeStreamingConversationIdRef.current;
+      const sameConversation =
+        activeId === prepared.conversationId ||
+        (prepared.conversationId === null && activeId !== null);
+      if (sameConversation) {
+        // Bind the queued message to the active conversation so onDone
+        // picks it up with the correct ID.
+        if (prepared.conversationId === null && activeId !== null) {
+          prepared.conversationId = activeId;
+        }
+        const queuedUserMessage: Message = {
+          id: `temp-queued-${Date.now()}`,
+          conversation_id: activeId || '',
+          role: 'user',
+          content: displayContent,
+          timestamp: new Date().toISOString(),
+          is_error: false,
+        };
+        prepared.queuedMessageId = queuedUserMessage.id;
+        queuedMessagesRef.current.push(prepared);
+        setMessages((prev) => [...prev, queuedUserMessage]);
+        const progressKey = prepared.conversationId ?? PENDING_CONVERSATION_KEY;
+        const existing = inProgressByConversationRef.current[progressKey] ?? { streamingText: '' };
+        inProgressByConversationRef.current[progressKey] = {
+          ...existing,
+          queuedMessages: [...(existing.queuedMessages || []), queuedUserMessage],
+        };
+        toast.info(`Queued in this chat (${queuedMessagesRef.current.length} waiting)`);
+        return;
+      }
+
+      // Different chat: run independently instead of cross-chat queueing.
+      try {
+        await sendBackgroundMessage(prepared, true);
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        toast.error(msg, { duration: 8000 });
+      }
+      return;
+    }
+
+    await sendPreparedMessage(prepared, true);
+  }, [projectId, input, attachedImages, attachedFiles, isStreaming, currentConversation?.id, sendPreparedMessage, sendBackgroundMessage]);
+
+  // Stop generation - abort client stream AND tell backend to cancel
+  const handleStopGeneration = useCallback(async () => {
+    abortControllerRef.current?.abort();
+
+    // Tell the backend to cancel the agent execution
+    if (activeExecutionId) {
+      try {
+        await stopExecution(activeExecutionId);
+      } catch (error) {
+        console.error('Failed to stop execution on backend:', error);
+      }
+    }
+
+    // Finalize UI: keep user message and save whatever partial response we have
+    setStreamingText((currentText) => {
+      if (currentText) {
+        setMessages((prev) =>
+          insertAssistantBeforeQueued(
+            prev,
+            {
+              id: `msg-stopped-${Date.now()}`,
+              conversation_id: '',
+              role: 'assistant' as const,
+              content: currentText,
+              timestamp: new Date().toISOString(),
+              is_error: false,
+            },
+            activeStreamingConversationIdRef.current
+          )
         );
       }
-      // Block code inside pre
-      return <code className={cn(className, 'font-mono text-[12px]')}>{children}</code>;
-    },
-    table: ({ children }: { children?: React.ReactNode }) => (
-      <div className="my-3 overflow-x-auto rounded-lg border border-[var(--color-border)]/50">
-        <table className="w-full text-sm">{children}</table>
-      </div>
-    ),
-    th: ({ children }: { children?: React.ReactNode }) => (
-      <th className="px-3 py-2 text-left text-xs font-semibold text-[var(--color-text-heading)] bg-[var(--color-bg-secondary)] border-b border-[var(--color-border)]/50">
-        {children}
-      </th>
-    ),
-    td: ({ children }: { children?: React.ReactNode }) => (
-      <td className="px-3 py-2 text-sm border-b border-[var(--color-border)]/30">
-        {children}
-      </td>
-    ),
-  }), []);
+      return '';
+    });
+    const stoppedConversationId = activeStreamingConversationIdRef.current;
+    if (stoppedConversationId) {
+      const before = queuedMessagesRef.current.length;
+      queuedMessagesRef.current = queuedMessagesRef.current.filter(
+        (m) => m.conversationId !== stoppedConversationId
+      );
+      const removed = before - queuedMessagesRef.current.length;
+      if (removed > 0) {
+        toast.info(`Cleared ${removed} queued message${removed > 1 ? 's' : ''} for this chat`);
+      }
+      delete inProgressByConversationRef.current[stoppedConversationId];
+      setMessages((prev) =>
+        prev.filter(
+          (m) =>
+            !(m.id.startsWith('temp-queued-') && m.conversation_id === stoppedConversationId)
+        )
+      );
+    }
+    delete inProgressByConversationRef.current[PENDING_CONVERSATION_KEY];
+    if (stoppedConversationId) {
+      setConversationStreamingState(stoppedConversationId, false);
+    } else {
+      setIsStreaming(false);
+      activeStreamingConversationIdRef.current = null;
+      setActiveExecutionId(null);
+    }
+    activeQueuedMessageIdRef.current = null;
+    setActivityItems((current) => {
+      if (stoppedConversationId) {
+        appendTraceHistoryForConversation(stoppedConversationId, current);
+      }
+      return current;
+    });
+  }, [activeExecutionId, appendTraceHistoryForConversation, insertAssistantBeforeQueued, setConversationStreamingState]);
 
-  // Config summary for header chips
+  const handleRemoveQueuedMessage = useCallback((queuedMessageId: string) => {
+    queuedMessagesRef.current = queuedMessagesRef.current.filter(
+      (queued) => queued.queuedMessageId !== queuedMessageId
+    );
+    setMessages((prev) => prev.filter((message) => message.id !== queuedMessageId));
+
+    for (const key of Object.keys(inProgressByConversationRef.current)) {
+      const state = inProgressByConversationRef.current[key];
+      if (!state?.queuedMessages) continue;
+      const nextQueued = state.queuedMessages.filter((message) => message.id !== queuedMessageId);
+      inProgressByConversationRef.current[key] = {
+        ...state,
+        queuedMessages: nextQueued.length > 0 ? nextQueued : undefined,
+      };
+    }
+  }, []);
+
+  const handleMoveQueuedMessageUp = useCallback((queuedMessageId: string) => {
+    const conversationId = currentConversation?.id ?? null;
+    if (!conversationId) return;
+
+    const queueIndexes = queuedMessagesRef.current
+      .map((queued, index) => ({ queued, index }))
+      .filter(({ queued }) => queued.conversationId === conversationId);
+
+    const position = queueIndexes.findIndex(({ queued }) => queued.queuedMessageId === queuedMessageId);
+    if (position <= 0) return;
+
+    const currentIndex = queueIndexes[position].index;
+    const previousIndex = queueIndexes[position - 1].index;
+    const reordered = [...queuedMessagesRef.current];
+    [reordered[previousIndex], reordered[currentIndex]] = [reordered[currentIndex], reordered[previousIndex]];
+    queuedMessagesRef.current = reordered;
+
+    const queuedIdsInOrder = reordered
+      .filter((queued) => queued.conversationId === conversationId)
+      .map((queued) => queued.queuedMessageId)
+      .filter((id): id is string => Boolean(id));
+
+    setMessages((prev) => {
+      const queuedMap = new Map(
+        prev
+          .filter((message) => message.id.startsWith('temp-queued-') && message.conversation_id === conversationId)
+          .map((message) => [message.id, message] as const)
+      );
+      const reorderedQueuedMessages = queuedIdsInOrder
+        .map((id) => queuedMap.get(id))
+        .filter((message): message is Message => Boolean(message));
+      const remainingMessages = prev.filter(
+        (message) => !(message.id.startsWith('temp-queued-') && message.conversation_id === conversationId)
+      );
+      return [...remainingMessages, ...reorderedQueuedMessages];
+    });
+
+    const progressState = inProgressByConversationRef.current[conversationId];
+    if (progressState?.queuedMessages) {
+      const progressQueuedMap = new Map(progressState.queuedMessages.map((message) => [message.id, message] as const));
+      const reorderedProgressQueued = queuedIdsInOrder
+        .map((id) => progressQueuedMap.get(id))
+        .filter((message): message is Message => Boolean(message));
+      inProgressByConversationRef.current[conversationId] = {
+        ...progressState,
+        queuedMessages: reorderedProgressQueued.length > 0 ? reorderedProgressQueued : undefined,
+      };
+    }
+  }, [currentConversation?.id]);
+
+  // Handle keyboard submit
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      handleSendMessage();
+    }
+  };
+
+  // Handle paste — intercept image pastes from clipboard
+  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const imageFiles: File[] = [];
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) imageFiles.push(file);
+      }
+    }
+    if (imageFiles.length > 0) {
+      e.preventDefault();
+      handleAddImages(imageFiles);
+    }
+  }, []);
+
+  // Process and add image files
+  const handleAddImages = useCallback(async (files: File[]) => {
+    const valid = files.filter((f) => {
+      if (!SUPPORTED_IMAGE_TYPES.includes(f.type)) {
+        toast.error(`Unsupported image type: ${f.type}`);
+        return false;
+      }
+      if (f.size > MAX_IMAGE_SIZE) {
+        toast.error(`Image too large (max 20MB): ${f.name}`);
+        return false;
+      }
+      return true;
+    });
+    if (valid.length === 0) return;
+
+    const newImages = await Promise.all(
+      valid.map(async (file) => {
+        const preview = URL.createObjectURL(file);
+        const { data, mediaType } = await readImageAsBase64(file);
+        return { id: crypto.randomUUID(), file, preview, data, mediaType };
+      })
+    );
+    setAttachedImages((prev) => [...prev, ...newImages].slice(0, 5)); // max 5 images
+  }, []);
+
+  // Handle image file input change
+  const handleImageChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files;
+      if (files && files.length > 0) handleAddImages(Array.from(files));
+      e.target.value = '';
+    },
+    [handleAddImages]
+  );
+
+  // Process text files — mirrors handleAddImages pattern (start FileReader synchronously)
+  const handleAddFiles = useCallback(async (files: File[]) => {
+    const queued = files.map((file) => ({ id: crypto.randomUUID(), file }));
+    if (queued.length > 0) setAttachedFiles((prev) => [...prev, ...queued]);
+  }, []);
+
+  // Handle text file input change — mirrors handleImageChange exactly
+  const handleFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files;
+      if (files && files.length > 0) handleAddFiles(Array.from(files));
+      e.target.value = '';
+    },
+    [handleAddFiles]
+  );
+
+  // Open skills explorer
+  const handleViewSkills = () => {
+    setSkillsExplorerOpen(true);
+  };
+
   const configChips = useMemo(() => {
     const chips: { label: string; color: string }[] = [];
     if (defaultCatalog && defaultSchema) {
@@ -1172,9 +2278,6 @@ export default function ProjectPage() {
     return chips;
   }, [defaultCatalog, defaultSchema, clusters, selectedClusterId, warehouses, selectedWarehouseId]);
 
-  // Only show streaming UI if viewing a conversation that is actively streaming
-  const isStreamingHere = streamingConvIds.includes(currentConversation?.id || '');
-
   if (isLoading) {
     return (
       <MainLayout projectName={project?.name}>
@@ -1185,10 +2288,33 @@ export default function ProjectPage() {
     );
   }
 
+  const queuedMessageIdPrefix = 'temp-queued-';
+  const currentConversationId = currentConversation?.id ?? null;
+  const isCurrentConversationStreaming =
+    isStreaming && (
+      activeStreamingConversationIdRef.current === currentConversationId
+      || currentConversationId === null
+    );
+  const activeQueuedMessageId = activeQueuedMessageIdRef.current;
+  const isQueuedRunActive =
+    !!activeQueuedMessageId && (
+      isCurrentConversationStreaming
+      || (!isStreaming && !!streamingText)
+    );
+  const showStoppedSnapshot =
+    !isCurrentConversationStreaming && !!streamingText && !isQueuedRunActive;
+  const nonQueuedMessages = isCurrentConversationStreaming
+    ? messages.filter((message) => !message.id.startsWith(queuedMessageIdPrefix))
+    : messages;
+  const queuedMessages = isCurrentConversationStreaming
+    ? messages.filter((message) => message.id.startsWith(queuedMessageIdPrefix))
+    : [];
+
   const sidebar = (
     <Sidebar
       conversations={conversations}
       currentConversationId={currentConversation?.id}
+      streamingConversationIds={streamingConversationIds}
       onConversationSelect={handleSelectConversation}
       onNewConversation={handleNewConversation}
       onDeleteConversation={handleDeleteConversation}
@@ -1222,6 +2348,19 @@ export default function ProjectPage() {
                 </span>
               ))}
             </div>
+            {/* Thinking toggle */}
+            <button
+              onClick={() => setVerbose((v) => !v)}
+              className={cn(
+                'flex items-center justify-center h-9 w-9 rounded-lg transition-all',
+                verbose
+                  ? 'bg-purple-500/10 text-purple-400 ring-2 ring-purple-500/20'
+                  : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-secondary)]'
+              )}
+              title={verbose ? 'Thinking ON — showing full agent trace' : 'Thinking OFF — click to show full agent trace'}
+            >
+              <Brain className="h-4.5 w-4.5" />
+            </button>
             {/* Settings button */}
             <div className="relative" ref={configPanelRef}>
               <button
@@ -1260,12 +2399,10 @@ export default function ProjectPage() {
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto">
-          {messages.length === 0 && !isStreamingHere ? (
-            /* Empty State */
+        <div className="flex-1 overflow-y-auto p-6">
+          {messages.length === 0 && !streamingText ? (
             <div className="flex h-full items-center justify-center px-6">
               <div className="text-center max-w-xl w-full">
-                {/* Decorative gradient orb */}
                 <div className="relative inline-flex items-center justify-center w-20 h-20 mb-6">
                   <div className="absolute inset-0 rounded-3xl bg-gradient-to-br from-[var(--color-accent-primary)]/15 to-[var(--color-accent-secondary)]/10 blur-md" />
                   <div className="relative w-16 h-16 rounded-2xl bg-gradient-to-br from-[var(--color-accent-primary)]/10 to-[var(--color-accent-secondary)]/5 border border-[var(--color-accent-primary)]/10 flex items-center justify-center">
@@ -1279,7 +2416,6 @@ export default function ProjectPage() {
                   Build data pipelines, generate synthetic data, create dashboards, and more on Databricks.
                 </p>
 
-                {/* Example prompts - 2x2 grid */}
                 <div className="mt-10 grid grid-cols-2 gap-3 text-left">
                   {[
                     { title: 'Generate synthetic data', desc: 'Realistic test datasets with customers, orders, and tickets', prompt: 'Generate synthetic customer data with orders and support tickets' },
@@ -1300,66 +2436,101 @@ export default function ProjectPage() {
               </div>
             </div>
           ) : (
-            /* Message Thread */
-            <div className="mx-auto max-w-3xl px-6 py-8 space-y-1">
-              {messages.map((message) => (
-                <div key={message.id}>
-                  {message.role === 'assistant' ? (
-                    /* Assistant message - left aligned with Databricks avatar */
-                    <div className="flex items-start gap-3 group/msg mb-4">
-                      <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-[var(--color-accent-primary)] to-[var(--color-accent-secondary)] flex items-center justify-center shadow-sm shadow-[var(--color-accent-primary)]/20 mt-0.5">
-                        <DatabricksLogo className="h-4 w-4 text-white" />
+            <div className="mx-auto max-w-5xl space-y-4">
+              {(() => {
+                const finishedTraces = verbose ? traceHistoryItems : [];
+                let assistantTraceIdx = 0;
+                const rows = nonQueuedMessages.map((message) => {
+                  const traceForMessage =
+                    message.role === 'assistant' ? finishedTraces[assistantTraceIdx++] : null;
+                  const stats = message.role === 'assistant'
+                    ? (message.duration_ms != null || message.input_tokens != null
+                      ? message
+                      : responseStatsRef.current[message.id] ?? null)
+                    : null;
+                  return (
+                  <div key={`msg-row-${message.id}`}>
+                    {traceForMessage && (
+                      <div className="mb-4 flex justify-start">
+                        <VerboseActivityLog items={traceForMessage} isStreaming={false} />
                       </div>
-                      <div className={cn('flex-1 min-w-0', message.is_error && 'text-[var(--color-error)]')}>
-                        <div className="mb-1 flex items-center gap-2">
-                          <span className="text-xs font-semibold text-[var(--color-text-heading)]">Assistant</span>
-                          {message.timestamp && (
-                            <span className="text-[10px] text-[var(--color-text-muted)]/60 opacity-0 group-hover/msg:opacity-100 transition-opacity">
-                              {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                          )}
-                        </div>
-                        <div className="prose prose-xs max-w-none text-[var(--color-text-primary)] text-[14px] leading-[1.7]">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                            {message.content}
-                          </ReactMarkdown>
-                        </div>
-                        <ToolsUsedBadge tools={messageTools[message.id] || []} />
+                    )}
+                    <div
+                      className={cn(
+                        'flex',
+                        message.role === 'user' ? 'justify-end' : 'justify-start'
+                      )}
+                    >
+                      <div
+                        className={cn(
+                          'max-w-[85%] rounded-lg px-3 py-2 shadow-sm',
+                          message.role === 'user'
+                            ? 'bg-[var(--color-accent-primary)] text-white'
+                            : 'bg-[var(--color-bg-secondary)] border border-[var(--color-border)]/50',
+                          message.is_error && 'bg-[var(--color-error)]/10 border-[var(--color-error)]/30'
+                        )}
+                      >
+                        {message.role === 'assistant' ? (
+                          <div className="prose prose-xs max-w-none text-[var(--color-text-primary)] text-[13px] leading-relaxed">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                              {message.content}
+                            </ReactMarkdown>
+                          </div>
+                        ) : (
+                          <p className="whitespace-pre-wrap text-[13px]">{message.content}</p>
+                        )}
                       </div>
                     </div>
-                  ) : (
-                    /* User message - right aligned like iMessage */
-                    <div className="flex justify-end mb-4 group/msg">
-                      <div className="max-w-[80%]">
-                        <div className="mb-1 flex items-center justify-end gap-2">
-                          {message.timestamp && (
-                            <span className="text-[10px] text-[var(--color-text-muted)]/60 opacity-0 group-hover/msg:opacity-100 transition-opacity">
-                              {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                          )}
-                        </div>
-                        <div className="rounded-2xl rounded-br-md bg-[var(--color-accent-primary)] text-white px-4 py-2.5 shadow-sm">
-                          <p className="whitespace-pre-wrap text-[14px] leading-[1.6]">{message.content}</p>
-                        </div>
+                    {message.role === 'user' && message.timestamp && (
+                      <div className="flex justify-end mt-1">
+                        <span className="text-[10px] text-[var(--color-text-muted)]">
+                          {formatTimestamp(message.timestamp)}
+                        </span>
                       </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-
-              {/* Streaming response */}
-              {isStreamingHere && streamingText && (
-                <div className="flex items-start gap-3 mb-4">
-                  <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-[var(--color-accent-primary)] to-[var(--color-accent-secondary)] flex items-center justify-center shadow-sm shadow-[var(--color-accent-primary)]/20 mt-0.5">
-                    <DatabricksLogo className="h-4 w-4 text-white" />
+                    )}
+                    {message.role === 'assistant' && stats && (
+                      <div className="flex justify-start mt-1 gap-2 flex-wrap">
+                        {stats.duration_ms != null && (
+                          <span className="text-[10px] text-[var(--color-text-muted)]">
+                            {formatDuration(stats.duration_ms)}
+                          </span>
+                        )}
+                        {(stats.input_tokens != null || stats.output_tokens != null) && (
+                          <span className="text-[10px] text-[var(--color-text-muted)]">
+                            {formatTokenCount(stats.input_tokens)} in / {formatTokenCount(stats.output_tokens)} out
+                          </span>
+                        )}
+                        {stats.cache_read_tokens != null && stats.cache_read_tokens > 0 && (
+                          <span className="text-[10px] text-[var(--color-text-muted)]">
+                            {formatTokenCount(stats.cache_read_tokens)} cached
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="mb-1">
-                      <span className="text-xs font-semibold text-[var(--color-text-heading)]">
-                        Assistant
-                      </span>
+                )});
+                if (finishedTraces.length > 0 && nonQueuedMessages.filter((m) => m.role === 'assistant').length === 0) {
+                  rows.push(
+                    <div key="finished-trace-without-assistant" className="mb-4 flex justify-start">
+                      <VerboseActivityLog items={finishedTraces[finishedTraces.length - 1]} isStreaming={false} />
                     </div>
-                    <div className="prose prose-xs max-w-none text-[var(--color-text-primary)] text-[14px] leading-[1.7]">
+                  );
+                }
+                return rows;
+              })()}
+
+              {/* Activity section - verbose shows full trace, non-verbose shows current tool only */}
+              {(isCurrentConversationStreaming || showStoppedSnapshot) && !isQueuedRunActive && activityItems.length > 0 && (
+                verbose
+                  ? <div className="flex justify-start"><VerboseActivityLog items={activityItems} isStreaming={true} /></div>
+                  : <ActivitySection items={activityItems} isStreaming={isCurrentConversationStreaming} />
+              )}
+
+              {/* Streaming response - show accumulated text as it arrives */}
+              {(isCurrentConversationStreaming || showStoppedSnapshot) && !isQueuedRunActive && streamingText && (
+                <div className="flex justify-start">
+                  <div className="max-w-[85%] rounded-lg px-3 py-2 shadow-sm bg-[var(--color-bg-secondary)] border border-[var(--color-border)]/50">
+                    <div className="prose prose-xs max-w-none text-[var(--color-text-primary)] text-[13px] leading-relaxed">
                       <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
                         {streamingText}
                       </ReactMarkdown>
@@ -1368,31 +2539,98 @@ export default function ProjectPage() {
                 </div>
               )}
 
-              {/* Activity section */}
-              {isStreamingHere && activityItems.length > 0 && (
-                <ActivitySection items={activityItems} isStreaming={isStreamingHere} />
+              {/* Fun loader with progress - shown while streaming before text arrives */}
+              {isCurrentConversationStreaming && !isQueuedRunActive && !streamingText && (
+                <div className="flex justify-start">
+                  {isReconnecting ? (
+                    <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)] py-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Reconnecting to agent...</span>
+                    </div>
+                  ) : (
+                    <FunLoader todos={todos} className="py-2" />
+                  )}
+                </div>
               )}
 
-              {/* Loader */}
-              {isStreamingHere && !streamingText && (
-                <div className="flex items-start gap-3 mb-4">
-                  <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-[var(--color-accent-primary)] to-[var(--color-accent-secondary)] flex items-center justify-center shadow-sm shadow-[var(--color-accent-primary)]/20 mt-0.5">
-                    <DatabricksLogo className="h-4 w-4 text-white" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="mb-1">
-                      <span className="text-xs font-semibold text-[var(--color-text-heading)]">
-                        Assistant
-                      </span>
-                    </div>
-                    {isReconnecting ? (
-                      <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)] py-2">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        <span>Reconnecting to agent...</span>
+              {/* Active queued item streaming output */}
+              {isQueuedRunActive && (
+                <div className="mt-2 space-y-2">
+                  {activityItems.length > 0 && (
+                    verbose
+                      ? <div className="flex justify-start"><VerboseActivityLog items={activityItems} isStreaming={true} /></div>
+                      : <ActivitySection items={activityItems} isStreaming={isCurrentConversationStreaming} />
+                  )}
+                  {streamingText ? (
+                    <div className="flex justify-start">
+                      <div className="max-w-[85%] rounded-lg px-3 py-2 shadow-sm bg-[var(--color-bg-secondary)] border border-[var(--color-border)]/50">
+                        <div className="prose prose-xs max-w-none text-[var(--color-text-primary)] text-[13px] leading-relaxed">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                            {streamingText}
+                          </ReactMarkdown>
+                        </div>
                       </div>
-                    ) : (
-                      <FunLoader todos={todos} className="py-1" />
-                    )}
+                    </div>
+                  ) : (
+                    <div className="flex justify-start">
+                      {isReconnecting ? (
+                        <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)] py-2">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <span>Reconnecting to agent...</span>
+                        </div>
+                      ) : (
+                        <FunLoader todos={todos} className="py-2" />
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Queued messages panel */}
+              {queuedMessages.length > 0 && (
+                <div className="flex justify-start">
+                  <div className="w-full max-w-[85%] rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)]/40 shadow-sm overflow-hidden">
+                    <div className="px-3 py-2 border-b border-[var(--color-border)] text-sm font-medium text-[var(--color-text-heading)]">
+                      {queuedMessages.length} Queued
+                    </div>
+                    <div className="divide-y divide-[var(--color-border)]">
+                      {queuedMessages.map((message, index) => (
+                        <div key={`queued-row-${message.id}`} className="group flex items-center gap-3 px-3 py-2.5">
+                          <span className="h-4 w-4 rounded-full border border-[var(--color-text-muted)]/60 flex-shrink-0" />
+                          <span className="flex-1 min-w-0 truncate text-[13px] text-[var(--color-text-primary)]">
+                            {message.content.replace(/\s+/g, ' ').trim()}
+                          </span>
+                          <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                            <button
+                              onClick={() => {
+                                setInput(message.content);
+                                handleRemoveQueuedMessage(message.id);
+                                inputRef.current?.focus();
+                              }}
+                              className="p-1 rounded text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-secondary)]"
+                              title="Edit queued message"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleMoveQueuedMessageUp(message.id)}
+                              disabled={index === 0}
+                              className="p-1 rounded text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-secondary)] disabled:opacity-40 disabled:cursor-not-allowed"
+                              title="Move up"
+                            >
+                              <ArrowUp className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleRemoveQueuedMessage(message.id)}
+                              className="p-1 rounded text-[var(--color-text-muted)] hover:text-[var(--color-error)] hover:bg-[var(--color-bg-secondary)]"
+                              title="Remove from queue"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
               )}
@@ -1403,50 +2641,127 @@ export default function ProjectPage() {
         </div>
 
         {/* Input Area */}
-        <div className="px-6 pb-5 pt-3">
-          <div className="mx-auto max-w-3xl">
-            <div className="relative rounded-2xl border border-[var(--color-border)] bg-[var(--color-background)] shadow-sm shadow-black/[0.03] focus-within:border-[var(--color-accent-primary)]/40 focus-within:shadow-lg focus-within:shadow-[var(--color-accent-primary)]/[0.06] transition-all duration-300">
+        <div className="border-t border-[var(--color-border)] p-4 bg-[var(--color-bg-secondary)]/30">
+          <div className="mx-auto max-w-5xl flex gap-3 items-end">
+            <div className={cn(
+              'flex-1',
+              'rounded-xl border bg-[var(--color-background)] transition-all',
+              isStreaming
+                ? 'border-[var(--color-border)] opacity-80'
+                : 'border-[var(--color-border)] focus-within:ring-2 focus-within:ring-[var(--color-accent-primary)]/50 focus-within:border-[var(--color-accent-primary)]'
+            )}>
+              {/* Attachment previews */}
+              {(attachedImages.length > 0 || attachedFiles.length > 0) && (
+                <div className="flex flex-wrap gap-2 px-4 pt-3">
+                  {attachedImages.map((img) => (
+                    <div
+                      key={img.id}
+                      className="relative group w-16 h-16 rounded-lg overflow-hidden border border-[var(--color-border)] bg-[var(--color-bg-secondary)] flex-shrink-0"
+                    >
+                      <img src={img.preview} alt="Attached" className="w-full h-full object-cover" />
+                      <button
+                        onClick={() => {
+                          URL.revokeObjectURL(img.preview);
+                          setAttachedImages((prev) => prev.filter((i) => i.id !== img.id));
+                        }}
+                        className="absolute top-0.5 right-0.5 h-4 w-4 rounded-full bg-black/60 text-white opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+                      >
+                        <X className="h-2.5 w-2.5" />
+                      </button>
+                    </div>
+                  ))}
+                  {attachedFiles.map((file) => (
+                    <div
+                      key={file.id}
+                      className="flex items-center gap-1.5 h-8 px-3 rounded-full border border-[var(--color-border)] bg-[var(--color-bg-secondary)] text-xs text-[var(--color-text-primary)] flex-shrink-0"
+                    >
+                      <FileText className="h-3 w-3 text-[var(--color-accent-primary)]" />
+                      <span className="max-w-[120px] truncate">{file.file.name}</span>
+                      <button
+                        onClick={() => setAttachedFiles((prev) => prev.filter((f) => f.id !== file.id))}
+                        className="ml-0.5 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Textarea */}
               <textarea
                 ref={inputRef}
                 value={input}
-                onChange={handleInputChange}
+                onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Message the assistant..."
+                onPaste={handlePaste}
+                placeholder="Ask Claude to help with code..."
                 rows={1}
-                className="w-full resize-none bg-transparent px-5 pt-4 pb-14 text-[14px] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]/50 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-                style={{ maxHeight: 200 }}
-                disabled={isStreamingHere}
+                className="w-full resize-none bg-transparent px-4 pt-3 pb-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none"
               />
-              <div className="absolute bottom-3 left-5 right-3 flex items-center justify-between">
-                <span className="text-[11px] text-[var(--color-text-muted)]/40 select-none">
-                  <kbd className="px-1.5 py-0.5 rounded border border-[var(--color-border)]/40 bg-[var(--color-bg-secondary)]/50 text-[10px] font-mono">Enter</kbd> to send
-                </span>
-                {isStreamingHere ? (
-                  <button
-                    onClick={handleStopGeneration}
-                    className="flex items-center justify-center h-9 w-9 rounded-xl bg-[var(--color-destructive)] hover:bg-[var(--color-destructive)]/90 text-white transition-all shadow-sm hover:shadow-md"
-                    title="Stop generation"
-                  >
-                    <Square className="h-3.5 w-3.5" />
-                  </button>
-                ) : (
-                  <button
-                    onClick={handleSendMessage}
-                    disabled={!input.trim()}
-                    className={cn(
-                      'flex items-center justify-center h-9 w-9 rounded-xl transition-all',
-                      input.trim()
-                        ? 'bg-[var(--color-accent-primary)] hover:bg-[var(--color-accent-primary)]/90 text-white shadow-sm shadow-[var(--color-accent-primary)]/30 hover:shadow-md hover:shadow-[var(--color-accent-primary)]/40'
-                        : 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)]/40 cursor-not-allowed'
-                    )}
-                    title="Send message"
-                  >
-                    <ArrowUp className="h-4.5 w-4.5" />
-                  </button>
-                )}
+
+              {/* Bottom toolbar — attach buttons only */}
+              <div className="flex items-center gap-1 px-3 pb-2.5 pt-1">
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex items-center gap-1.5 h-7 px-2 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-secondary)] border border-transparent hover:border-[var(--color-border)] transition-all text-xs"
+                  title="Attach file"
+                >
+                  <Paperclip className="h-3.5 w-3.5" />
+                  <span>File</span>
+                </button>
+                <button
+                  onClick={() => imageInputRef.current?.click()}
+                  className="flex items-center gap-1.5 h-7 px-2 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-secondary)] border border-transparent hover:border-[var(--color-border)] transition-all text-xs"
+                  title="Attach image"
+                >
+                  <ImageIcon className="h-3.5 w-3.5" />
+                  <span>Image</span>
+                </button>
               </div>
             </div>
+
+            {/* Send / Stop button — Send takes priority when input has content (interrupt-and-resend).
+                Stop is shown only when streaming with no pending input. */}
+            {isStreaming && !input.trim() && attachedImages.length === 0 && attachedFiles.length === 0 ? (
+              <Button
+                onClick={handleStopGeneration}
+                className="h-12 w-12 rounded-xl bg-[var(--color-destructive)] hover:bg-[var(--color-destructive)]/90 flex-shrink-0"
+                title="Stop generation"
+              >
+                <Square className="h-5 w-5" />
+              </Button>
+            ) : (
+              <Button
+                onClick={handleSendMessage}
+                disabled={!input.trim() && attachedImages.length === 0 && attachedFiles.length === 0}
+                className="h-12 w-12 rounded-xl flex-shrink-0"
+              >
+                <Send className="h-5 w-5" />
+              </Button>
+            )}
+
+            {/* Hidden file inputs */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              className="hidden"
+              accept="text/*,.md,.py,.js,.ts,.jsx,.tsx,.json,.yaml,.yml,.csv,.sql,.sh,.env,.toml,.ini,.cfg,.xml,.html,.htm,.css,.scss,.less,.r,.R,.rmd,.scala,.java,.c,.cpp,.h,.hpp,.go,.rs,.rb,.php,.swift,.kt,.lua,.pl,.pm,.ps1,.bat,.cmd,.makefile,.dockerfile,.tf,.hcl,.conf,.properties,.log,.diff,.patch,.ipynb,.tsv,.graphql,.proto,.gradle,.sbt,.lock,.gitignore,.dockerignore,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+              onChange={handleFileChange}
+            />
+            <input
+              ref={imageInputRef}
+              type="file"
+              multiple
+              className="hidden"
+              accept="image/jpeg,image/png,image/gif,image/webp"
+              onChange={handleImageChange}
+            />
           </div>
+          <p className="mt-2 text-xs text-[var(--color-text-muted)]">
+            Press Enter to send, Shift+Enter for new line
+          </p>
         </div>
       </div>
 
@@ -1461,6 +2776,10 @@ export default function ProjectPage() {
             defaultSchema,
             workspaceFolder,
             projectId,
+          }}
+          customSystemPrompt={project?.custom_system_prompt ?? null}
+          onSystemPromptChange={(prompt) => {
+            setProject((prev) => prev ? { ...prev, custom_system_prompt: prompt } : prev);
           }}
           onClose={() => setSkillsExplorerOpen(false)}
         />

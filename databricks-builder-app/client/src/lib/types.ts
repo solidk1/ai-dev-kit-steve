@@ -50,6 +50,12 @@ export interface Message {
   content: string;
   timestamp: string | null;
   is_error: boolean;
+  duration_ms?: number | null;
+  num_turns?: number | null;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  cache_read_tokens?: number | null;
+  cache_creation_tokens?: number | null;
 }
 
 /** Databricks cluster from GET /api/clusters */

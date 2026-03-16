@@ -76,6 +76,8 @@ class InvokeAgentRequest(BaseModel):
     workspace_folder: Optional[str] = None  # Workspace folder for file uploads
     mlflow_experiment_name: Optional[str] = None  # MLflow experiment name for tracing
     images: Optional[List[dict]] = None  # Attached images [{type, media_type, data}]
+    target_databricks_host: Optional[str] = None  # Target workspace URL for cross-workspace ops
+    target_databricks_token: Optional[str] = None  # Pre-generated OAuth token for target workspace
 
 
 class InvokeAgentResponse(BaseModel):
@@ -121,6 +123,22 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
     user_access_token = await get_databricks_token(request, user_email)
     workspace_url = get_workspace_url()
 
+    # FMAPI (Claude API) always uses the Builder App's own workspace
+    fmapi_host = workspace_url
+    fmapi_token = user_token
+
+    # Databricks tool operations target the caller-specified workspace when
+    # cross-workspace params are provided, otherwise default to this workspace
+    is_cross_workspace = body.target_databricks_host is not None
+    tools_host = body.target_databricks_host or workspace_url
+    tools_token = body.target_databricks_token or user_token
+
+    # Read user's model preferences from saved settings
+    from ..services.user_config import get_user_config
+    user_config = await get_user_config(user_email)
+    user_model = user_config.get('model') or None
+    user_model_mini = user_config.get('model_mini') or None
+
     # Verify project exists and belongs to user
     project_storage = ProjectStorage(user_email)
     project = await project_storage.get(body.project_id)
@@ -162,14 +180,15 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
         logger.info(f'Created new conversation: {conversation_id}')
 
         # Generate AI title in the background (fire-and-forget)
+        # Title generation calls the Claude API, so always use FMAPI creds
         asyncio.create_task(
             generate_title_async(
                 message=body.message,
                 conversation_id=conversation_id,
                 user_email=user_email,
                 project_id=body.project_id,
-                databricks_host=workspace_url,
-                databricks_token=user_token,
+                databricks_host=fmapi_host,
+                databricks_token=fmapi_token,
             )
         )
     else:
@@ -196,11 +215,19 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
     # Create the agent coroutine that will run in background
     async def run_agent():
         """Run the agent and accumulate events in the stream."""
-        final_text_blocks: list[str] = []  # text blocks for persistence
-        delta_text_block: str = ''  # in-progress streaming delta text
-        inline_image_paths: list[str] = []  # image paths for persistence
+        final_text = ''
         new_session_id: Optional[str] = None
         error_message: Optional[str] = None
+        received_deltas = False
+        result_stats = {
+            'duration_ms': None,
+            'num_turns': None,
+            'input_tokens': None,
+            'output_tokens': None,
+            'cache_read_tokens': None,
+            'cache_creation_tokens': None,
+        }
+        result_stats: dict = {}
 
         try:
             # Stream all events from Claude
@@ -214,8 +241,11 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
                 default_schema=body.default_schema,
                 warehouse_id=body.warehouse_id,
                 workspace_folder=body.workspace_folder,
-                databricks_host=workspace_url,
-                databricks_token=user_token,
+                fmapi_host=fmapi_host,
+                fmapi_token=fmapi_token,
+                databricks_host=tools_host,
+                databricks_token=tools_token,
+                is_cross_workspace=is_cross_workspace,
                 is_cancelled_fn=lambda: stream.is_cancelled,
                 enabled_skills=enabled_skills,
                 mlflow_experiment_name=body.mlflow_experiment_name,
@@ -223,6 +253,8 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
                 images=body.images,
                 user_email=user_email,
                 user_access_token=user_access_token,
+                anthropic_model=user_model,
+                anthropic_model_mini=user_model_mini,
             ):
                 # Check if cancelled (also checked in agent thread, but double-check here)
                 if stream.is_cancelled:
@@ -232,23 +264,17 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
                 event_type = event.get('type', '')
 
                 if event_type == 'text_delta':
-                    # Token-by-token streaming - forward to client for live display.
-                    # Track deltas so cancelled runs can still persist partial output.
                     text = event.get('text', '')
-                    if text:
-                        delta_text_block += text
+                    final_text += text
+                    received_deltas = True
                     stream.add_event({'type': 'text_delta', 'text': text})
 
                 elif event_type == 'text':
-                    # Complete text block - ALWAYS emit to client as a block-boundary marker.
-                    # The client uses text events to insert \n\n separators between text blocks
-                    # that are separated by tool calls. Skipping these events (the old behaviour)
-                    # caused all blocks to be concatenated without line breaks.
                     text = event.get('text', '')
                     if text:
-                        final_text_blocks.append(text)
-                        delta_text_block = ''
-                        stream.add_event({'type': 'text', 'text': text})
+                        if not received_deltas:
+                            final_text += text
+                            stream.add_event({'type': 'text', 'text': text})
 
                 elif event_type == 'thinking':
                     stream.add_event({
@@ -259,10 +285,11 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
                 elif event_type == 'tool_use':
                     tool_name = event.get('tool_name', '')
                     tool_input = event.get('tool_input', {})
+                    tool_id = event.get('tool_id', '')
 
                     stream.add_event({
                         'type': 'tool_use',
-                        'tool_id': event.get('tool_id', ''),
+                        'tool_id': tool_id,
                         'tool_name': tool_name,
                         'tool_input': tool_input,
                     })
@@ -296,13 +323,21 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
 
                 elif event_type == 'result':
                     new_session_id = event.get('session_id')
+                    result_stats = {
+                        'duration_ms': event.get('duration_ms'),
+                        'num_turns': event.get('num_turns'),
+                        'input_tokens': event.get('input_tokens'),
+                        'output_tokens': event.get('output_tokens'),
+                        'cache_read_tokens': event.get('cache_read_tokens'),
+                        'cache_creation_tokens': event.get('cache_creation_tokens'),
+                    }
                     stream.add_event({
                         'type': 'result',
                         'session_id': new_session_id,
-                        'duration_ms': event.get('duration_ms'),
+                        'duration_ms': result_stats['duration_ms'],
                         'total_cost_usd': event.get('total_cost_usd'),
                         'is_error': event.get('is_error', False),
-                        'num_turns': event.get('num_turns'),
+                        **result_stats,
                     })
 
                 elif event_type == 'error':
@@ -328,12 +363,8 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
                     break
 
                 elif event_type == 'inline_image':
-                    # Auto-detected image path in tool result - forward to client for inline display
                     path = event.get('path', '')
                     stream.add_event({'type': 'inline_image', 'path': path})
-                    # Track for persistence so images survive in conversation history
-                    if path and path not in inline_image_paths:
-                        inline_image_paths.append(path)
 
                 elif event_type == 'thinking_delta':
                     stream.add_event({
@@ -365,97 +396,75 @@ async def invoke_agent(request: Request, body: InvokeAgentRequest):
 
             stream.add_event({'type': 'error', 'error': error_message})
 
-        # Join text blocks with \n\n separators (same as client display logic)
-        final_text = '\n\n'.join(final_text_blocks)
-        # If the run was stopped mid-block, persist any remaining streaming delta.
-        if delta_text_block:
-            final_text = (
-                f'{final_text}\n\n{delta_text_block}'
-                if final_text and not final_text.endswith('\n')
-                else f'{final_text}{delta_text_block}'
-            )
-
-        # Append image markdown for any images not already referenced in the text
-        image_markdown = '\n\n'.join(
-            f'![]({p})' for p in inline_image_paths if f']({p})' not in final_text
-        )
-        if image_markdown:
-            final_text = f'{final_text}\n\n{image_markdown}' if final_text else image_markdown
-
-        # Save messages to storage after stream completes, including cancelled runs.
-        try:
-            # Save user message
-            await conv_storage.add_message(
-                conversation_id=conversation_id,
-                role='user',
-                content=body.message,
-            )
-
-            # Save assistant response (or error). On cancellation, final_text may be
-            # partial output, which we still persist.
-            if final_text or error_message:
-                content = final_text if final_text else f'Error: {error_message}'
-                is_error = bool(error_message and not final_text)
-                logger.info(
-                    f'Saving assistant message: {len(content)} chars, '
-                    f'is_error={is_error}, cancelled={stream.is_cancelled}'
-                )
+        # Save messages to storage after stream completes (if not cancelled)
+        if not stream.is_cancelled:
+            try:
+                # Save user message
                 await conv_storage.add_message(
                     conversation_id=conversation_id,
-                    role='assistant',
-                    content=content,
-                    is_error=is_error,
-                )
-            else:
-                logger.warning(
-                    'No assistant response to save '
-                    f'(cancelled={stream.is_cancelled}, error={error_message is not None})'
+                    role='user',
+                    content=body.message,
                 )
 
-            # Update session_id for conversation resumption
-            if new_session_id:
-                await conv_storage.update_session_id(conversation_id, new_session_id)
+                # Save assistant response (or error)
+                if final_text or error_message:
+                    content = final_text if final_text else f'Error: {error_message}'
+                    is_error = bool(error_message and not final_text)
+                    logger.info(f'Saving assistant message: {len(content)} chars, is_error={is_error}')
+                    await conv_storage.add_message(
+                        conversation_id=conversation_id,
+                        role='assistant',
+                        content=content,
+                        is_error=is_error,
+                        duration_ms=result_stats.get('duration_ms'),
+                        num_turns=result_stats.get('num_turns'),
+                        input_tokens=result_stats.get('input_tokens'),
+                        output_tokens=result_stats.get('output_tokens'),
+                        cache_read_tokens=result_stats.get('cache_read_tokens'),
+                        cache_creation_tokens=result_stats.get('cache_creation_tokens'),
+                    )
+                else:
+                    logger.warning('No response to save (no text and no error)')
 
-            # Update cluster_id if provided
-            if body.cluster_id:
-                await conv_storage.update_cluster_id(conversation_id, body.cluster_id)
+                # Update session_id for conversation resumption
+                if new_session_id:
+                    await conv_storage.update_session_id(conversation_id, new_session_id)
 
-            # Update catalog/schema if provided
-            if body.default_catalog or body.default_schema:
-                await conv_storage.update_catalog_schema(
-                    conversation_id, body.default_catalog, body.default_schema
+                # Update cluster_id if provided
+                if body.cluster_id:
+                    await conv_storage.update_cluster_id(conversation_id, body.cluster_id)
+
+                # Update catalog/schema if provided
+                if body.default_catalog or body.default_schema:
+                    await conv_storage.update_catalog_schema(
+                        conversation_id, body.default_catalog, body.default_schema
+                    )
+
+                # Update warehouse_id if provided
+                if body.warehouse_id:
+                    await conv_storage.update_warehouse_id(conversation_id, body.warehouse_id)
+
+                # Update workspace_folder if provided
+                if body.workspace_folder:
+                    await conv_storage.update_workspace_folder(conversation_id, body.workspace_folder)
+
+                logger.info(
+                    f'Saved messages to conversation {conversation_id}: '
+                    f'text={len(final_text)} chars, error={error_message is not None}'
                 )
 
-            # Update warehouse_id if provided
-            if body.warehouse_id:
-                await conv_storage.update_warehouse_id(conversation_id, body.warehouse_id)
+                # Mark project for backup (will be processed by backup worker)
+                mark_for_backup(body.project_id)
 
-            # Update workspace_folder if provided
-            if body.workspace_folder:
-                await conv_storage.update_workspace_folder(conversation_id, body.workspace_folder)
+                # Persist latest CLAUDE.md directly in Lakebase projects table.
+                latest_claude_md = _read_project_claude_md(project_dir)
+                await project_storage.update_claude_md(body.project_id, latest_claude_md)
 
-            logger.info(
-                f'Saved messages to conversation {conversation_id}: '
-                f'text={len(final_text)} chars, error={error_message is not None}, '
-                f'cancelled={stream.is_cancelled}'
-            )
-
-            # Mark project for backup (will be processed by backup worker)
-            mark_for_backup(body.project_id)
-
-            # Persist latest CLAUDE.md directly in Lakebase projects table.
-            # This keeps it durable like custom_system_prompt (not only in zip backups).
-            latest_claude_md = _read_project_claude_md(project_dir)
-            await project_storage.update_claude_md(body.project_id, latest_claude_md)
-
-        except Exception as e:
-            logger.error(f'Failed to save messages: {e}')
+            except Exception as e:
+                logger.error(f'Failed to save messages: {e}')
 
         # Mark stream as complete
-        if stream.is_cancelled:
-            stream.is_complete = True
-            stream.add_event({'type': 'stream.completed', 'is_error': False})
-        elif error_message and not final_text:
+        if error_message and not final_text:
             stream.mark_error(error_message)
         else:
             stream.mark_complete()
@@ -538,8 +547,9 @@ async def stream_progress(execution_id: str, body: StreamProgressRequest):
                 })
                 break
 
-            # Wait a bit before checking for new events
-            await asyncio.sleep(0.1)
+            # Wait for the producer to signal new events (instant wake-up)
+            # instead of fixed-interval polling.
+            await stream.wait_for_event(timeout=1.0)
 
     return StreamingResponse(
         generate_events(),
