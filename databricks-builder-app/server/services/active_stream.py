@@ -53,19 +53,29 @@ class ActiveStream:
     _pending_events: list[dict] = field(default_factory=list)
     _last_persist_time: float = field(default_factory=time.time)
     _persist_index: int = 0  # Track which events have been persisted
+    _notify: asyncio.Event = field(default_factory=asyncio.Event)
+    _persist_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     def add_event(self, event_data: dict[str, Any]) -> None:
-        """Add an event to the stream and queue for persistence."""
+        """Add an event to the stream, queue for persistence, and wake consumers."""
         event = StreamEvent(
             timestamp=time.time(),
             data=event_data,
         )
         self.events.append(event)
-        # Queue event for database persistence
         self._pending_events.append({
             'timestamp': event.timestamp,
             **event_data,
         })
+        self._notify.set()
+
+    async def wait_for_event(self, timeout: float = 1.0) -> None:
+        """Wait until a new event arrives or timeout expires."""
+        try:
+            await asyncio.wait_for(self._notify.wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            pass
+        self._notify.clear()
 
     def get_events_since(self, cursor: float = 0.0) -> tuple[list[dict[str, Any]], float]:
         """Get all events since the given cursor timestamp.
@@ -116,11 +126,19 @@ class ActiveStream:
         return True
 
     def get_pending_events(self) -> list[dict]:
-        """Get and clear pending events for database persistence."""
-        events = self._pending_events.copy()
-        self._pending_events.clear()
+        """Get pending events for database persistence without clearing."""
+        return self._pending_events.copy()
+
+    def mark_events_persisted(self, count: int) -> None:
+        """Remove a persisted prefix of pending events.
+
+        Events are only removed after a successful database write so transient
+        persistence failures do not drop stream history.
+        """
+        if count <= 0:
+            return
+        del self._pending_events[:count]
         self._last_persist_time = time.time()
-        return events
 
     def should_persist(self) -> bool:
         """Check if events should be persisted now."""
@@ -202,24 +220,33 @@ class ActiveStreamManager:
         if not stream.user_email:
             return
 
-        events = stream.get_pending_events()
-        if not events:
-            return
+        # Serialize persistence attempts per stream to avoid duplicate writes.
+        async with stream._persist_lock:
+            events = stream.get_pending_events()
+            if not events:
+                return
 
-        try:
-            from .storage import ExecutionStorage
-            storage = ExecutionStorage(
-                stream.user_email,
-                stream.project_id,
-                stream.conversation_id
-            )
-            await storage.add_events(stream.execution_id, events)
-            logger.debug(
-                f"Persisted {len(events)} events for "
-                f"stream {stream.execution_id}"
-            )
-        except Exception as e:
-            logger.warning(f"Failed to persist events to database: {e}")
+            try:
+                from .storage import ExecutionStorage
+                storage = ExecutionStorage(
+                    stream.user_email,
+                    stream.project_id,
+                    stream.conversation_id
+                )
+                persisted = await storage.add_events(stream.execution_id, events)
+                if not persisted:
+                    logger.warning(
+                        f"Execution {stream.execution_id} not found while persisting events; "
+                        f"will retry ({len(events)} pending)"
+                    )
+                    return
+                stream.mark_events_persisted(len(events))
+                logger.debug(
+                    f"Persisted {len(events)} events for "
+                    f"stream {stream.execution_id}"
+                )
+            except Exception as e:
+                logger.warning(f"Failed to persist events to database: {e}")
 
     async def update_stream_status(
         self,

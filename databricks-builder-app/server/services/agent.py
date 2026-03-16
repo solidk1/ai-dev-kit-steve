@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import queue
+import re
 import sys
 import threading
 import time
@@ -44,13 +45,171 @@ from claude_agent_sdk.types import (
   ToolUseBlock,
   UserMessage,
 )
+import databricks_tools_core.auth as _dt_auth
 from databricks_tools_core.auth import set_databricks_auth, clear_databricks_auth
+
+_original_get_workspace_client = _dt_auth.get_workspace_client
+
+
+def _obo_workspace_client():
+  """OBO: user token (when set) takes priority over SP OAuth for workspace ops."""
+  host = _dt_auth._host_ctx.get() or os.environ.get('DATABRICKS_HOST')
+  token = _dt_auth._token_ctx.get()
+  if token:
+    if not host:
+      raise ValueError('Databricks host is required when using a context token')
+    from databricks.sdk import WorkspaceClient
+    from databricks.sdk.credentials_provider import CredentialsStrategy
+    from databricks_tools_core.identity import PRODUCT_NAME, PRODUCT_VERSION, tag_client
+
+    _t = token
+
+    class _OBOStrategy(CredentialsStrategy):
+      def auth_type(self) -> str:
+        return 'pat'
+
+      def __call__(self, cfg):
+        return lambda: {'Authorization': f'Bearer {_t}'}
+
+    return tag_client(WorkspaceClient(
+      host=host,
+      credentials_strategy=_OBOStrategy(),
+      product=PRODUCT_NAME,
+      product_version=PRODUCT_VERSION,
+    ))
+  return _original_get_workspace_client()
+
+
+_dt_auth.get_workspace_client = _obo_workspace_client
 
 from .backup_manager import ensure_project_directory as _ensure_project_directory
 from .databricks_tools import load_databricks_tools, create_filtered_databricks_server
 from .system_prompt import get_system_prompt
 
 logger = logging.getLogger(__name__)
+
+_IMAGE_PATH_RE = re.compile(
+  r'(?:dbfs:/|/dbfs/|/Volumes/|/Workspace/|/Users/|/Shared/)'
+  r'[^\s\'"<>\]]*\.(?:png|jpg|jpeg|gif|svg|webp)',
+  re.IGNORECASE,
+)
+_CLUSTER_ID_RE = re.compile(r'"cluster_id"\s*:\s*"([^"]+)"')
+_CLUSTER_NAME_RE = re.compile(r'"cluster_name"\s*:\s*"([^"]+)"')
+_CONTEXT_ID_RE = re.compile(r'"context_id"\s*:\s*"([^"]+)"')
+_cluster_name_cache: dict[str, str] = {
+  '__serverless__': 'Serverless Compute',
+  'serverless': 'Serverless Compute',
+}
+
+
+def _extract_image_paths(content: str) -> list[str]:
+  """Return normalised Databricks paths for any image files mentioned in tool output."""
+  paths = []
+  for m in _IMAGE_PATH_RE.finditer(content):
+    p = m.group(0)
+    if p.startswith('/dbfs/'):
+      p = 'dbfs:/' + p[6:]
+    paths.append(p)
+  return paths
+
+
+def _is_inline_image_tool(tool_name: str | None) -> bool:
+  """True for MCP tools whose output may include renderable image paths."""
+  if not tool_name:
+    return False
+  normalized = tool_name.strip()
+  return (
+    normalized == 'execute_databricks_command'
+    or normalized.endswith('__execute_databricks_command')
+    or normalized == 'check_operation_status'
+    or normalized.endswith('__check_operation_status')
+  )
+
+
+def _is_command_execution_tool(tool_name: str | None) -> bool:
+  """True only for Databricks command-execution MCP tool names."""
+  if not tool_name:
+    return False
+  normalized = tool_name.strip()
+  return (
+    normalized == 'execute_databricks_command'
+    or normalized.endswith('__execute_databricks_command')
+  )
+
+
+def _resolve_cluster_name(cluster_id: str | None) -> str | None:
+  """Best-effort cluster name lookup from a cluster_id."""
+  if not cluster_id:
+    return None
+
+  cached = _cluster_name_cache.get(cluster_id)
+  if cached:
+    return cached
+
+  try:
+    client = _dt_auth.get_workspace_client()
+    cluster = client.clusters.get(cluster_id=cluster_id)
+    cluster_name = getattr(cluster, 'cluster_name', None)
+    if cluster_name:
+      _cluster_name_cache[cluster_id] = cluster_name
+      return cluster_name
+  except Exception:
+    logger.debug('Failed to resolve cluster name for cluster_id=%s', cluster_id, exc_info=True)
+
+  return None
+
+
+def _extract_command_execution_metadata(
+  content: str,
+  default_cluster_id: str | None = None,
+) -> dict[str, str]:
+  """Extract command execution metadata from tool output text."""
+  cluster_id: str | None = None
+  cluster_name: str | None = None
+  context_id: str | None = None
+
+  try:
+    parsed = json.loads(content)
+    if isinstance(parsed, dict):
+      raw_cluster_id = parsed.get('cluster_id')
+      raw_cluster_name = parsed.get('cluster_name')
+      raw_context_id = parsed.get('context_id')
+      if isinstance(raw_cluster_id, str) and raw_cluster_id:
+        cluster_id = raw_cluster_id
+      if isinstance(raw_cluster_name, str) and raw_cluster_name:
+        cluster_name = raw_cluster_name
+      if isinstance(raw_context_id, str) and raw_context_id:
+        context_id = raw_context_id
+  except Exception:
+    # Expected for mixed/plain outputs; fall back to regex below.
+    pass
+
+  if not cluster_id:
+    m = _CLUSTER_ID_RE.search(content)
+    if m:
+      cluster_id = m.group(1)
+  if not cluster_name:
+    m = _CLUSTER_NAME_RE.search(content)
+    if m:
+      cluster_name = m.group(1)
+  if not context_id:
+    m = _CONTEXT_ID_RE.search(content)
+    if m:
+      context_id = m.group(1)
+
+  if not cluster_id and default_cluster_id:
+    cluster_id = default_cluster_id
+  if not cluster_name:
+    cluster_name = _resolve_cluster_name(cluster_id)
+
+  metadata: dict[str, str] = {}
+  if cluster_id:
+    metadata['cluster_id'] = cluster_id
+  if cluster_name:
+    metadata['cluster_name'] = cluster_name
+  if context_id:
+    metadata['context_id'] = context_id
+  return metadata
 
 # Built-in Claude Code tools
 BUILTIN_TOOLS = [
@@ -210,7 +369,7 @@ def _get_mlflow_stop_hook(experiment_name: str | None = None):
     return None
 
 
-def _run_agent_in_fresh_loop(message, options, result_queue, context, is_cancelled_fn, mlflow_experiment=None):
+def _run_agent_in_fresh_loop(message, options, result_queue, context, is_cancelled_fn, mlflow_experiment=None, images=None):
   """Run agent in a fresh event loop (workaround for issue #462).
 
   This function runs in a separate thread with a fresh event loop to avoid
@@ -251,25 +410,30 @@ def _run_agent_in_fresh_loop(message, options, result_queue, context, is_cancell
       """Run agent using query() for proper streaming."""
       # Create prompt generator in the fresh event loop context
       async def prompt_generator():
-        yield {'type': 'user', 'message': {'role': 'user', 'content': message}}
+        if images:
+          content = [{'type': 'image', 'source': img} for img in images]
+          content.append({'type': 'text', 'text': message})
+          yield {'type': 'user', 'message': {'role': 'user', 'content': content}}
+        else:
+          yield {'type': 'user', 'message': {'role': 'user', 'content': message}}
 
       try:
         msg_count = 0
         async for msg in query(prompt=prompt_generator(), options=options):
           msg_count += 1
           msg_type = type(msg).__name__
-          logger.info(f"[AGENT DEBUG] Received message #{msg_count}: {msg_type}")
+          logger.debug(f"[AGENT DEBUG] Received message #{msg_count}: {msg_type}")
 
           # Log more details for specific message types
           if hasattr(msg, 'content'):
             content = msg.content
             if isinstance(content, list):
               block_types = [type(b).__name__ for b in content]
-              logger.info(f"[AGENT DEBUG]   Content blocks: {block_types}")
+              logger.debug(f"[AGENT DEBUG]   Content blocks: {block_types}")
           if hasattr(msg, 'is_error') and msg.is_error:
-            logger.error(f"[AGENT DEBUG]   is_error=True")
+            logger.debug('[AGENT DEBUG]   is_error=True')
           if hasattr(msg, 'session_id'):
-            logger.info(f"[AGENT DEBUG]   session_id={msg.session_id}")
+            logger.debug(f"[AGENT DEBUG]   session_id={msg.session_id}")
 
           # Check for cancellation before processing each message
           if is_cancelled_fn():
@@ -277,7 +441,7 @@ def _run_agent_in_fresh_loop(message, options, result_queue, context, is_cancell
             result_queue.put(('cancelled', None))
             return
           result_queue.put(('message', msg))
-        logger.info(f"[AGENT DEBUG] query() loop completed normally after {msg_count} messages")
+        logger.debug(f"[AGENT DEBUG] query() loop completed normally after {msg_count} messages")
       except asyncio.CancelledError:
         logger.warning("Agent query was cancelled (asyncio.CancelledError)")
         result_queue.put(('error', Exception("Agent query cancelled - likely due to stream timeout or connection issue")))
@@ -302,7 +466,12 @@ def _run_agent_in_fresh_loop(message, options, result_queue, context, is_cancell
   context.run(run_with_context)
 
 
-def _process_tool_result(block: ToolResultBlock, ask_user_tool_ids: set[str]) -> dict:
+def _process_tool_result(
+  block: ToolResultBlock,
+  ask_user_tool_ids: set[str],
+  tool_name: str | None = None,
+  default_cluster_id: str | None = None,
+) -> dict:
   """Extract and normalize content from a ToolResultBlock for streaming."""
   content = block.content
   if isinstance(content, list):
@@ -312,6 +481,8 @@ def _process_tool_result(block: ToolResultBlock, ask_user_tool_ids: set[str]) ->
         texts.append(item['text'])
       elif isinstance(item, str):
         texts.append(item)
+      elif hasattr(item, 'text'):
+        texts.append(item.text)
       else:
         texts.append(str(item))
     content = '\n'.join(texts) if texts else str(block.content)
@@ -327,17 +498,26 @@ def _process_tool_result(block: ToolResultBlock, ask_user_tool_ids: set[str]) ->
     content = f'Tool execution interrupted: {content}. This may occur when operations exceed timeout limits or when the connection is interrupted. Check backend logs for more details.'
     logger.warning(f'Tool result error (improved): {content}')
 
-  return {
+  result = {
     'type': 'tool_result',
     'tool_use_id': block.tool_use_id,
     'content': content,
     'is_error': block.is_error,
   }
+  if _is_command_execution_tool(tool_name):
+    command_execution = _extract_command_execution_metadata(
+      content,
+      default_cluster_id=default_cluster_id,
+    )
+    if command_execution:
+      result['command_execution'] = command_execution
+  return result
 
 
 async def stream_agent_response(
   project_id: str,
   message: str,
+  images: list[dict] | None = None,
   session_id: str | None = None,
   cluster_id: str | None = None,
   default_catalog: str | None = None,
@@ -352,6 +532,11 @@ async def stream_agent_response(
   is_cancelled_fn: callable = None,
   enabled_skills: list[str] | None = None,
   mlflow_experiment_name: str | None = None,
+  custom_system_prompt: str | None = None,
+  user_email: str | None = None,
+  user_access_token: str | None = None,
+  anthropic_model: str | None = None,
+  anthropic_model_mini: str | None = None,
 ) -> AsyncIterator[dict]:
   """Stream Claude agent response with all event types.
 
@@ -390,6 +575,9 @@ async def stream_agent_response(
   logger.info(f'Agent working directory (cwd): {project_dir}')
   logger.info(f'Workspace folder (remote): {workspace_folder}')
 
+  # Use user's access token for tool operations when available
+  if user_access_token:
+    databricks_token = user_access_token
   # Set auth context for tool operations (targets the specified workspace)
   # When cross-workspace, force_token ensures the target credentials are used
   # even when OAuth M2M credentials exist in environment
@@ -402,6 +590,16 @@ async def stream_agent_response(
     # Sync project skills directory before running agent
     from .skills_manager import sync_project_skills, get_available_skills, get_allowed_mcp_tools
     sync_project_skills(project_dir, enabled_skills=enabled_skills)
+
+    # Sync user's personal workspace skills if token is available
+    if user_email and user_access_token:
+      try:
+        from .workspace_personal import sync_personal_skills_to_project
+        synced = sync_personal_skills_to_project(user_email, user_access_token, project_dir)
+        if synced:
+          logger.info(f'Synced {synced} personal skills to project')
+      except Exception as e:
+        logger.warning(f'Failed to sync personal skills: {e}')
 
     # Get Databricks tools and filter based on enabled skills.
     # We must create a filtered MCP server (not just filter allowed_tools)
@@ -435,6 +633,10 @@ async def stream_agent_response(
       enabled_skills=enabled_skills,
     )
 
+    # Override with custom system prompt if provided
+    if custom_system_prompt:
+      system_prompt = custom_system_prompt
+
     # Load Claude settings for Databricks model serving authentication
     claude_env = _load_claude_settings()
 
@@ -454,22 +656,33 @@ async def stream_agent_response(
       host = effective_fmapi_host.replace('https://', '').replace('http://', '').rstrip('/')
       anthropic_base_url = f'https://{host}/serving-endpoints/anthropic'
 
-      claude_env['ANTHROPIC_BASE_URL'] = anthropic_base_url
+      # Route through the local proxy so unsupported fields/headers
+      # (context_management, betas, anthropic-beta) are stripped before
+      # hitting Databricks FMAPI.
+      app_port = os.environ.get('DATABRICKS_APP_PORT', '8000')
+      proxy_base_url = f'http://localhost:{app_port}/anthropic-proxy'
+      claude_env['ANTHROPIC_BASE_URL'] = proxy_base_url
       claude_env['ANTHROPIC_API_KEY'] = effective_fmapi_token
       claude_env['ANTHROPIC_AUTH_TOKEN'] = effective_fmapi_token
 
-      # Set the model to use (required for Databricks FMAPI)
-      anthropic_model = os.environ.get('ANTHROPIC_MODEL', 'databricks-claude-opus-4-6')
-      claude_env['ANTHROPIC_MODEL'] = anthropic_model
+      # Store the real FMAPI URL server-side so the proxy can read it
+      # directly (avoids header-parsing issues with ANTHROPIC_CUSTOM_HEADERS).
+      from ..routers.anthropic_proxy import set_fmapi_base_url
+      set_fmapi_base_url(anthropic_base_url)
 
-      # Disable beta headers and experimental betas for Databricks FMAPI compatibility
-      # ANTHROPIC_CUSTOM_HEADERS enables coding agent mode on FMAPI
-      # CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS prevents context_management and other
-      # experimental body parameters that FMAPI doesn't support (400: Extra inputs not permitted)
+      # Enable coding agent mode on FMAPI (matches upstream format)
       claude_env['ANTHROPIC_CUSTOM_HEADERS'] = 'x-databricks-use-coding-agent-mode: true'
+
+      # Set the model: user setting > env var > default
+      effective_model = anthropic_model or os.environ.get('ANTHROPIC_MODEL', 'databricks-claude-opus-4-6')
+      claude_env['ANTHROPIC_MODEL'] = effective_model
+      if anthropic_model_mini:
+        claude_env['ANTHROPIC_SMALL_FAST_MODEL'] = anthropic_model_mini
+
+      # Extra safety: disable experimental betas at the SDK level too
       claude_env['CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS'] = '1'
 
-      logger.info(f'Configured Databricks model serving: {anthropic_base_url} with model {anthropic_model}')
+      logger.info(f'Configured Databricks model serving via proxy: {proxy_base_url} → {anthropic_base_url} with model {effective_model}')
       logger.info(f'Claude env vars: BASE_URL={claude_env.get("ANTHROPIC_BASE_URL")}, MODEL={claude_env.get("ANTHROPIC_MODEL")}')
 
     # Databricks SDK upstream tracking for subprocess user-agent attribution
@@ -481,11 +694,21 @@ async def stream_agent_response(
     stream_timeout = os.environ.get('CLAUDE_CODE_STREAM_CLOSE_TIMEOUT', '3600000')
     claude_env['CLAUDE_CODE_STREAM_CLOSE_TIMEOUT'] = stream_timeout
 
+    # Hardening for non-interactive app runtime:
+    # some subprocess paths invoke terminal capabilities (e.g., tput) and can
+    # fail when TERM/TTY expectations are not met inside Databricks Apps.
+    claude_env.setdefault('TERM', 'xterm')
+    claude_env.setdefault('CI', '1')
+    claude_env.setdefault('NO_COLOR', '1')
+    claude_env.setdefault('CLICOLOR', '0')
+
     # Stderr callback to capture Claude subprocess output for debugging
     def stderr_callback(line: str):
-      logger.debug(f'[Claude stderr] {line.strip()}')
-      # Also print to stderr for immediate visibility during development
-      print(f'[Claude stderr] {line.strip()}', file=sys.stderr, flush=True)
+      stripped = line.strip()
+      if not stripped:
+        return
+      logger.warning(f'[Claude stderr] {stripped}')
+      print(f'[Claude stderr] {stripped}', flush=True)
 
     # Handle AskUserQuestion tool calls gracefully.
     # With bypassPermissions and no callback, AskUserQuestion triggers an SDK
@@ -539,7 +762,7 @@ async def stream_agent_response(
 
     agent_thread = threading.Thread(
       target=_run_agent_in_fresh_loop,
-      args=(message, options, result_queue, ctx, cancel_check, mlflow_experiment),
+      args=(message, options, result_queue, ctx, cancel_check, mlflow_experiment, images),
       daemon=True
     )
     agent_thread.start()
@@ -549,6 +772,13 @@ async def stream_agent_response(
     last_activity = time.time()
     # Track AskUserQuestion tool IDs to rewrite their results in the stream
     ask_user_tool_ids: set[str] = set()
+    _tool_name_by_id: dict[str, str] = {}
+    _last_tool_use_name: str = ''
+    _emitted_inline_image_paths: set[str] = set()
+    _total_input_tokens: int = 0
+    _total_output_tokens: int = 0
+    _total_cache_read_tokens: int = 0
+    _total_cache_creation_tokens: int = 0
 
     while True:
       # Use timeout on queue.get to allow keepalive emission
@@ -585,6 +815,8 @@ async def stream_agent_response(
         raise msg
       elif msg_type == 'message':
         # Handle different message types
+        msg_class = type(msg).__name__
+        print(f'[AGENT MSG] type={msg_class}', flush=True)
         if isinstance(msg, AssistantMessage):
           # Process content blocks
           for block in msg.content:
@@ -602,6 +834,8 @@ async def stream_agent_response(
               # Track AskUserQuestion calls so we can rewrite their results
               if block.name == 'AskUserQuestion':
                 ask_user_tool_ids.add(block.id)
+              _tool_name_by_id[block.id] = block.name
+              _last_tool_use_name = block.name
               yield {
                 'type': 'tool_use',
                 'tool_id': block.id,
@@ -609,7 +843,27 @@ async def stream_agent_response(
                 'tool_input': block.input,
               }
             elif isinstance(block, ToolResultBlock):
-              yield _process_tool_result(block, ask_user_tool_ids)
+              raw_tid = block.tool_use_id
+              tool_name = _tool_name_by_id.get(raw_tid, '') if raw_tid else _last_tool_use_name
+              print(f'[AGENT IMG] AssistantMsg ToolResultBlock tool={tool_name} is_error={block.is_error}', flush=True)
+              result_event = _process_tool_result(
+                block,
+                ask_user_tool_ids,
+                tool_name=tool_name,
+                default_cluster_id=cluster_id,
+              )
+              yield result_event
+              is_img_tool = _is_inline_image_tool(tool_name)
+              content_preview = (result_event.get('content', '') or '')[:200]
+              print(f'[AGENT IMG] is_inline_image_tool={is_img_tool} content_preview={content_preview!r}', flush=True)
+              if not block.is_error and is_img_tool:
+                found_paths = _extract_image_paths(result_event.get('content', ''))
+                print(f'[AGENT IMG] extracted_paths={found_paths}', flush=True)
+                for img_path in found_paths:
+                  if img_path not in _emitted_inline_image_paths:
+                    _emitted_inline_image_paths.add(img_path)
+                    print(f'[AGENT IMG] EMITTING inline_image path={img_path}', flush=True)
+                    yield {'type': 'inline_image', 'path': img_path}
 
         elif isinstance(msg, ResultMessage):
           yield {
@@ -619,6 +873,10 @@ async def stream_agent_response(
             'total_cost_usd': msg.total_cost_usd,
             'is_error': msg.is_error,
             'num_turns': msg.num_turns,
+            'input_tokens': _total_input_tokens,
+            'output_tokens': _total_output_tokens,
+            'cache_read_tokens': _total_cache_read_tokens,
+            'cache_creation_tokens': _total_cache_creation_tokens,
           }
 
         elif isinstance(msg, SystemMessage):
@@ -629,13 +887,33 @@ async def stream_agent_response(
           }
 
         elif isinstance(msg, UserMessage):
-          # UserMessage can contain tool results (sent back to Claude after tool execution)
           msg_content = msg.content
+          content_types = [type(b).__name__ for b in msg_content] if isinstance(msg_content, list) else [type(msg_content).__name__]
+          print(f'[AGENT MSG] UserMessage content_types={content_types}', flush=True)
           if isinstance(msg_content, list):
             for block in msg_content:
               if isinstance(block, ToolResultBlock):
-                yield _process_tool_result(block, ask_user_tool_ids)
-          # Skip string content (just echo of user input)
+                raw_tid = block.tool_use_id
+                tool_name = _tool_name_by_id.get(raw_tid, '') if raw_tid else _last_tool_use_name
+                print(f'[AGENT IMG] UserMsg ToolResultBlock tool={tool_name} is_error={block.is_error}', flush=True)
+                result_event = _process_tool_result(
+                  block,
+                  ask_user_tool_ids,
+                  tool_name=tool_name,
+                  default_cluster_id=cluster_id,
+                )
+                yield result_event
+                is_img_tool = _is_inline_image_tool(tool_name)
+                content_preview = (result_event.get('content', '') or '')[:200]
+                print(f'[AGENT IMG] is_inline_image_tool={is_img_tool} content_preview={content_preview!r}', flush=True)
+                if not block.is_error and is_img_tool:
+                  found_paths = _extract_image_paths(result_event.get('content', ''))
+                  print(f'[AGENT IMG] extracted_paths={found_paths}', flush=True)
+                  for img_path in found_paths:
+                    if img_path not in _emitted_inline_image_paths:
+                      _emitted_inline_image_paths.add(img_path)
+                      print(f'[AGENT IMG] EMITTING inline_image path={img_path}', flush=True)
+                      yield {'type': 'inline_image', 'path': img_path}
 
         elif isinstance(msg, StreamEvent):
           # Handle streaming events for token-by-token updates
@@ -660,8 +938,17 @@ async def stream_agent_response(
                   'type': 'thinking_delta',
                   'thinking': thinking,
                 }
+          elif event_type == 'message_start':
+            usage = event_data.get('message', {}).get('usage', {})
+            _total_input_tokens += usage.get('input_tokens', 0)
+            _total_output_tokens += usage.get('output_tokens', 0)
+            _total_cache_read_tokens += usage.get('cache_read_input_tokens', 0)
+            _total_cache_creation_tokens += usage.get('cache_creation_input_tokens', 0)
+          elif event_type == 'message_delta':
+            usage = event_data.get('usage', {})
+            _total_output_tokens += usage.get('output_tokens', 0)
           # Pass through other stream events if needed
-          elif event_type not in ('content_block_start', 'content_block_stop', 'message_start', 'message_delta', 'message_stop'):
+          elif event_type not in ('content_block_start', 'content_block_stop', 'message_delta', 'message_stop'):
             yield {
               'type': 'stream_event',
               'event': event_data,
@@ -673,12 +960,17 @@ async def stream_agent_response(
     error_msg = f'Error during Claude query: {e}'
     full_traceback = traceback.format_exc()
 
-    # Use print to stderr for immediate visibility
-    print(f'\n{"="*60}', file=sys.stderr)
-    print(f'AGENT ERROR: {error_msg}', file=sys.stderr)
-    print(full_traceback, file=sys.stderr)
+    print(f'\n{"="*60}')
+    print(f'AGENT ERROR: {error_msg}')
+    print(full_traceback)
 
-    # Also log normally
+    # Extract stderr from ProcessError if available
+    if hasattr(e, 'stderr') and e.stderr:
+      print(f'Claude CLI stderr: {e.stderr}')
+      logger.error(f'Claude CLI stderr: {e.stderr}')
+    if hasattr(e, 'message') and 'Check stderr' in str(e):
+      print(f'NOTE: Claude CLI exited with error. Check stderr_callback output above.')
+
     logger.error(error_msg)
     logger.error(full_traceback)
 
@@ -686,12 +978,12 @@ async def stream_agent_response(
     if hasattr(e, 'exceptions'):
       for i, sub_exc in enumerate(e.exceptions):
         sub_tb = ''.join(traceback.format_exception(type(sub_exc), sub_exc, sub_exc.__traceback__))
-        print(f'Sub-exception {i}: {sub_exc}', file=sys.stderr)
-        print(sub_tb, file=sys.stderr)
+        print(f'Sub-exception {i}: {sub_exc}')
+        print(sub_tb)
         logger.error(f'Sub-exception {i}: {sub_exc}')
         logger.error(sub_tb)
 
-    print(f'{"="*60}\n', file=sys.stderr)
+    print(f'{"="*60}\n')
 
     yield {
       'type': 'error',
