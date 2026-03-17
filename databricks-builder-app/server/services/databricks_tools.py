@@ -12,6 +12,7 @@ import asyncio
 import concurrent.futures
 import json
 import logging
+import re
 import threading
 import time
 from contextvars import copy_context
@@ -32,6 +33,67 @@ logger = logging.getLogger(__name__)
 # Anthropic API has ~50s stream idle timeout, we switch early to keep messages flowing
 # Lower threshold ensures tool results return quickly, preventing cumulative timeout
 SAFE_EXECUTION_THRESHOLD = 10
+_ANSI_ESCAPE_RE = re.compile(r'\x1b\[[0-?]*[ -/]*[@-~]')
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_ESCAPE_RE.sub('', text).replace('\r', '')
+
+
+def _summarize_error_text(raw_error: str) -> str:
+    """Collapse verbose tracebacks into a short human-readable cause."""
+    clean = _strip_ansi(raw_error).strip()
+    if not clean:
+        return "Unknown execution error."
+
+    lines = [ln.strip() for ln in clean.split('\n') if ln.strip()]
+
+    # Py4JJavaError usually contains the best root cause on a line after the header:
+    # ": com....InvalidMountException: <message>"
+    py4j_idx = next((i for i, ln in enumerate(lines) if ln.startswith('Py4JJavaError')), -1)
+    if py4j_idx >= 0:
+        for ln in lines[py4j_idx + 1:]:
+            if ln.startswith(':'):
+                return ln.lstrip(':').strip()
+            if 'Exception:' in ln or 'Error:' in ln:
+                return ln
+        return lines[py4j_idx]
+
+    # Generic fallback: prefer the last explicit error/exception line.
+    for ln in reversed(lines):
+        if 'Exception:' in ln or 'Error:' in ln:
+            return ln
+
+    return lines[0]
+
+
+def _sanitize_compute_like_result(result: Any) -> Any:
+    """Sanitize compute tool results so errors are compact and token-efficient."""
+    if not isinstance(result, dict):
+        return result
+
+    sanitized = dict(result)
+
+    # Direct execute_databricks_command / run_python_file_on_databricks output.
+    if sanitized.get('success') is False and isinstance(sanitized.get('error'), str):
+        raw = sanitized['error']
+        sanitized['error'] = _summarize_error_text(raw)
+        sanitized['error_summary'] = sanitized['error']
+        sanitized['error_truncated'] = len(raw) > len(sanitized['error'])
+
+    # check_operation_status wraps original tool output under result.
+    nested = sanitized.get('result')
+    if isinstance(nested, dict):
+        sanitized['result'] = _sanitize_compute_like_result(nested)
+
+    return sanitized
+
+
+def _sanitize_tool_result(tool_name: str, result: Any) -> Any:
+    """Apply tool-specific sanitization before serializing to model-visible text."""
+    if tool_name in {'execute_databricks_command', 'run_python_file_on_databricks', 'check_operation_status'}:
+        return _sanitize_compute_like_result(result)
+    return result
 
 
 def load_databricks_tools():
@@ -155,6 +217,10 @@ Use this to get results of long-running operations that were moved to
 background execution. When a tool takes longer than 30 seconds, it returns
 an operation_id instead of blocking. Use this tool to poll for the result.
 
+Polling guidance:
+    - Poll no more frequently than once every 5 seconds
+    - Continue polling until status is 'completed' or 'failed'
+
 Args:
     operation_id: The operation ID returned by the long-running tool
 
@@ -194,7 +260,7 @@ Returns:
         }
 
         if op.status == "completed":
-            result["result"] = op.result
+            result["result"] = _sanitize_tool_result(op.tool_name, op.result)
         elif op.status == "failed":
             result["error"] = op.error
 
@@ -353,7 +419,8 @@ def _make_wrapper(name: str, description: str, schema: dict, fn):
                                 # Block until the future completes (it's already running)
                                 # cf_future is a concurrent.futures.Future which is thread-safe
                                 result = cf_future.result()  # This blocks
-                                complete_operation(op_id, result=result)
+                                sanitized_result = _sanitize_tool_result(name, result)
+                                complete_operation(op_id, result=sanitized_result)
                                 print(
                                     f'[MCP ASYNC] Operation {op_id} completed successfully',
                                     file=sys.stderr,
@@ -393,7 +460,8 @@ def _make_wrapper(name: str, description: str, schema: dict, fn):
                                         'message': (
                                             f'Operation is taking longer than {SAFE_EXECUTION_THRESHOLD}s '
                                             f'and has been moved to background execution. '
-                                            f'Use check_operation_status("{op_id}") to poll for results.'
+                                            f'Use check_operation_status("{op_id}") to poll for results '
+                                            f'(every 5 seconds).'
                                         ),
                                         'elapsed_seconds': round(elapsed, 1),
                                     }),
@@ -405,6 +473,7 @@ def _make_wrapper(name: str, description: str, schema: dict, fn):
                     continue
 
             elapsed = time.time() - start_time
+            result = _sanitize_tool_result(name, result)
             result_str = json.dumps(result, default=str)
             print(f'[MCP TOOL] {name} completed in {elapsed:.2f}s, result length: {len(result_str)}', file=sys.stderr, flush=True)
             logger.info(f'[MCP] Tool {name} completed in {elapsed:.2f}s')

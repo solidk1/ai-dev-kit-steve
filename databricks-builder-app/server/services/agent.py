@@ -815,8 +815,6 @@ async def stream_agent_response(
         raise msg
       elif msg_type == 'message':
         # Handle different message types
-        msg_class = type(msg).__name__
-        print(f'[AGENT MSG] type={msg_class}', flush=True)
         if isinstance(msg, AssistantMessage):
           # Process content blocks
           for block in msg.content:
@@ -845,7 +843,6 @@ async def stream_agent_response(
             elif isinstance(block, ToolResultBlock):
               raw_tid = block.tool_use_id
               tool_name = _tool_name_by_id.get(raw_tid, '') if raw_tid else _last_tool_use_name
-              print(f'[AGENT IMG] AssistantMsg ToolResultBlock tool={tool_name} is_error={block.is_error}', flush=True)
               result_event = _process_tool_result(
                 block,
                 ask_user_tool_ids,
@@ -853,16 +850,11 @@ async def stream_agent_response(
                 default_cluster_id=cluster_id,
               )
               yield result_event
-              is_img_tool = _is_inline_image_tool(tool_name)
-              content_preview = (result_event.get('content', '') or '')[:200]
-              print(f'[AGENT IMG] is_inline_image_tool={is_img_tool} content_preview={content_preview!r}', flush=True)
-              if not block.is_error and is_img_tool:
-                found_paths = _extract_image_paths(result_event.get('content', ''))
-                print(f'[AGENT IMG] extracted_paths={found_paths}', flush=True)
-                for img_path in found_paths:
+              if not block.is_error and _is_inline_image_tool(tool_name):
+                for img_path in _extract_image_paths(result_event.get('content', '')):
                   if img_path not in _emitted_inline_image_paths:
                     _emitted_inline_image_paths.add(img_path)
-                    print(f'[AGENT IMG] EMITTING inline_image path={img_path}', flush=True)
+                    logger.info(f'Inline image detected: {img_path}')
                     yield {'type': 'inline_image', 'path': img_path}
 
         elif isinstance(msg, ResultMessage):
@@ -887,15 +879,13 @@ async def stream_agent_response(
           }
 
         elif isinstance(msg, UserMessage):
+          # UserMessage can contain tool results (sent back to Claude after tool execution)
           msg_content = msg.content
-          content_types = [type(b).__name__ for b in msg_content] if isinstance(msg_content, list) else [type(msg_content).__name__]
-          print(f'[AGENT MSG] UserMessage content_types={content_types}', flush=True)
           if isinstance(msg_content, list):
             for block in msg_content:
               if isinstance(block, ToolResultBlock):
                 raw_tid = block.tool_use_id
                 tool_name = _tool_name_by_id.get(raw_tid, '') if raw_tid else _last_tool_use_name
-                print(f'[AGENT IMG] UserMsg ToolResultBlock tool={tool_name} is_error={block.is_error}', flush=True)
                 result_event = _process_tool_result(
                   block,
                   ask_user_tool_ids,
@@ -903,17 +893,13 @@ async def stream_agent_response(
                   default_cluster_id=cluster_id,
                 )
                 yield result_event
-                is_img_tool = _is_inline_image_tool(tool_name)
-                content_preview = (result_event.get('content', '') or '')[:200]
-                print(f'[AGENT IMG] is_inline_image_tool={is_img_tool} content_preview={content_preview!r}', flush=True)
-                if not block.is_error and is_img_tool:
-                  found_paths = _extract_image_paths(result_event.get('content', ''))
-                  print(f'[AGENT IMG] extracted_paths={found_paths}', flush=True)
-                  for img_path in found_paths:
+                if not block.is_error and _is_inline_image_tool(tool_name):
+                  for img_path in _extract_image_paths(result_event.get('content', '')):
                     if img_path not in _emitted_inline_image_paths:
                       _emitted_inline_image_paths.add(img_path)
-                      print(f'[AGENT IMG] EMITTING inline_image path={img_path}', flush=True)
+                      logger.info(f'Inline image detected: {img_path}')
                       yield {'type': 'inline_image', 'path': img_path}
+          # Skip string content (just echo of user input)
 
         elif isinstance(msg, StreamEvent):
           # Handle streaming events for token-by-token updates

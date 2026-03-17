@@ -2,12 +2,13 @@
 SQL Executor - Internal class for executing SQL queries on Databricks.
 """
 
+import inspect
 import time
 import logging
 from typing import Any, Dict, List, Optional
 
 from databricks.sdk import WorkspaceClient
-from databricks.sdk.service.sql import StatementState
+from databricks.sdk.service.sql import EndpointTagPair, StatementState
 
 from ...auth import get_workspace_client
 
@@ -86,16 +87,43 @@ class SQLExecutor:
         if row_limit is not None:
             exec_params["row_limit"] = row_limit
         if query_tags:
-            exec_params["query_tags"] = query_tags
+            # query_tags support and expected shape vary by databricks-sdk version.
+            # Newer SDKs may accept this field as an SDK dataclass, while older
+            # SDKs do not expose it at all.
+            if self._supports_query_tags():
+                exec_params["query_tags"] = self._build_query_tags_payload(query_tags)
+            else:
+                logger.warning(
+                    "Ignoring query_tags: current databricks-sdk does not support query_tags in execute_statement()"
+                )
 
         # Submit the statement
         try:
             response = self.client.statement_execution.execute_statement(**exec_params)
         except Exception as e:
-            raise SQLExecutionError(
-                f"Failed to submit SQL query to warehouse '{self.warehouse_id}': {str(e)}. "
-                f"Check that the warehouse exists and is accessible."
-            )
+            # Backward-compatible fallback: if query_tags serialization fails,
+            # retry once without query_tags so the query can still execute.
+            if "query_tags" in exec_params and (
+                "as_dict" in str(e) or "not iterable" in str(e) or "query_tags" in str(e)
+            ):
+                logger.warning(
+                    "Retrying execute_statement without query_tags due to SDK serialization mismatch: %s",
+                    e,
+                )
+                fallback_params = dict(exec_params)
+                fallback_params.pop("query_tags", None)
+                try:
+                    response = self.client.statement_execution.execute_statement(**fallback_params)
+                except Exception:
+                    raise SQLExecutionError(
+                        f"Failed to submit SQL query to warehouse '{self.warehouse_id}': {str(e)}. "
+                        f"Check that the warehouse exists and is accessible."
+                    )
+            else:
+                raise SQLExecutionError(
+                    f"Failed to submit SQL query to warehouse '{self.warehouse_id}': {str(e)}. "
+                    f"Check that the warehouse exists and is accessible."
+                )
 
         statement_id = response.statement_id
         logger.debug(f"Statement submitted with ID: {statement_id}")
@@ -178,3 +206,25 @@ class SQLExecutor:
             logger.debug(f"Canceled statement {statement_id}")
         except Exception as e:
             logger.warning(f"Failed to cancel statement {statement_id}: {e}")
+
+    def _supports_query_tags(self) -> bool:
+        """Return True when execute_statement() supports a query_tags parameter."""
+        try:
+            sig = inspect.signature(self.client.statement_execution.execute_statement)
+            return "query_tags" in sig.parameters
+        except Exception:
+            return False
+
+    def _build_query_tags_payload(self, query_tags: str) -> List[EndpointTagPair]:
+        """Parse 'k:v,k2:v2' into a list of SDK EndpointTagPair objects."""
+        tags: List[EndpointTagPair] = []
+        for raw in query_tags.split(","):
+            part = raw.strip()
+            if not part:
+                continue
+            if ":" not in part:
+                tags.append(EndpointTagPair(key=part, value=""))
+                continue
+            key, value = part.split(":", 1)
+            tags.append(EndpointTagPair(key=key.strip(), value=value.strip()))
+        return tags

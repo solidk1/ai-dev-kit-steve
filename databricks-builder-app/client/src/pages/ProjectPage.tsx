@@ -85,6 +85,7 @@ interface InProgressConversationState {
 }
 
 const PENDING_CONVERSATION_KEY = '__pending__';
+const QUEUE_TOAST_STYLE = { marginBottom: '72px' } as const;
 
 const SUPPORTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 const MAX_IMAGE_SIZE = 20 * 1024 * 1024; // 20MB
@@ -357,7 +358,7 @@ function VerboseItem({ item }: { item: ActivityItem }) {
           onClick={() => setExpanded(!expanded)}
           className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-[var(--color-bg-secondary)]/40 transition-colors"
         >
-          <Brain className="h-3 w-3 flex-shrink-0 text-purple-400" />
+          <Brain className="h-3 w-3 flex-shrink-0 text-red-400" />
           <span className="text-[11px] text-[var(--color-text-muted)] flex-1 truncate">
             {expanded
               ? `Thinking · ${readableThinking.length} chars`
@@ -1916,7 +1917,9 @@ export default function ProjectPage() {
           const nextIdx = queuedMessagesRef.current.findIndex((m) => m.conversationId === conversationId);
           const next = nextIdx >= 0 ? queuedMessagesRef.current.splice(nextIdx, 1)[0] : undefined;
           if (next) {
-            toast.info(`Sending queued message (${queuedMessagesRef.current.length} remaining)...`);
+            toast.info(`Sending queued message (${queuedMessagesRef.current.length} remaining)...`, {
+              style: QUEUE_TOAST_STYLE,
+            });
             void sendPreparedMessage(next, false, next.queuedMessageId);
           }
         },
@@ -1941,7 +1944,9 @@ export default function ProjectPage() {
       const nextIdx = queuedMessagesRef.current.findIndex((m) => m.conversationId === targetConversationId);
       const next = nextIdx >= 0 ? queuedMessagesRef.current.splice(nextIdx, 1)[0] : undefined;
       if (next) {
-        toast.info(`Sending queued message (${queuedMessagesRef.current.length} remaining)...`);
+        toast.info(`Sending queued message (${queuedMessagesRef.current.length} remaining)...`, {
+          style: QUEUE_TOAST_STYLE,
+        });
         void sendPreparedMessage(next, false, next.queuedMessageId);
       }
     }
@@ -2208,7 +2213,9 @@ export default function ProjectPage() {
           ...existing,
           queuedMessages: [...(existing.queuedMessages || []), queuedUserMessage],
         };
-        toast.info(`Queued in this chat (${queuedMessagesRef.current.length} waiting)`);
+        toast.info(`Queued in this chat (${queuedMessagesRef.current.length} waiting)`, {
+          style: QUEUE_TOAST_STYLE,
+        });
         return;
       }
 
@@ -2260,21 +2267,14 @@ export default function ProjectPage() {
     });
     const stoppedConversationId = activeStreamingConversationIdRef.current;
     if (stoppedConversationId) {
-      const before = queuedMessagesRef.current.length;
-      queuedMessagesRef.current = queuedMessagesRef.current.filter(
-        (m) => m.conversationId !== stoppedConversationId
-      );
-      const removed = before - queuedMessagesRef.current.length;
-      if (removed > 0) {
-        toast.info(`Cleared ${removed} queued message${removed > 1 ? 's' : ''} for this chat`);
+      // Stop only the active generation. Keep queued messages for this chat.
+      const state = inProgressByConversationRef.current[stoppedConversationId];
+      if (state) {
+        inProgressByConversationRef.current[stoppedConversationId] = {
+          ...state,
+          streamingText: '',
+        };
       }
-      delete inProgressByConversationRef.current[stoppedConversationId];
-      setMessages((prev) =>
-        prev.filter(
-          (m) =>
-            !(m.id.startsWith('temp-queued-') && m.conversation_id === stoppedConversationId)
-        )
-      );
     }
     delete inProgressByConversationRef.current[PENDING_CONVERSATION_KEY];
     if (stoppedConversationId) {
@@ -2543,7 +2543,7 @@ export default function ProjectPage() {
               className={cn(
                 'flex items-center justify-center h-7 w-7 rounded-lg transition-all',
                 verbose
-                  ? 'bg-purple-500/10 text-purple-400 ring-2 ring-purple-500/20'
+                  ? 'bg-red-500/10 text-red-400 ring-2 ring-red-500/20'
                   : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-secondary)]'
               )}
               title={verbose ? 'Thinking ON — showing full agent trace' : 'Thinking OFF — click to show full agent trace'}
