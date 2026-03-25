@@ -19,15 +19,19 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from ..trace.models import FileOperation, ToolCall, TraceMetrics
+from ..trace.models import FileOperation, ToolCall, TraceMetrics, TokenUsage
 
 logger = logging.getLogger(__name__)
+
+_mlflow_env_lock = threading.Lock()
+_mlflow_env_configured = False
 
 
 @dataclass
@@ -100,11 +104,7 @@ def _build_trace_metrics(
 
             if tool_use_id in tool_calls_by_id:
                 tc = tool_calls_by_id[tool_use_id]
-                tc.result = (
-                    result_text[:2000]
-                    if isinstance(result_text, str)
-                    else str(result_text)[:2000]
-                )
+                tc.result = result_text[:2000] if isinstance(result_text, str) else str(result_text)[:2000]
                 tc.success = not is_error
 
                 # Extract file operations from tool results
@@ -114,23 +114,17 @@ def _build_trace_metrics(
                     fp = tool_input.get("file_path", "")
                     if fp:
                         metrics.files_created.append(fp)
-                        metrics.file_operations.append(
-                            FileOperation(type="create", file_path=fp, timestamp=ts)
-                        )
+                        metrics.file_operations.append(FileOperation(type="create", file_path=fp, timestamp=ts))
                 elif tool_name == "Edit" and tc.success:
                     fp = tool_input.get("file_path", "")
                     if fp:
                         metrics.files_modified.append(fp)
-                        metrics.file_operations.append(
-                            FileOperation(type="edit", file_path=fp, timestamp=ts)
-                        )
+                        metrics.file_operations.append(FileOperation(type="edit", file_path=fp, timestamp=ts))
                 elif tool_name == "Read":
                     fp = tool_input.get("file_path", "")
                     if fp:
                         metrics.files_read.append(fp)
-                        metrics.file_operations.append(
-                            FileOperation(type="read", file_path=fp, timestamp=ts)
-                        )
+                        metrics.file_operations.append(FileOperation(type="read", file_path=fp, timestamp=ts))
 
         elif event.type == "assistant_turn":
             num_turns += 1
@@ -175,6 +169,41 @@ def _find_repo_root() -> str:
             return str(d)
         d = d.parent
     return os.getcwd()
+
+
+def _load_mcp_config() -> dict[str, Any]:
+    """Load MCP server config from .mcp.json, resolving variable references."""
+    import json
+    from pathlib import Path
+
+    repo_root = Path(_find_repo_root())
+    mcp_json = repo_root / ".mcp.json"
+    if not mcp_json.exists():
+        return {}
+
+    try:
+        data = json.loads(mcp_json.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+    servers = data.get("mcpServers", {})
+    resolved: dict[str, Any] = {}
+    for name, cfg in servers.items():
+        resolved_cfg: dict[str, Any] = {}
+        for key, val in cfg.items():
+            if key == "defer_loading":
+                continue  # Not relevant for agent SDK
+            if isinstance(val, str):
+                resolved_cfg[key] = val.replace("${CLAUDE_PLUGIN_ROOT}", str(repo_root))
+            elif isinstance(val, list):
+                resolved_cfg[key] = [
+                    v.replace("${CLAUDE_PLUGIN_ROOT}", str(repo_root)) if isinstance(v, str) else v for v in val
+                ]
+            else:
+                resolved_cfg[key] = val
+        if resolved_cfg:
+            resolved[name] = resolved_cfg
+    return resolved
 
 
 _ENV_PREFIXES = (
@@ -275,9 +304,7 @@ def _get_agent_env() -> dict[str, str]:
     return env
 
 
-def _get_mlflow_stop_hook(
-    mlflow_experiment: str | None = None, skill_name: str | None = None
-):
+def _get_mlflow_stop_hook(mlflow_experiment: str | None = None, skill_name: str | None = None):
     """Create an MLflow Stop hook that processes the transcript into a real trace.
 
     Mirrors the pattern from databricks-builder-app/server/services/agent.py:
@@ -299,74 +326,86 @@ def _get_mlflow_stop_hook(
     # Mutable dict so the hook can pass the trace out
     result_holder: dict[str, Any] = {"trace": None}
 
-    # Apply DATABRICKS_* and MLFLOW_* vars from agent settings to os.environ
-    # so SkillTestConfig / MLflow can pick them up for auth.
-    agent_env = _get_agent_env()
-    for key, value in agent_env.items():
-        if key.startswith(("DATABRICKS_", "MLFLOW_")):
-            os.environ[key] = value
+    # One-time environment and MLflow configuration (thread-safe).
+    # All os.environ writes happen here, once, to avoid races in parallel runs.
+    global _mlflow_env_configured
+    with _mlflow_env_lock:
+        if not _mlflow_env_configured:
+            # Apply DATABRICKS_* and MLFLOW_* vars from agent settings to os.environ
+            # so SkillTestConfig / MLflow can pick them up for auth.
+            agent_env = _get_agent_env()
+            for key, value in agent_env.items():
+                if key.startswith(("DATABRICKS_", "MLFLOW_")):
+                    os.environ[key] = value
 
-    # Configure MLflow at hook creation time (matches builder app pattern).
-    # This ensures tracking URI and experiment are set before the hook fires.
-    from ..config import SkillTestConfig
+            # Configure MLflow at hook creation time (matches builder app pattern).
+            from ..config import SkillTestConfig
 
-    # Override MLFLOW_EXPERIMENT_NAME before SkillTestConfig reads it —
-    # the shell may have a stale value from the builder app or other context.
-    # The agent evaluator should use its own experiment.
-    agent_experiment = mlflow_experiment or os.environ.get(
-        "SKILL_TEST_MLFLOW_EXPERIMENT",
-        "/Shared/skill-tests",
-    )
-    os.environ["MLFLOW_EXPERIMENT_NAME"] = agent_experiment
-
-    stc = SkillTestConfig()
-    tracking_uri = stc.mlflow.tracking_uri
-    experiment_name = (
-        agent_experiment  # Use our override, not stc's (which may read stale env)
-    )
-
-    # Sync env vars so setup_mlflow() from mlflow.claude_code.tracing agrees
-    os.environ["MLFLOW_TRACKING_URI"] = tracking_uri
-    os.environ["MLFLOW_EXPERIMENT_NAME"] = experiment_name
-    os.environ["MLFLOW_CLAUDE_TRACING_ENABLED"] = "true"
-
-    mlflow.set_tracking_uri(tracking_uri)
-    mlflow.set_registry_uri("databricks-uc")
-    try:
-        mlflow.set_experiment(experiment_name)
-    except Exception as e:
-        logger.warning("MLflow set_experiment('%s') failed: %s", experiment_name, e)
-        try:
-            mlflow.create_experiment(experiment_name)
-            mlflow.set_experiment(experiment_name)
-        except Exception:
-            logger.warning(
-                "Cannot access MLflow experiment '%s' on %s. "
-                "Traces will not be logged. Check DATABRICKS_CONFIG_PROFILE.",
-                experiment_name,
-                tracking_uri,
+            agent_experiment = mlflow_experiment or os.environ.get(
+                "SKILL_TEST_MLFLOW_EXPERIMENT",
+                "/Shared/skill-tests",
             )
-            return None, None
+            os.environ["MLFLOW_EXPERIMENT_NAME"] = agent_experiment
 
-    print(
-        f"    [MLflow] Tracing configured: uri={tracking_uri} experiment={experiment_name}"
-    )
+            stc = SkillTestConfig()
+            tracking_uri = stc.mlflow.tracking_uri
+            experiment_name = agent_experiment
+
+            # Sync env vars so setup_mlflow() from mlflow.claude_code.tracing agrees
+            os.environ["MLFLOW_TRACKING_URI"] = tracking_uri
+            os.environ["MLFLOW_EXPERIMENT_NAME"] = experiment_name
+            os.environ["MLFLOW_CLAUDE_TRACING_ENABLED"] = "true"
+
+            mlflow.set_tracking_uri(tracking_uri)
+            mlflow.set_registry_uri("databricks-uc")
+            try:
+                mlflow.set_experiment(experiment_name)
+            except Exception as e:
+                logger.warning("MLflow set_experiment('%s') failed: %s", experiment_name, e)
+                try:
+                    mlflow.create_experiment(experiment_name)
+                    mlflow.set_experiment(experiment_name)
+                except Exception:
+                    logger.warning(
+                        "Cannot access MLflow experiment '%s' on %s. "
+                        "Traces will not be logged. Check DATABRICKS_CONFIG_PROFILE.",
+                        experiment_name,
+                        tracking_uri,
+                    )
+                    return None, None
+
+            print(f"    [MLflow] Tracing configured: uri={tracking_uri} experiment={experiment_name}")
+            _mlflow_env_configured = True
 
     async def mlflow_stop_hook(input_data, tool_use_id, context):
         """Process transcript and create MLflow trace when agent stops."""
         session_id = input_data.get("session_id")
         transcript_path = input_data.get("transcript_path")
 
-        print(
-            f"    [MLflow] Stop hook fired: session={session_id}, transcript={transcript_path}"
-        )
+        print(f"    [MLflow] Stop hook fired: session={session_id}, transcript={transcript_path}")
 
         try:
             # Ensure MLflow is set up (matches builder app: call every time)
             setup_mlflow()
 
-            # Process transcript and create trace
-            trace = process_transcript(transcript_path, session_id)
+            # Run process_transcript synchronously — it does HTTP I/O per span
+            # so can take 20-40s for large sessions. Use a generous timeout to
+            # prevent hangs from rate limits or network issues.
+            loop = asyncio.get_running_loop()
+            try:
+                trace = await asyncio.wait_for(
+                    loop.run_in_executor(None, process_transcript, transcript_path, session_id),
+                    timeout=120.0,
+                )
+            except asyncio.TimeoutError:
+                print(
+                    f"    [MLflow] ERROR: process_transcript timed out after 120s "
+                    f"(session={session_id}). This may indicate rate limiting or "
+                    f"network issues. Continuing without trace."
+                )
+                result_holder["trace"] = None
+                return {"continue": True}
+
             result_holder["trace"] = trace
 
             if trace:
@@ -379,24 +418,16 @@ def _get_mlflow_stop_hook(
                     requested_model = os.environ.get("ANTHROPIC_MODEL", "")
                     base_url = os.environ.get("ANTHROPIC_BASE_URL", "")
                     if requested_model:
-                        client.set_trace_tag(
-                            trace_id, "databricks.requested_model", requested_model
-                        )
+                        client.set_trace_tag(trace_id, "databricks.requested_model", requested_model)
                     if base_url:
-                        client.set_trace_tag(
-                            trace_id, "databricks.model_serving_endpoint", base_url
-                        )
-                    client.set_trace_tag(
-                        trace_id, "mlflow.source", "skill-test-agent-eval"
-                    )
+                        client.set_trace_tag(trace_id, "databricks.model_serving_endpoint", base_url)
+                    client.set_trace_tag(trace_id, "mlflow.source", "skill-test-agent-eval")
                     if skill_name:
                         client.set_trace_tag(trace_id, "skill_name", skill_name)
                 except Exception as tag_err:
                     print(f"    [MLflow] Warning: could not add tags: {tag_err}")
             else:
-                print(
-                    "    [MLflow] Warning: process_transcript returned None (empty transcript?)"
-                )
+                print("    [MLflow] Warning: process_transcript returned None (empty transcript?)")
 
         except Exception as e:
             print(f"    [MLflow] Error processing transcript: {e}")
@@ -458,14 +489,19 @@ async def run_agent(
     events: list[AgentEvent] = []
     response_parts: list[str] = []
 
+    # Auto-load MCP config from .mcp.json if not explicitly provided
+    if mcp_config is None:
+        mcp_config = _load_mcp_config()
+        if mcp_config:
+            logger.info("Auto-loaded MCP config: %s", list(mcp_config.keys()))
+
     # Build options
     if allowed_tools is None:
-        allowed_tools = ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
-        # Add MCP tool names if config provided
         if mcp_config:
-            for _server_name in mcp_config:
-                # MCP tools will be auto-discovered; we don't need to enumerate them
-                pass
+            # MCP tools are discovered dynamically — don't restrict
+            allowed_tools = None
+        else:
+            allowed_tools = ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
 
     env = _get_agent_env()
     if model:
@@ -482,9 +518,7 @@ async def run_agent(
                 server_cfg["env"] = mcp_env
 
     # Set up MLflow tracing via Stop hook
-    mlflow_hook, mlflow_result = _get_mlflow_stop_hook(
-        mlflow_experiment=mlflow_experiment, skill_name=skill_name
-    )
+    mlflow_hook, mlflow_result = _get_mlflow_stop_hook(mlflow_experiment=mlflow_experiment, skill_name=skill_name)
     hooks = {}
     if mlflow_hook:
         hooks["Stop"] = [HookMatcher(hooks=[mlflow_hook])]
@@ -512,10 +546,6 @@ async def run_agent(
 
     start_time = time.monotonic()
 
-    # Unset CLAUDECODE so the subprocess doesn't think it's nested inside
-    # another Claude Code session (the SDK inherits the parent os.environ).
-    _saved_claudecode = os.environ.pop("CLAUDECODE", None)
-
     # Use ClaudeSDKClient (not query()) — Stop hooks only fire with the client.
     try:
         async with ClaudeSDKClient(options=options) as client:
@@ -541,12 +571,8 @@ async def run_agent(
                         usage_data = {
                             "input_tokens": getattr(msg.usage, "input_tokens", 0),
                             "output_tokens": getattr(msg.usage, "output_tokens", 0),
-                            "cache_creation_input_tokens": getattr(
-                                msg.usage, "cache_creation_input_tokens", 0
-                            ),
-                            "cache_read_input_tokens": getattr(
-                                msg.usage, "cache_read_input_tokens", 0
-                            ),
+                            "cache_creation_input_tokens": getattr(msg.usage, "cache_creation_input_tokens", 0),
+                            "cache_read_input_tokens": getattr(msg.usage, "cache_read_input_tokens", 0),
                         }
                     events.append(
                         AgentEvent(
@@ -574,9 +600,7 @@ async def run_agent(
                                     data={
                                         "id": block.id,
                                         "name": block.name,
-                                        "input": block.input
-                                        if isinstance(block.input, dict)
-                                        else {},
+                                        "input": block.input if isinstance(block.input, dict) else {},
                                     },
                                 )
                             )
@@ -586,9 +610,7 @@ async def run_agent(
                                     type="tool_result",
                                     timestamp=now,
                                     data={
-                                        "tool_use_id": getattr(
-                                            block, "tool_use_id", ""
-                                        ),
+                                        "tool_use_id": getattr(block, "tool_use_id", ""),
                                         "content": getattr(block, "content", ""),
                                         "is_error": getattr(block, "is_error", False),
                                     },
@@ -604,9 +626,7 @@ async def run_agent(
                                     type="tool_result",
                                     timestamp=now,
                                     data={
-                                        "tool_use_id": getattr(
-                                            block, "tool_use_id", ""
-                                        ),
+                                        "tool_use_id": getattr(block, "tool_use_id", ""),
                                         "content": getattr(block, "content", ""),
                                         "is_error": getattr(block, "is_error", False),
                                     },
@@ -657,10 +677,6 @@ async def run_agent(
                 data={"message": f"{e} | stderr: {stderr_detail}"},
             )
         )
-    finally:
-        # Restore CLAUDECODE so the parent session isn't affected
-        if _saved_claudecode is not None:
-            os.environ["CLAUDECODE"] = _saved_claudecode
 
     duration_ms = int((time.monotonic() - start_time) * 1000)
 
@@ -680,16 +696,27 @@ async def run_agent(
     # the event loop closes. Temporarily suppress MLflow's own ERROR log
     # to avoid noisy "'NoneType' object has no attribute '_async_queue'"
     # when async logging was never initialized.
+    # Use a thread timeout to prevent indefinite hangs if the tracking
+    # server is unresponsive.
     if mlflow_result is not None:
         try:
             import mlflow
             import logging as _logging
+            import concurrent.futures
 
             _fluent_logger = _logging.getLogger("mlflow.tracking.fluent")
             _prev_level = _fluent_logger.level
             _fluent_logger.setLevel(_logging.CRITICAL)
+            _flush_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
             try:
-                mlflow.flush_trace_async_logging(terminate=False)
+                _flush_fut = _flush_pool.submit(mlflow.flush_trace_async_logging, terminate=False)
+                _flush_fut.result(timeout=30)
+                _flush_pool.shutdown(wait=True)
+            except concurrent.futures.TimeoutError:
+                logger.warning("flush_trace_async_logging timed out after 30s")
+                _flush_pool.shutdown(wait=False)
+            except Exception:
+                _flush_pool.shutdown(wait=False)
             finally:
                 _fluent_logger.setLevel(_prev_level)
         except Exception as flush_err:
@@ -731,11 +758,17 @@ def _run_in_fresh_loop(coro) -> Any:
                 for task in pending:
                     task.cancel()
                 if pending:
-                    loop.run_until_complete(
-                        asyncio.gather(*pending, return_exceptions=True)
-                    )
+                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
                 loop.run_until_complete(loop.shutdown_asyncgens())
-                loop.run_until_complete(loop.shutdown_default_executor())
+                # Don't block on shutdown_default_executor() — it waits for
+                # all tasks submitted via run_in_executor(None, ...), including
+                # process_transcript which may be slow (rate limits, large traces).
+                # This avoids a deadlock where the default executor can't shut
+                # down because process_transcript is still running.
+                try:
+                    loop.run_until_complete(asyncio.wait_for(loop.shutdown_default_executor(), timeout=5.0))
+                except (asyncio.TimeoutError, Exception):
+                    pass  # Let the default executor GC naturally
             except Exception:
                 pass
             # Suppress "Loop ... is closed" from subprocess transport __del__
@@ -745,9 +778,16 @@ def _run_in_fresh_loop(coro) -> Any:
             loop._check_closed = lambda: None
             loop.close()
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    try:
         future = pool.submit(_thread_target)
         future.result(timeout=600)  # wait for thread to finish
+    except concurrent.futures.TimeoutError:
+        # Don't let shutdown(wait=True) block — the thread is still running
+        pool.shutdown(wait=False)
+        raise
+    else:
+        pool.shutdown(wait=True)
 
     if "error" in result_holder:
         raise result_holder["error"]

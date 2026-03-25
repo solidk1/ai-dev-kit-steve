@@ -217,11 +217,14 @@ def get_env(name: str) -> str:
 
 instance = get_env("LAKEBASE_INSTANCE_NAME")
 database = get_env("LAKEBASE_DATABASE_NAME")
+schema = get_env("LAKEBASE_SCHEMA_NAME")
 
 if instance:
     print(f'export LAKEBASE_INSTANCE_NAME="{instance}"')
 if database:
     print(f'export LAKEBASE_DATABASE_NAME="{database}"')
+if schema:
+    print(f'export LAKEBASE_SCHEMA_NAME="{schema}"')
 PY
 )"
 fi
@@ -286,11 +289,13 @@ if [ -n "${LAKEBASE_PG_URL:-}" ] || [ -n "${LAKEBASE_INSTANCE_NAME:-}" ]; then
   # connects as its SP at runtime and needs explicit grants.
   if [ -n "${LAKEBASE_PG_URL:-}" ]; then
     export APP_NAME_FOR_GRANT="${APP_NAME}"
+    export LAKEBASE_SCHEMA_FOR_GRANT="${LAKEBASE_SCHEMA_NAME:-builder_app}"
     $VENV_PYTHON - <<'GRANT_PY'
 import os, psycopg
 
 url = os.environ["LAKEBASE_PG_URL"]
 app_name = os.environ["APP_NAME_FOR_GRANT"]
+schema = os.environ.get("LAKEBASE_SCHEMA_FOR_GRANT", "builder_app")
 
 try:
     from databricks.sdk import WorkspaceClient
@@ -302,14 +307,15 @@ try:
 
     conn = psycopg.connect(url, autocommit=True)
     cur = conn.cursor()
-    cur.execute(f'GRANT USAGE ON SCHEMA public TO "{sp_role}"')
-    cur.execute(f'GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO "{sp_role}"')
-    cur.execute(f'GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO "{sp_role}"')
-    cur.execute(f'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON TABLES TO "{sp_role}"')
-    cur.execute(f'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON SEQUENCES TO "{sp_role}"')
+    for s in (schema, "public"):
+        cur.execute(f'GRANT USAGE ON SCHEMA {s} TO "{sp_role}"')
+        cur.execute(f'GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA {s} TO "{sp_role}"')
+        cur.execute(f'GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA {s} TO "{sp_role}"')
+        cur.execute(f'ALTER DEFAULT PRIVILEGES IN SCHEMA {s} GRANT ALL PRIVILEGES ON TABLES TO "{sp_role}"')
+        cur.execute(f'ALTER DEFAULT PRIVILEGES IN SCHEMA {s} GRANT ALL PRIVILEGES ON SEQUENCES TO "{sp_role}"')
     cur.close()
     conn.close()
-    print(f"  \033[0;32m✓\033[0m Granted SP ({sp_role[:8]}...) database permissions")
+    print(f"  \033[0;32m✓\033[0m Granted SP ({sp_role[:8]}...) permissions on schemas: {schema}, public")
 except Exception as e:
     print(f"  \033[1;33mWarning: Could not grant SP permissions: {e}\033[0m")
 GRANT_PY

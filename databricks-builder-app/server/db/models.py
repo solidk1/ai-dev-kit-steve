@@ -12,7 +12,13 @@ def generate_uuid() -> str:
   return str(uuid.uuid4())
 
 
-def utc_now() -> datetime:
+def utc_now(_ctx: Any | None = None) -> datetime:
+  """Return timezone-aware UTC timestamp.
+
+  SQLAlchemy may invoke Python-side default/onupdate callables with an
+  execution context argument. Accepting an optional context keeps this helper
+  compatible for both direct calls and ORM callback invocation.
+  """
   return datetime.now(timezone.utc)
 
 
@@ -257,6 +263,7 @@ class Execution(Base):
   def to_dict(self) -> dict[str, Any]:
     """Convert to dictionary."""
     import json
+
     return {
       'id': self.id,
       'conversation_id': self.conversation_id,

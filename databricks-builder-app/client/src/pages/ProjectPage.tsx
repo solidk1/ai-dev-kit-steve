@@ -23,11 +23,17 @@ import {
 import { toast } from 'sonner';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { PrismLight as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import sqlLang from 'react-syntax-highlighter/dist/esm/languages/prism/sql';
+import pythonLang from 'react-syntax-highlighter/dist/esm/languages/prism/python';
+import bashLang from 'react-syntax-highlighter/dist/esm/languages/prism/bash';
+import jsonLang from 'react-syntax-highlighter/dist/esm/languages/prism/json';
+import javascriptLang from 'react-syntax-highlighter/dist/esm/languages/prism/javascript';
+import typescriptLang from 'react-syntax-highlighter/dist/esm/languages/prism/typescript';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Sidebar } from '@/components/layout/Sidebar';
-import { SkillsExplorer } from '@/components/SkillsExplorer';
+
 import { FunLoader } from '@/components/FunLoader';
 import { Button } from '@/components/ui/Button';
 import {
@@ -79,9 +85,18 @@ interface InProgressConversationState {
 }
 
 const PENDING_CONVERSATION_KEY = '__pending__';
+const QUEUE_TOAST_STYLE = { marginBottom: '72px' } as const;
 
 const SUPPORTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 const MAX_IMAGE_SIZE = 20 * 1024 * 1024; // 20MB
+
+SyntaxHighlighter.registerLanguage('sql', sqlLang);
+SyntaxHighlighter.registerLanguage('python', pythonLang);
+SyntaxHighlighter.registerLanguage('bash', bashLang);
+SyntaxHighlighter.registerLanguage('shell', bashLang);
+SyntaxHighlighter.registerLanguage('json', jsonLang);
+SyntaxHighlighter.registerLanguage('javascript', javascriptLang);
+SyntaxHighlighter.registerLanguage('typescript', typescriptLang);
 
 async function readImageAsBase64(file: File): Promise<{ data: string; mediaType: AttachedImage['mediaType'] }> {
   return new Promise((resolve, reject) => {
@@ -104,6 +119,11 @@ interface ActivityItem {
   content: string;
   toolName?: string;
   toolInput?: Record<string, unknown>;
+  commandExecution?: {
+    cluster_id?: string;
+    cluster_name?: string;
+    context_id?: string;
+  };
   isError?: boolean;
   timestamp: number;
 }
@@ -134,33 +154,77 @@ function buildActivityItemsFromExecutionEvents(events: unknown[]): ActivityItem[
     }
 
     if (type === 'tool_use') {
-      items.push({
+      const toolUseItem: ActivityItem = {
         id: String(event.tool_id ?? `tool-${items.length}`),
         type: 'tool_use',
         content: '',
         toolName: String(event.tool_name ?? ''),
         toolInput: (event.tool_input as Record<string, unknown> | undefined) ?? {},
         timestamp: Date.now(),
-      });
+      };
+      const existingIdx = items.findIndex((item) => item.id === toolUseItem.id);
+      if (existingIdx >= 0) items[existingIdx] = toolUseItem;
+      else items.push(toolUseItem);
       continue;
     }
 
     if (type === 'tool_result') {
       const toolUseId = String(event.tool_use_id ?? '');
-      const resultItem: ActivityItem = {
-        id: `result-${toolUseId || items.length}`,
-        type: 'tool_result',
-        content: typeof event.content === 'string' ? event.content : JSON.stringify(event.content),
-        isError: Boolean(event.is_error),
-        timestamp: Date.now(),
-      };
-      const existingIdx = items.findIndex((item) => item.id === resultItem.id);
-      if (existingIdx >= 0) items[existingIdx] = resultItem;
-      else items.push(resultItem);
+      const resultItem = buildToolResultItem(event, `result-${toolUseId || items.length}`);
+      const mergedItems = applyToolResultToItems(items, resultItem, toolUseId || undefined, resultItem.commandExecution);
+      items.length = 0;
+      items.push(...mergedItems);
       continue;
     }
   }
   return items;
+}
+
+function toCommandExecutionMeta(value: unknown): ActivityItem['commandExecution'] | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const obj = value as Record<string, unknown>;
+  const cluster_id = typeof obj.cluster_id === 'string' && obj.cluster_id ? obj.cluster_id : undefined;
+  const cluster_name = typeof obj.cluster_name === 'string' && obj.cluster_name ? obj.cluster_name : undefined;
+  const context_id = typeof obj.context_id === 'string' && obj.context_id ? obj.context_id : undefined;
+  if (!cluster_id && !cluster_name && !context_id) return undefined;
+  return { cluster_id, cluster_name, context_id };
+}
+
+function buildToolResultItem(
+  event: Record<string, unknown>,
+  id: string | undefined,
+  contentOverride?: string,
+): ActivityItem {
+  return {
+    id: id ?? `result-${String(event.tool_use_id ?? '')}`,
+    type: 'tool_result',
+    content: contentOverride ?? (typeof event.content === 'string' ? event.content : JSON.stringify(event.content)),
+    commandExecution: toCommandExecutionMeta(event.command_execution),
+    isError: Boolean(event.is_error),
+    timestamp: Date.now(),
+  };
+}
+
+function applyToolResultToItems(
+  items: ActivityItem[],
+  resultItem: ActivityItem,
+  toolUseId: string | undefined,
+  commandExecution: ActivityItem['commandExecution'],
+): ActivityItem[] {
+  const nextItems = upsertActivityItem(items, resultItem);
+  if (!toolUseId || !commandExecution) return nextItems;
+  return nextItems.map((item) => {
+    if (item.type === 'tool_use' && item.id === toolUseId) {
+      return {
+        ...item,
+        commandExecution: {
+          ...(item.commandExecution || {}),
+          ...commandExecution,
+        },
+      };
+    }
+    return item;
+  });
 }
 
 function buildTraceHistoryFromExecutions(executions: Execution[]): ActivityItem[][] {
@@ -221,6 +285,13 @@ function applyThinkingEventToItems(
       timestamp: Date.now(),
     },
   ];
+}
+
+function upsertActivityItem(items: ActivityItem[], nextItem: ActivityItem): ActivityItem[] {
+  const idx = items.findIndex((item) => item.id === nextItem.id);
+  return idx >= 0
+    ? items.map((item, itemIdx) => (itemIdx === idx ? nextItem : item))
+    : [...items, nextItem];
 }
 
 // Minimal activity indicator - shows only current tool being executed (non-verbose)
@@ -287,7 +358,7 @@ function VerboseItem({ item }: { item: ActivityItem }) {
           onClick={() => setExpanded(!expanded)}
           className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-[var(--color-bg-secondary)]/40 transition-colors"
         >
-          <Brain className="h-3 w-3 flex-shrink-0 text-purple-400" />
+          <Brain className="h-3 w-3 flex-shrink-0 text-red-400" />
           <span className="text-[11px] text-[var(--color-text-muted)] flex-1 truncate">
             {expanded
               ? `Thinking · ${readableThinking.length} chars`
@@ -308,7 +379,21 @@ function VerboseItem({ item }: { item: ActivityItem }) {
     const toolName = item.toolName?.replace('mcp__databricks__', '') ?? '';
     const codeInfo = getCodeFromToolInput(item.toolName, item.toolInput);
     const inputStr = !codeInfo && item.toolInput ? JSON.stringify(item.toolInput, null, 2) : '';
-    const hasExpandable = !!(codeInfo || inputStr);
+    const metaParams = [
+      item.commandExecution?.cluster_name ? (['cluster', item.commandExecution.cluster_name] as [string, string]) : null,
+      !item.commandExecution?.cluster_name && item.commandExecution?.cluster_id
+        ? (['cluster_id', item.commandExecution.cluster_id] as [string, string])
+        : null,
+    ].filter((entry): entry is [string, string] => Boolean(entry));
+    const metaKeys = new Set(metaParams.map(([k]) => k));
+    if (item.commandExecution) {
+      if (item.commandExecution.cluster_name) { metaKeys.add('cluster_id'); metaKeys.add('cluster_name'); }
+      if (item.commandExecution.context_id) metaKeys.add('context_id');
+    }
+    const toolParams = Object.entries(codeInfo?.params ?? {}).filter(
+      ([key, val]) => val !== null && val !== undefined && String(val).trim() !== '' && !metaKeys.has(key)
+    );
+    const hasExpandable = !!(codeInfo || inputStr || toolParams.length > 0 || metaParams.length > 0);
     return (
       <div className="border-b border-[var(--color-border)]/20 last:border-0">
         <button
@@ -326,9 +411,15 @@ function VerboseItem({ item }: { item: ActivityItem }) {
             <ChevronDown className={cn('h-3 w-3 ml-auto flex-shrink-0 text-[var(--color-text-muted)] transition-transform', expanded && 'rotate-180')} />
           )}
         </button>
-        {expanded && codeInfo?.params && (
+        {expanded && (toolParams.length > 0 || metaParams.length > 0) && (
           <div className="flex flex-wrap gap-1 mx-3 mb-1.5">
-            {Object.entries(codeInfo.params).map(([key, val]) => (
+            {metaParams.map(([key, val]) => (
+              <span key={`meta-${key}`} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono bg-[var(--color-bg-secondary)]/60 text-[var(--color-text-muted)] border border-[var(--color-border)]/30">
+                <span className="text-[var(--color-text-muted)]/70">{key}:</span>
+                <span className="text-[var(--color-text-primary)]">{val}</span>
+              </span>
+            ))}
+            {toolParams.map(([key, val]) => (
               <span key={key} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono bg-[var(--color-bg-secondary)]/60 text-[var(--color-text-muted)] border border-[var(--color-border)]/30">
                 <span className="text-[var(--color-text-muted)]/70">{key}:</span>
                 <span className="text-[var(--color-text-primary)]">{String(val)}</span>
@@ -360,6 +451,7 @@ function VerboseItem({ item }: { item: ActivityItem }) {
   if (item.type === 'tool_result') {
     const preview = item.content.slice(0, 120).replace(/\n/g, ' ');
     const hasMore = item.content.length > 120;
+    const imagePaths = extractDatabricksImagePaths(item.content);
     return (
       <div className={cn('border-b border-[var(--color-border)]/20 last:border-0', item.isError && 'bg-[var(--color-error)]/5')}>
         <button
@@ -379,8 +471,15 @@ function VerboseItem({ item }: { item: ActivityItem }) {
           )}
         </button>
         {expanded && (
-          <div className="px-3 pb-2 ml-5 font-mono text-[10px] text-[var(--color-text-muted)] whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto bg-[var(--color-bg-secondary)]/30 rounded mx-3 mb-1 p-1.5">
-            {item.content}
+          <div className="px-3 pb-2 ml-5 text-[10px] text-[var(--color-text-muted)] leading-relaxed max-h-48 overflow-y-auto bg-[var(--color-bg-secondary)]/30 rounded mx-3 mb-1 p-1.5">
+            <div className="font-mono whitespace-pre-wrap">{item.content}</div>
+            {imagePaths.length > 0 && (
+              <div className="mt-2 space-y-2">
+                {imagePaths.map((path) => (
+                  <DatabricksImage key={path} path={path} />
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -454,6 +553,34 @@ function isDatabricksFilePath(src: string): boolean {
     src.startsWith('/dbfs/') ||
     src.startsWith('/Volumes/')
   );
+}
+
+function extractDatabricksImagePaths(text: string): string[] {
+  if (!text) return [];
+  const re = /(?:dbfs:\/|\/(?:Volumes|Workspace|Users|Shared|dbfs)\/)[^\s"'`<>]+?\.(?:png|jpe?g|gif|webp)/gi;
+  const matches = text.match(re) ?? [];
+  return Array.from(new Set(matches));
+}
+
+function normalizeImagePathsToMarkdown(text: string): string {
+  if (!text) return text;
+  const markdownImagePaths = new Set(
+    Array.from(text.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)).map((match) => match[1])
+  );
+  return text
+    .split('\n')
+    .map((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return line;
+      if (trimmed.startsWith('![') || /^\[[^\]]*\]\([^)]+\)$/.test(trimmed)) return line;
+      const matches = extractDatabricksImagePaths(trimmed);
+      if (matches.length === 1 && matches[0] === trimmed) {
+        if (markdownImagePaths.has(trimmed)) return line;
+        return line.replace(trimmed, `![](${trimmed})`);
+      }
+      return line;
+    })
+    .join('\n');
 }
 
 // Renders a Databricks-hosted image via the workspace proxy.
@@ -824,7 +951,7 @@ export default function ProjectPage() {
   const [defaultSchema, setDefaultSchema] = useState<string>('');
   const [workspaceFolder, setWorkspaceFolder] = useState<string>('');
   const [mlflowExperimentName, setMlflowExperimentName] = useState<string>('');
-  const [skillsExplorerOpen, setSkillsExplorerOpen] = useState(false);
+
   const [activeExecutionId, setActiveExecutionId] = useState<string | null>(null);
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [verbose, setVerbose] = useState(true);
@@ -940,6 +1067,22 @@ export default function ProjectPage() {
         }
         setActiveExecutionId(null);
       }
+    }
+  }, []);
+
+  const updateConversationActivityItems = useCallback((
+    conversationId: string | null | undefined,
+    updater: (items: ActivityItem[]) => ActivityItem[]
+  ): void => {
+    const progressKey = conversationId ?? PENDING_CONVERSATION_KEY;
+    const existing = inProgressByConversationRef.current[progressKey] ?? { streamingText: '' };
+    const nextItems = updater(existing.activityItems ?? []);
+    inProgressByConversationRef.current[progressKey] = {
+      ...existing,
+      activityItems: nextItems,
+    };
+    if (currentConversationIdRef.current === conversationId) {
+      setActivityItems(nextItems);
     }
   }, []);
 
@@ -1149,30 +1292,27 @@ export default function ProjectPage() {
                   setStreamingText(buildDisplayText());
                 }
               } else if (type === 'tool_use') {
-                setActivityItems((prev) => [
-                  ...prev,
-                  {
-                    id: event.tool_id as string,
-                    type: 'tool_use',
-                    content: '',
-                    toolName: event.tool_name as string,
-                    toolInput: event.tool_input as Record<string, unknown>,
-                    timestamp: Date.now(),
-                  },
-                ]);
-              } else if (type === 'tool_result') {
-                const resultItem = {
-                  id: `result-${event.tool_use_id}`,
-                  type: 'tool_result' as const,
-                  content: typeof event.content === 'string' ? event.content : JSON.stringify(event.content),
-                  isError: event.is_error as boolean,
+                const toolItem: ActivityItem = {
+                  id: event.tool_id as string,
+                  type: 'tool_use',
+                  content: '',
+                  toolName: event.tool_name as string,
+                  toolInput: event.tool_input as Record<string, unknown>,
                   timestamp: Date.now(),
                 };
-                setActivityItems((prev) => {
-                  const idx = prev.findIndex((i) => i.id === resultItem.id);
-                  if (idx >= 0) { const u = [...prev]; u[idx] = resultItem; return u; }
-                  return [...prev, resultItem];
-                });
+                updateConversationActivityItems(
+                  currentConversation.id,
+                  (items) => upsertActivityItem(items, toolItem)
+                );
+              } else if (type === 'tool_result') {
+                const resultItem = buildToolResultItem(
+                  event as Record<string, unknown>,
+                  `result-${event.tool_use_id}`,
+                );
+                updateConversationActivityItems(
+                  currentConversation.id,
+                  (items) => applyToolResultToItems(items, resultItem, event.tool_use_id as string | undefined, resultItem.commandExecution)
+                );
               } else if (type === 'inline_image') {
                 const path = event.path as string;
                 if (!streamingImagesRef.current.includes(path)) {
@@ -1540,15 +1680,20 @@ export default function ProjectPage() {
               inProgressByConversationRef.current[conversationId] = pending;
               delete inProgressByConversationRef.current[PENDING_CONVERSATION_KEY];
             }
-            // Eagerly set currentConversation so that messages queued while
-            // streaming use the correct conversation ID for queueing.
-            currentConversationIdRef.current = conversationId;
-            setCurrentConversation({
-              id: conversationId,
-              project_id: projectId,
-              title: 'New Chat',
-              created_at: new Date().toISOString(),
-            });
+            // Only bind UI to the newly-created conversation when this run still
+            // belongs to the currently viewed chat. If the user switched chats
+            // meanwhile, don't force navigation and risk cross-chat mingling.
+            if (
+              currentConversationIdRef.current === targetConversationId
+              || (targetConversationId === null && currentConversationIdRef.current === null)
+            ) {
+              setCurrentConversation({
+                id: conversationId,
+                project_id: projectId,
+                title: 'New Chat',
+                created_at: new Date().toISOString(),
+              });
+            }
             // Rebind any queued messages that were created before the
             // conversation existed (conversationId was null).
             for (const qm of queuedMessagesRef.current) {
@@ -1603,35 +1748,21 @@ export default function ProjectPage() {
             // instead replace the delta-built item with the authoritative complete block.
             const thinking = (event.thinking as string) || '';
             if (thinking) {
-              const progressKey = conversationId ?? PENDING_CONVERSATION_KEY;
-              const existing = inProgressByConversationRef.current[progressKey] ?? { streamingText: '' };
-              const nextItems = applyThinkingEventToItems(
-                existing.activityItems ?? [],
-                type as 'thinking' | 'thinking_delta',
-                thinking
+              updateConversationActivityItems(
+                conversationId,
+                (items) => applyThinkingEventToItems(items, type as 'thinking' | 'thinking_delta', thinking)
               );
-              inProgressByConversationRef.current[progressKey] = {
-                ...existing,
-                activityItems: nextItems,
-              };
-              if (currentConversationIdRef.current === conversationId) {
-                setActivityItems(nextItems);
-              }
             }
           } else if (type === 'tool_use') {
-            if (currentConversationIdRef.current === conversationId) {
-              setActivityItems((prev) => [
-                ...prev,
-                {
-                  id: event.tool_id as string,
-                  type: 'tool_use',
-                  content: '',
-                  toolName: event.tool_name as string,
-                  toolInput: event.tool_input as Record<string, unknown>,
-                  timestamp: Date.now(),
-                },
-              ]);
-            }
+            const toolItem: ActivityItem = {
+              id: event.tool_id as string,
+              type: 'tool_use',
+              content: '',
+              toolName: event.tool_name as string,
+              toolInput: event.tool_input as Record<string, unknown>,
+              timestamp: Date.now(),
+            };
+            updateConversationActivityItems(conversationId, (items) => upsertActivityItem(items, toolItem));
           } else if (type === 'tool_result') {
             let content = event.content as string;
 
@@ -1649,20 +1780,15 @@ export default function ProjectPage() {
               }
             }
 
-            const resultItem = {
-              id: `result-${event.tool_use_id}`,
-              type: 'tool_result' as const,
-              content: typeof content === 'string' ? content : JSON.stringify(content),
-              isError: event.is_error as boolean,
-              timestamp: Date.now(),
-            };
-            if (currentConversationIdRef.current === conversationId) {
-              setActivityItems((prev) => {
-                const idx = prev.findIndex((i) => i.id === resultItem.id);
-                if (idx >= 0) { const u = [...prev]; u[idx] = resultItem; return u; }
-                return [...prev, resultItem];
-              });
-            }
+            const resultItem = buildToolResultItem(
+              event as Record<string, unknown>,
+              `result-${event.tool_use_id}`,
+              typeof content === 'string' ? content : JSON.stringify(content),
+            );
+            updateConversationActivityItems(
+              conversationId,
+              (items) => applyToolResultToItems(items, resultItem, event.tool_use_id as string | undefined, resultItem.commandExecution)
+            );
           } else if (type === 'error') {
             let errorMsg = event.error as string;
 
@@ -1725,7 +1851,7 @@ export default function ProjectPage() {
           const images = streamingImagesRef.current;
           streamingImagesRef.current = [];
           const imageMarkdown = images
-            .filter((p) => !fullText.includes(`](${p})`))
+            .filter((p) => !fullText.includes(`](${p})`) && !fullText.includes(`(${p})`))
             .map((p) => `![](${p})`)
             .join('\n\n');
           const content = [fullText, imageMarkdown].filter(Boolean).join('\n\n');
@@ -1778,7 +1904,9 @@ export default function ProjectPage() {
 
           if (conversationId) {
             const conv = await fetchConversation(projectId, conversationId);
-            setCurrentConversation(conv);
+            if (currentConversationIdRef.current === conversationId) {
+              setCurrentConversation(conv);
+            }
           }
 
           // Refresh conversations after the run finishes so sidebar updates
@@ -1789,7 +1917,9 @@ export default function ProjectPage() {
           const nextIdx = queuedMessagesRef.current.findIndex((m) => m.conversationId === conversationId);
           const next = nextIdx >= 0 ? queuedMessagesRef.current.splice(nextIdx, 1)[0] : undefined;
           if (next) {
-            toast.info(`Sending queued message (${queuedMessagesRef.current.length} remaining)...`);
+            toast.info(`Sending queued message (${queuedMessagesRef.current.length} remaining)...`, {
+              style: QUEUE_TOAST_STYLE,
+            });
             void sendPreparedMessage(next, false, next.queuedMessageId);
           }
         },
@@ -1814,11 +1944,13 @@ export default function ProjectPage() {
       const nextIdx = queuedMessagesRef.current.findIndex((m) => m.conversationId === targetConversationId);
       const next = nextIdx >= 0 ? queuedMessagesRef.current.splice(nextIdx, 1)[0] : undefined;
       if (next) {
-        toast.info(`Sending queued message (${queuedMessagesRef.current.length} remaining)...`);
+        toast.info(`Sending queued message (${queuedMessagesRef.current.length} remaining)...`, {
+          style: QUEUE_TOAST_STYLE,
+        });
         void sendPreparedMessage(next, false, next.queuedMessageId);
       }
     }
-  }, [projectId, currentConversation?.id, selectedClusterId, defaultCatalog, defaultSchema, selectedWarehouseId, workspaceFolder, mlflowExperimentName, appendTraceHistoryForConversation, setConversationStreamingState]);
+  }, [projectId, currentConversation?.id, selectedClusterId, defaultCatalog, defaultSchema, selectedWarehouseId, workspaceFolder, mlflowExperimentName, appendTraceHistoryForConversation, setConversationStreamingState, updateConversationActivityItems]);
 
   // Start an execution in another conversation while keeping the current chat live.
   const sendBackgroundMessage = useCallback(async (
@@ -1926,50 +2058,35 @@ export default function ProjectPage() {
         if (type === 'thinking' || type === 'thinking_delta') {
           const thinking = (event.thinking as string) || '';
           if (!thinking) return;
-          const existing = inProgressByConversationRef.current[conversationId] ?? { streamingText: '' };
-          const nextItems = applyThinkingEventToItems(
-            existing.activityItems ?? [],
-            type as 'thinking' | 'thinking_delta',
-            thinking
+          updateConversationActivityItems(
+            conversationId,
+            (items) => applyThinkingEventToItems(items, type as 'thinking' | 'thinking_delta', thinking)
           );
-          inProgressByConversationRef.current[conversationId] = {
-            ...existing,
-            activityItems: nextItems,
-          };
-          if (currentConversationIdRef.current === conversationId) {
-            setActivityItems(nextItems);
-          }
           return;
         }
 
-        if (type === 'tool_use' && currentConversationIdRef.current === conversationId) {
-          setActivityItems((prev) => [
-            ...prev,
-            {
-              id: event.tool_id as string,
-              type: 'tool_use',
-              content: '',
-              toolName: event.tool_name as string,
-              toolInput: event.tool_input as Record<string, unknown>,
-              timestamp: Date.now(),
-            },
-          ]);
-          return;
-        }
-
-        if (type === 'tool_result' && currentConversationIdRef.current === conversationId) {
-          const resultItem = {
-            id: `result-${event.tool_use_id}`,
-            type: 'tool_result' as const,
-            content: typeof event.content === 'string' ? event.content : JSON.stringify(event.content),
-            isError: Boolean(event.is_error),
+        if (type === 'tool_use') {
+          const toolItem: ActivityItem = {
+            id: event.tool_id as string,
+            type: 'tool_use',
+            content: '',
+            toolName: event.tool_name as string,
+            toolInput: event.tool_input as Record<string, unknown>,
             timestamp: Date.now(),
           };
-          setActivityItems((prev) => {
-            const idx = prev.findIndex((i) => i.id === resultItem.id);
-            if (idx >= 0) { const u = [...prev]; u[idx] = resultItem; return u; }
-            return [...prev, resultItem];
-          });
+          updateConversationActivityItems(conversationId, (items) => upsertActivityItem(items, toolItem));
+          return;
+        }
+
+        if (type === 'tool_result') {
+          const resultItem = buildToolResultItem(
+            event as Record<string, unknown>,
+            `result-${event.tool_use_id}`,
+          );
+          updateConversationActivityItems(
+            conversationId,
+            (items) => applyToolResultToItems(items, resultItem, event.tool_use_id as string | undefined, resultItem.commandExecution)
+          );
         }
       },
       onError: (error) => {
@@ -1999,7 +2116,7 @@ export default function ProjectPage() {
         fetchConversations(projectId).then(setConversations).catch(() => undefined);
       },
     });
-  }, [projectId, selectedClusterId, defaultCatalog, defaultSchema, selectedWarehouseId, workspaceFolder, mlflowExperimentName, appendTraceHistoryForConversation, setConversationStreamingState]);
+  }, [projectId, selectedClusterId, defaultCatalog, defaultSchema, selectedWarehouseId, workspaceFolder, mlflowExperimentName, appendTraceHistoryForConversation, setConversationStreamingState, updateConversationActivityItems]);
 
   // Send message — allows new messages while streaming by queueing them.
   const handleSendMessage = useCallback(async () => {
@@ -2096,7 +2213,9 @@ export default function ProjectPage() {
           ...existing,
           queuedMessages: [...(existing.queuedMessages || []), queuedUserMessage],
         };
-        toast.info(`Queued in this chat (${queuedMessagesRef.current.length} waiting)`);
+        toast.info(`Queued in this chat (${queuedMessagesRef.current.length} waiting)`, {
+          style: QUEUE_TOAST_STYLE,
+        });
         return;
       }
 
@@ -2148,21 +2267,14 @@ export default function ProjectPage() {
     });
     const stoppedConversationId = activeStreamingConversationIdRef.current;
     if (stoppedConversationId) {
-      const before = queuedMessagesRef.current.length;
-      queuedMessagesRef.current = queuedMessagesRef.current.filter(
-        (m) => m.conversationId !== stoppedConversationId
-      );
-      const removed = before - queuedMessagesRef.current.length;
-      if (removed > 0) {
-        toast.info(`Cleared ${removed} queued message${removed > 1 ? 's' : ''} for this chat`);
+      // Stop only the active generation. Keep queued messages for this chat.
+      const state = inProgressByConversationRef.current[stoppedConversationId];
+      if (state) {
+        inProgressByConversationRef.current[stoppedConversationId] = {
+          ...state,
+          streamingText: '',
+        };
       }
-      delete inProgressByConversationRef.current[stoppedConversationId];
-      setMessages((prev) =>
-        prev.filter(
-          (m) =>
-            !(m.id.startsWith('temp-queued-') && m.conversation_id === stoppedConversationId)
-        )
-      );
     }
     delete inProgressByConversationRef.current[PENDING_CONVERSATION_KEY];
     if (stoppedConversationId) {
@@ -2324,9 +2436,18 @@ export default function ProjectPage() {
     [handleAddFiles]
   );
 
-  // Open skills explorer
+  // Open skills explorer in a new tab
   const handleViewSkills = () => {
-    setSkillsExplorerOpen(true);
+    if (projectId) {
+      const params = new URLSearchParams();
+      if (selectedClusterId) params.set('cluster_id', selectedClusterId);
+      if (selectedWarehouseId) params.set('warehouse_id', selectedWarehouseId);
+      if (defaultCatalog) params.set('default_catalog', defaultCatalog);
+      if (defaultSchema) params.set('default_schema', defaultSchema);
+      if (workspaceFolder) params.set('workspace_folder', workspaceFolder);
+      const qs = params.toString();
+      window.open(`/projects/${projectId}/skills${qs ? `?${qs}` : ''}`, '_blank');
+    }
   };
 
   const configChips = useMemo(() => {
@@ -2422,7 +2543,7 @@ export default function ProjectPage() {
               className={cn(
                 'flex items-center justify-center h-7 w-7 rounded-lg transition-all',
                 verbose
-                  ? 'bg-purple-500/10 text-purple-400 ring-2 ring-purple-500/20'
+                  ? 'bg-red-500/10 text-red-400 ring-2 ring-red-500/20'
                   : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-secondary)]'
               )}
               title={verbose ? 'Thinking ON — showing full agent trace' : 'Thinking OFF — click to show full agent trace'}
@@ -2541,7 +2662,7 @@ export default function ProjectPage() {
                         {message.role === 'assistant' ? (
                           <div className="prose prose-xs max-w-none text-[var(--color-text-primary)] text-[13px] leading-relaxed">
                             <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                              {message.content}
+                              {normalizeImagePathsToMarkdown(message.content)}
                             </ReactMarkdown>
                           </div>
                         ) : (
@@ -2600,7 +2721,7 @@ export default function ProjectPage() {
                   <div className="max-w-[85%] rounded-lg px-3 py-2 shadow-sm bg-[var(--color-bg-secondary)] border border-[var(--color-border)]/50">
                     <div className="prose prose-xs max-w-none text-[var(--color-text-primary)] text-[13px] leading-relaxed">
                       <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                        {improveReadabilityForStreaming(streamingText)}
+                        {normalizeImagePathsToMarkdown(improveReadabilityForStreaming(streamingText))}
                       </ReactMarkdown>
                     </div>
                   </div>
@@ -2634,7 +2755,7 @@ export default function ProjectPage() {
                       <div className="max-w-[85%] rounded-lg px-3 py-2 shadow-sm bg-[var(--color-bg-secondary)] border border-[var(--color-border)]/50">
                         <div className="prose prose-xs max-w-none text-[var(--color-text-primary)] text-[13px] leading-relaxed">
                           <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                            {improveReadabilityForStreaming(streamingText)}
+                            {normalizeImagePathsToMarkdown(improveReadabilityForStreaming(streamingText))}
                           </ReactMarkdown>
                         </div>
                       </div>
@@ -2833,25 +2954,7 @@ export default function ProjectPage() {
         </div>
       </div>
 
-      {/* Skills Explorer */}
-      {skillsExplorerOpen && projectId && (
-        <SkillsExplorer
-          projectId={projectId}
-          systemPromptParams={{
-            clusterId: selectedClusterId,
-            warehouseId: selectedWarehouseId,
-            defaultCatalog,
-            defaultSchema,
-            workspaceFolder,
-            projectId,
-          }}
-          customSystemPrompt={project?.custom_system_prompt ?? null}
-          onSystemPromptChange={(prompt) => {
-            setProject((prev) => prev ? { ...prev, custom_system_prompt: prompt } : prev);
-          }}
-          onClose={() => setSkillsExplorerOpen(false)}
-        />
-      )}
+      {/* Skills Explorer removed — now opens in a separate tab via /projects/:id/skills */}
     </MainLayout>
   );
 }

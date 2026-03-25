@@ -46,12 +46,8 @@ def save_result(result: OptimizationResult) -> tuple[Path | None, Path | None]:
         Tuple of (optimized_skill_path, metadata_path), either may be None on error.
     """
     # Check if this is a tools-only result (no skill content to save)
-    has_tool_components = result.components and any(
-        k.startswith("tools_") for k in result.components
-    )
-    is_tools_only = (
-        has_tool_components and result.original_content == result.optimized_content
-    )
+    has_tool_components = result.components and any(k.startswith("tools_") for k in result.components)
+    is_tools_only = has_tool_components and result.original_content == result.optimized_content
 
     if result.improvement <= 0 and not is_tools_only:
         return None, None
@@ -62,11 +58,7 @@ def save_result(result: OptimizationResult) -> tuple[Path | None, Path | None]:
     metadata_path = None
 
     # Write the optimized SKILL.md (skip for tools-only — no skill changes)
-    if (
-        not is_tools_only
-        and result.optimized_content
-        and result.optimized_content != result.original_content
-    ):
+    if not is_tools_only and result.optimized_content and result.optimized_content != result.original_content:
         optimized_path = results_dir / "optimized_SKILL.md"
         optimized_path.write_text(result.optimized_content)
 
@@ -87,9 +79,7 @@ def save_result(result: OptimizationResult) -> tuple[Path | None, Path | None]:
 
     # Save tool components if present
     if result.components:
-        tool_components = {
-            k: v for k, v in result.components.items() if k.startswith("tools_")
-        }
+        tool_components = {k: v for k, v in result.components.items() if k.startswith("tools_")}
         if tool_components:
             metadata["has_tool_components"] = True
             # Save each tool component
@@ -171,21 +161,29 @@ def review_optimization(result: OptimizationResult) -> None:
 
     # Aggregate judge-based scores from per-task side_info
     task_count = 0
-    sum_with = 0.0
-    sum_without = 0.0
+    sum_corr_w = 0.0
+    sum_comp_w = 0.0
+    sum_guide = 0.0
     sum_eff = 0.0
     per_task_lines: list[str] = []
 
     for task_id in sorted(si.keys()):
         info = si[task_id]
         scores = info.get("scores", {})
-        pw = scores.get("quality_with", 0.0)
-        pwo = scores.get("quality_without", 0.0)
+        corr_w = scores.get("correctness_with", 0.0)
+        comp_w = scores.get("completeness_with", 0.0)
+        guide = scores.get("guideline_adherence", 0.0)
         eff = scores.get("skill_effectiveness", 0.0)
-        sum_with += pw
-        sum_without += pwo
+        sum_corr_w += corr_w
+        sum_comp_w += comp_w
+        sum_guide += guide
         sum_eff += eff
         task_count += 1
+
+        # Get categorical verdicts for display
+        corr_verdict = info.get("Judge_correctness_with", {}).get("verdict", "?")
+        comp_verdict = info.get("Judge_completeness_with", {}).get("verdict", "?")
+        guide_verdict = info.get("Judge_guideline_adherence", {}).get("verdict", "?")
 
         # Build per-task notes
         error = info.get("Error", "")
@@ -198,15 +196,17 @@ def review_optimization(result: OptimizationResult) -> None:
             notes.append("OK")
         note_str = f"  [{'; '.join(notes)}]"
         per_task_lines.append(
-            f"    {task_id:<30s} WITH {pw:.2f}  WITHOUT {pwo:.2f}  delta {eff:+.2f}{note_str}"
+            f"    {task_id:<30s} corr={corr_verdict:<10s} comp={comp_verdict:<10s} "
+            f"guide={guide_verdict:<10s} delta {eff:+.2f}{note_str}"
         )
 
     if task_count > 0:
-        agg_with = sum_with / task_count
-        agg_without = sum_without / task_count
+        agg_corr = sum_corr_w / task_count
+        agg_comp = sum_comp_w / task_count
+        agg_guide = sum_guide / task_count
         agg_eff = sum_eff / task_count
     else:
-        agg_with = agg_without = agg_eff = 0.0
+        agg_corr = agg_comp = agg_guide = agg_eff = 0.0
 
     # Score summary
     improvement_sign = "+" if result.improvement >= 0 else ""
@@ -215,8 +215,9 @@ def review_optimization(result: OptimizationResult) -> None:
         f"({improvement_sign}{result.improvement:.3f})"
     )
     print(f"  Skill Effectiveness: {agg_eff:.2f}")
-    print(f"  Quality (with):      {agg_with:.2f}")
-    print(f"  Quality (without):   {agg_without:.2f} (baseline)")
+    print(f"  Correctness (with):  {agg_corr:.2f}")
+    print(f"  Completeness (with): {agg_comp:.2f}")
+    print(f"  Guideline Adherence: {agg_guide:.2f}")
 
     # Token counts
     reduction_sign = "+" if result.token_reduction_pct >= 0 else ""
@@ -282,9 +283,7 @@ def review_optimization(result: OptimizationResult) -> None:
     saved_skill, saved_meta = save_result(result)
     if saved_skill:
         print(f"  Saved: {saved_skill}")
-        print(
-            f"  Apply: uv run python .test/scripts/optimize.py {result.skill_name} --apply-last"
-        )
+        print(f"  Apply: uv run python .test/scripts/optimize.py {result.skill_name} --apply-last")
     elif result.original_content == result.optimized_content:
         print("  No improvement found -- nothing saved.")
     print(f"{'=' * 60}\n")
@@ -337,9 +336,7 @@ def apply_optimization(result: OptimizationResult) -> Path | None:
                 for f in modified:
                     print(f"  {f}")
 
-    print(
-        f"  Quality: {result.original_score:.3f} -> {result.optimized_score:.3f} ({result.improvement:+.3f})"
-    )
+    print(f"  Quality: {result.original_score:.3f} -> {result.optimized_score:.3f} ({result.improvement:+.3f})")
     print(
         f"  Tokens: {result.original_token_count:,} -> {result.optimized_token_count:,} "
         f"({result.token_reduction_pct:+.1f}%)"
