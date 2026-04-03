@@ -107,7 +107,7 @@ def execute_databricks_command(
     destroy_context_on_completion: bool = False,
 ) -> Dict[str, Any]:
     """
-    Execute code on a Databricks cluster.
+    Execute code on Databricks compute.
 
     If context_id is provided, reuses the existing context (faster, maintains state).
     If not provided, creates a new context.
@@ -115,18 +115,17 @@ def execute_databricks_command(
     By default, the context is kept alive for reuse. Set destroy_context_on_completion=True
     to destroy it after execution.
 
-    If no cluster_id is provided and no accessible running cluster is found,
-    returns an error with startable_clusters and suggestions. When this happens:
-    1. Present the best startable cluster to the user and ASK FOR APPROVAL to start it
-    2. If approved, call start_cluster() then poll get_cluster_status() until RUNNING
-    3. Retry this command with the now-running cluster_id
-    For SQL-only workloads, consider using execute_sql() instead (no cluster needed).
+    If no cluster_id is provided, the tool first auto-selects the best accessible
+    running classic cluster. If none are available and the language is Python or SQL,
+    it falls back to a one-time Jobs-backed serverless run. For Scala/R without an
+    available cluster, it returns an error with startable_clusters and suggestions.
 
     Args:
         code: Code to execute
         cluster_id: ID of the cluster to run on. If not provided, auto-selects
-                   a running cluster accessible to the current user.
-                   Single-user clusters owned by other users are automatically skipped.
+                   a running cluster accessible to the current user. Passing the UI
+                   serverless sentinel ('serverless' or '__serverless__') is treated
+                   the same as omitting cluster_id.
         context_id: Optional existing execution context ID. If provided, reuses it
                    for faster execution and state preservation (variables, imports).
         language: Programming language ("python", "scala", "sql", "r")
@@ -139,9 +138,13 @@ def execute_databricks_command(
         - success: Whether execution succeeded
         - output: The output from execution
         - error: Error message if failed
-        - cluster_id: The cluster ID used
+        - cluster_id: The cluster ID used (None for serverless runs)
+        - cluster_name: The actual cluster selected, or "Serverless Jobs"
         - context_id: The context ID (reuse this for follow-up commands!)
         - context_destroyed: Whether the context was destroyed
+        - execution_mode: "cluster" or "serverless"
+        - run_id: Jobs run ID for serverless runs
+        - run_url: Jobs run URL for serverless runs
         - message: Helpful message about reusing the context
 
         On cluster-not-found errors, also includes:
@@ -150,7 +153,7 @@ def execute_databricks_command(
         - skipped_clusters: running clusters skipped (single-user, different owner)
     """
     # Convert empty strings to None (Claude agent sometimes passes "" instead of null)
-    if cluster_id == "":
+    if cluster_id in {"", "serverless", "__serverless__"}:
         cluster_id = None
     if context_id == "":
         context_id = None
@@ -197,14 +200,16 @@ def run_python_file_on_databricks(
     If context_id is provided, reuses the existing context (faster, maintains state).
     If not provided, creates a new context.
 
-    If no cluster_id is provided and no accessible running cluster is found,
-    returns an error with actionable suggestions (startable clusters, alternatives).
+    If no cluster_id is provided, the tool first auto-selects a running classic
+    cluster. If none are available, Python file execution falls back to a one-time
+    Jobs-backed serverless run.
 
     Args:
         file_path: Local path to the Python file
         cluster_id: ID of the cluster to run on. If not provided, auto-selects
-                   a running cluster accessible to the current user.
-                   Single-user clusters owned by other users are automatically skipped.
+                   a running cluster accessible to the current user. Passing the UI
+                   serverless sentinel ('serverless' or '__serverless__') is treated
+                   the same as omitting cluster_id.
         context_id: Optional existing execution context ID. If provided, reuses it
                    for faster execution and state preservation.
         timeout: Maximum wait time in seconds (default: 600)
@@ -216,13 +221,17 @@ def run_python_file_on_databricks(
         - success: Whether execution succeeded
         - output: The output from execution
         - error: Error message if failed
-        - cluster_id: The cluster ID used
+        - cluster_id: The cluster ID used (None for serverless runs)
+        - cluster_name: The actual cluster selected, or "Serverless Jobs"
         - context_id: The context ID (reuse this for follow-up commands!)
         - context_destroyed: Whether the context was destroyed
+        - execution_mode: "cluster" or "serverless"
+        - run_id: Jobs run ID for serverless runs
+        - run_url: Jobs run URL for serverless runs
         - message: Helpful message about reusing the context
     """
     # Convert empty strings to None (Claude agent sometimes passes "" instead of null)
-    if cluster_id == "":
+    if cluster_id in {"", "serverless", "__serverless__"}:
         cluster_id = None
     if context_id == "":
         context_id = None

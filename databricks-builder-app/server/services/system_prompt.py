@@ -114,8 +114,9 @@ Use the `Skill` tool to load skills. Available skills:
 You are configured to use **Databricks Serverless Compute** for code execution.
 
 When using `execute_databricks_command` or `run_python_file_on_databricks`:
-- **Do NOT pass a cluster_id parameter** — serverless compute is used automatically when no cluster is specified.
-- Serverless compute starts instantly with no cluster startup wait time.
+- **Do NOT pass a cluster_id parameter**.
+- The tool will first auto-select the best accessible classic cluster and will report which cluster it actually used.
+- If no classic cluster is available, Python and SQL execution automatically fall back to a Jobs-backed serverless run.
 """
   elif cluster_id:
     cluster_section = f"""

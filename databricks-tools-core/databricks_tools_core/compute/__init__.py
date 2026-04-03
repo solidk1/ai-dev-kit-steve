@@ -16,6 +16,11 @@ from .execution import (
     execute_databricks_command,
     run_python_file_on_databricks,
 )
+from .serverless import (
+    ServerlessRunResult,
+    run_code_on_serverless,
+    run_file_on_serverless,
+)
 
 __all__ = [
     "ExecutionResult",
@@ -28,4 +33,7 @@ __all__ = [
     "destroy_context",
     "execute_databricks_command",
     "run_python_file_on_databricks",
+    "ServerlessRunResult",
+    "run_code_on_serverless",
+    "run_file_on_serverless",
 ]

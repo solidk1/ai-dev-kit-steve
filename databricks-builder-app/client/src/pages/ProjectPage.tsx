@@ -331,6 +331,13 @@ function getCodeFromToolInput(
 // Single item in the verbose trace
 function VerboseItem({ item }: { item: ActivityItem }) {
   const [expanded, setExpanded] = useState(item.type === 'thinking');
+  const commandMeta: [string, string][] = [
+    item.commandExecution?.cluster_name ? (['cluster', item.commandExecution.cluster_name] as [string, string]) : null,
+    !item.commandExecution?.cluster_name && item.commandExecution?.cluster_id
+      ? (['cluster_id', item.commandExecution.cluster_id] as [string, string])
+      : null,
+    item.commandExecution?.context_id ? (['context_id', item.commandExecution.context_id] as [string, string]) : null,
+  ].filter((entry): entry is [string, string] => Boolean(entry));
 
   if (item.type === 'thinking') {
     const readableThinking = improveReadabilityForStreaming(item.content);
@@ -361,12 +368,7 @@ function VerboseItem({ item }: { item: ActivityItem }) {
     const toolName = formatToolDisplayName(item.toolName);
     const codeInfo = getCodeFromToolInput(item.toolName, item.toolInput);
     const inputStr = !codeInfo && item.toolInput ? JSON.stringify(item.toolInput, null, 2) : '';
-    const metaParams = [
-      item.commandExecution?.cluster_name ? (['cluster', item.commandExecution.cluster_name] as [string, string]) : null,
-      !item.commandExecution?.cluster_name && item.commandExecution?.cluster_id
-        ? (['cluster_id', item.commandExecution.cluster_id] as [string, string])
-        : null,
-    ].filter((entry): entry is [string, string] => Boolean(entry));
+    const metaParams = commandMeta.filter(([key]) => key !== 'context_id');
     const metaKeys = new Set(metaParams.map(([k]) => k));
     if (item.commandExecution) {
       if (item.commandExecution.cluster_name) { metaKeys.add('cluster_id'); metaKeys.add('cluster_name'); }
@@ -448,12 +450,28 @@ function VerboseItem({ item }: { item: ActivityItem }) {
             {item.isError ? '✕' : '✓'}
           </span>
           <span className="font-mono text-[10px] text-[var(--color-text-muted)] flex-1 truncate">{preview}</span>
+          {item.commandExecution?.cluster_name && (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono bg-[var(--color-bg-secondary)]/60 text-[var(--color-text-muted)] border border-[var(--color-border)]/30">
+              <span className="text-[var(--color-text-muted)]/70">cluster:</span>
+              <span className="text-[var(--color-text-primary)]">{item.commandExecution.cluster_name}</span>
+            </span>
+          )}
           {hasMore && (
             <ChevronDown className={cn('h-3 w-3 flex-shrink-0 text-[var(--color-text-muted)] transition-transform', expanded && 'rotate-180')} />
           )}
         </button>
         {expanded && (
           <div className="px-3 pb-2 ml-5 text-[10px] text-[var(--color-text-muted)] leading-relaxed max-h-48 overflow-y-auto bg-[var(--color-bg-secondary)]/30 rounded mx-3 mb-1 p-1.5">
+            {commandMeta.length > 0 && (
+              <div className="flex flex-wrap gap-1 mb-2">
+                {commandMeta.map(([key, val]) => (
+                  <span key={`result-meta-${key}`} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono bg-[var(--color-bg-secondary)]/60 text-[var(--color-text-muted)] border border-[var(--color-border)]/30">
+                    <span className="text-[var(--color-text-muted)]/70">{key}:</span>
+                    <span className="text-[var(--color-text-primary)]">{val}</span>
+                  </span>
+                ))}
+              </div>
+            )}
             <div className="font-mono whitespace-pre-wrap">{item.content}</div>
             {imagePaths.length > 0 && (
               <div className="mt-2 space-y-2">

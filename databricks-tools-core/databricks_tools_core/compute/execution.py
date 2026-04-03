@@ -17,10 +17,12 @@ from databricks.sdk.service.compute import (
 )
 
 from ..auth import get_workspace_client, get_current_username
+from .serverless import run_code_on_serverless
 
 import logging
 
 logger = logging.getLogger(__name__)
+SERVERLESS_CLUSTER_NAME = "Serverless Jobs"
 
 
 class ExecutionResult:
@@ -44,18 +46,28 @@ class ExecutionResult:
         output: Optional[str] = None,
         error: Optional[str] = None,
         cluster_id: Optional[str] = None,
+        cluster_name: Optional[str] = None,
         context_id: Optional[str] = None,
         context_destroyed: bool = True,
+        execution_mode: str = "cluster",
+        run_id: Optional[int] = None,
+        run_url: Optional[str] = None,
     ):
         self.success = success
         self.output = output
         self.error = error
         self.cluster_id = cluster_id
+        self.cluster_name = cluster_name
         self.context_id = context_id
         self.context_destroyed = context_destroyed
+        self.execution_mode = execution_mode
+        self.run_id = run_id
+        self.run_url = run_url
 
         # Generate helpful message
-        if success and context_id and not context_destroyed:
+        if execution_mode == "serverless":
+            self.message = None
+        elif success and context_id and not context_destroyed:
             self.message = (
                 f"Execution successful. To speed up follow-up commands and maintain "
                 f"state (variables, imports), reuse context_id='{context_id}' with "
@@ -83,8 +95,12 @@ class ExecutionResult:
             "output": self.output,
             "error": self.error,
             "cluster_id": self.cluster_id,
+            "cluster_name": self.cluster_name,
             "context_id": self.context_id,
             "context_destroyed": self.context_destroyed,
+            "execution_mode": self.execution_mode,
+            "run_id": self.run_id,
+            "run_url": self.run_url,
             "message": self.message,
         }
 
@@ -195,9 +211,11 @@ class ClusterSelectionResult:
     def __init__(
         self,
         cluster_id: Optional[str],
+        cluster_name: Optional[str] = None,
         skipped_clusters: Optional[List[Dict[str, str]]] = None,
     ):
         self.cluster_id = cluster_id
+        self.cluster_name = cluster_name
         self.skipped_clusters = skipped_clusters or []
 
 
@@ -260,15 +278,45 @@ def _select_best_cluster() -> ClusterSelectionResult:
     # Priority 1: clusters with "shared" in name
     for c in running_clusters:
         if "shared" in c["cluster_name"].lower():
-            return ClusterSelectionResult(cluster_id=c["cluster_id"], skipped_clusters=skipped_clusters)
+            return ClusterSelectionResult(
+                cluster_id=c["cluster_id"],
+                cluster_name=c["cluster_name"],
+                skipped_clusters=skipped_clusters,
+            )
 
     # Priority 2: clusters with "demo" in name
     for c in running_clusters:
         if "demo" in c["cluster_name"].lower():
-            return ClusterSelectionResult(cluster_id=c["cluster_id"], skipped_clusters=skipped_clusters)
+            return ClusterSelectionResult(
+                cluster_id=c["cluster_id"],
+                cluster_name=c["cluster_name"],
+                skipped_clusters=skipped_clusters,
+            )
 
     # Fallback: first running cluster
-    return ClusterSelectionResult(cluster_id=running_clusters[0]["cluster_id"], skipped_clusters=skipped_clusters)
+    return ClusterSelectionResult(
+        cluster_id=running_clusters[0]["cluster_id"],
+        cluster_name=running_clusters[0]["cluster_name"],
+        skipped_clusters=skipped_clusters,
+    )
+
+
+def _to_serverless_execution_result(serverless_result) -> ExecutionResult:
+    """Map a Jobs-backed serverless result into the command execution result shape."""
+    result = ExecutionResult(
+        success=serverless_result.success,
+        output=serverless_result.output,
+        error=serverless_result.error,
+        cluster_id=None,
+        cluster_name=SERVERLESS_CLUSTER_NAME,
+        context_id=None,
+        context_destroyed=True,
+        execution_mode="serverless",
+        run_id=serverless_result.run_id,
+        run_url=serverless_result.run_url,
+    )
+    result.message = serverless_result.message
+    return result
 
 
 class NoRunningClusterError(Exception):
@@ -525,6 +573,7 @@ def _execute_on_context(cluster_id: str, context_id: str, code: str, language: s
                     success=False,
                     error=error_msg,
                     cluster_id=cluster_id,
+                    cluster_name=None,
                     context_id=context_id,
                     context_destroyed=False,
                 )
@@ -533,6 +582,7 @@ def _execute_on_context(cluster_id: str, context_id: str, code: str, language: s
                 success=True,
                 output=str(output),
                 cluster_id=cluster_id,
+                cluster_name=None,
                 context_id=context_id,
                 context_destroyed=False,
             )
@@ -542,6 +592,7 @@ def _execute_on_context(cluster_id: str, context_id: str, code: str, language: s
                 success=False,
                 error=error_msg,
                 cluster_id=cluster_id,
+                cluster_name=None,
                 context_id=context_id,
                 context_destroyed=False,
             )
@@ -550,6 +601,7 @@ def _execute_on_context(cluster_id: str, context_id: str, code: str, language: s
                 success=False,
                 error=f"Unexpected status: {result.status}",
                 cluster_id=cluster_id,
+                cluster_name=None,
                 context_id=context_id,
                 context_destroyed=False,
             )
@@ -559,6 +611,7 @@ def _execute_on_context(cluster_id: str, context_id: str, code: str, language: s
             success=False,
             error="Command timed out",
             cluster_id=cluster_id,
+            cluster_name=None,
             context_id=context_id,
             context_destroyed=False,
         )
@@ -599,11 +652,24 @@ def execute_databricks_command(
         NoRunningClusterError: If no cluster_id provided and no running cluster found
         DatabricksError: If API request fails
     """
-    # Auto-select cluster if not provided
+    # Treat the synthetic UI serverless sentinel as "no explicit cluster selected".
+    if cluster_id in {"serverless", "__serverless__"}:
+        cluster_id = None
+
+    selected_cluster_name = None
+
+    # Auto-select a classic cluster if not provided. If none are available,
+    # fall back to Jobs-backed serverless execution for Python/SQL.
     if cluster_id is None:
         selection = _select_best_cluster()
         cluster_id = selection.cluster_id
+        selected_cluster_name = selection.cluster_name
         if cluster_id is None:
+            if language.lower() in {"python", "sql"}:
+                return _to_serverless_execution_result(
+                    run_code_on_serverless(code=code, language=language, timeout=timeout)
+                )
+
             # No accessible running cluster — build an actionable error
             available_clusters = list_clusters(limit=20)
 
@@ -648,6 +714,7 @@ def execute_databricks_command(
             language=language,
             timeout=timeout,
         )
+        result.cluster_name = selected_cluster_name or result.cluster_name
 
         # Destroy context if requested
         if destroy_context_on_completion:
