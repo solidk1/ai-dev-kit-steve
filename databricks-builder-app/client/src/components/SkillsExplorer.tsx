@@ -21,7 +21,7 @@ import {
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
-import { cn } from '@/lib/utils';
+import { cn, formatToolDisplayName } from '@/lib/utils';
 import {
   fetchAvailableSkills,
   fetchInstalledMcpTools,
@@ -890,7 +890,7 @@ export function SkillsExplorer({
                         >
                           <Plug className="h-3.5 w-3.5 flex-shrink-0 text-[var(--color-accent-secondary)]" />
                           <div className="min-w-0">
-                            <div className="truncate font-medium text-[11px]">{tool.name}</div>
+                            <div className="truncate font-medium text-[11px]">{formatToolDisplayName(tool.name)}</div>
                             <div className="truncate text-[10px] text-[var(--color-text-muted)]">{tool.server}</div>
                           </div>
                         </button>
@@ -964,7 +964,7 @@ export function SkillsExplorer({
                   <Plug className="h-4 w-4 flex-shrink-0 text-[var(--color-accent-secondary)]" />
                   <div className="min-w-0">
                     <h3 className="text-sm font-semibold text-[var(--color-text-heading)] truncate flex items-center gap-2">
-                      {selectedMcpTool?.name || 'MCP Tool'}
+                      {formatToolDisplayName(selectedMcpTool?.name) || 'MCP Tool'}
                     </h3>
                     <p className="text-xs text-[var(--color-text-muted)] truncate">
                       {selectedMcpTool?.server || ''}

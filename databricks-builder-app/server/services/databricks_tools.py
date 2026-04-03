@@ -10,8 +10,10 @@ execution continues in background and returns an operation ID for polling.
 
 import asyncio
 import concurrent.futures
+import importlib
 import json
 import logging
+import pkgutil
 import re
 import threading
 import time
@@ -20,6 +22,7 @@ from typing import Any
 
 from claude_agent_sdk import tool, create_sdk_mcp_server
 
+from ..mcp_registry import get_registered_mcp_tools
 from .operation_tracker import (
     create_operation,
     complete_operation,
@@ -96,7 +99,7 @@ def _sanitize_tool_result(tool_name: str, result: Any) -> Any:
     return result
 
 
-def load_databricks_tools():
+async def load_databricks_tools():
     """Dynamically scan FastMCP tools and create in-process SDK MCP server.
 
     Returns:
@@ -104,7 +107,7 @@ def load_databricks_tools():
         - server_config: McpSdkServerConfig for ClaudeAgentOptions.mcp_servers
         - tool_names: List of tool names in mcp__databricks__* format
     """
-    sdk_tools, tool_names = _get_all_sdk_tools()
+    sdk_tools, tool_names = await _get_all_sdk_tools()
 
     logger.info(f'Loaded {len(sdk_tools)} Databricks tools: {[n.split("__")[-1] for n in tool_names]}')
 
@@ -126,7 +129,7 @@ _TOOL_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
 )
 
 
-def _get_all_sdk_tools():
+async def _get_all_sdk_tools():
     """Load and cache all SDK tool wrappers.
 
     Returns:
@@ -139,13 +142,23 @@ def _get_all_sdk_tools():
 
     # Import triggers @mcp.tool registration
     from databricks_mcp_server.server import mcp
-    from databricks_mcp_server.tools import sql, compute, file, pipelines  # noqa: F401
+    import databricks_mcp_server.tools as tools_pkg
+
+    loaded_tool_modules = []
+    for module_info in pkgutil.iter_modules(tools_pkg.__path__):
+        if module_info.ispkg:
+            continue
+        loaded_tool_modules.append(
+            importlib.import_module(f'databricks_mcp_server.tools.{module_info.name}')
+        )
 
     sdk_tools = []
     tool_names = []
 
     # Wrap all Databricks MCP tools
-    for name, mcp_tool in mcp._tool_manager._tools.items():
+    for name, mcp_tool in (
+        await get_registered_mcp_tools(mcp, tool_modules=loaded_tool_modules)
+    ).items():
         input_schema = _convert_schema(mcp_tool.parameters)
         sdk_tool = _make_wrapper(name, mcp_tool.description, input_schema, mcp_tool.fn)
         sdk_tools.append(sdk_tool)
@@ -163,7 +176,7 @@ def _get_all_sdk_tools():
     return sdk_tools, tool_names
 
 
-def create_filtered_databricks_server(allowed_tool_names: list[str]):
+async def create_filtered_databricks_server(allowed_tool_names: list[str]):
     """Create an MCP server with only the specified tools.
 
     Used to restrict which Databricks tools the agent can access based on
@@ -180,7 +193,7 @@ def create_filtered_databricks_server(allowed_tool_names: list[str]):
     if cached is not None:
         return cached
 
-    all_sdk_tools, all_tool_names = _get_all_sdk_tools()
+    all_sdk_tools, all_tool_names = await _get_all_sdk_tools()
 
     allowed_set = set(allowed_tool_names)
     filtered_tools = []

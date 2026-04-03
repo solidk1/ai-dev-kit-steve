@@ -35,6 +35,10 @@ function getCardPalette(id: string) {
   return CARD_PALETTES[hashString(id) % CARD_PALETTES.length];
 }
 
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
 /* ─── Animated mesh gradient canvas ─── */
 function MeshGradient() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -127,7 +131,7 @@ function DotGrid() {
 export default function HomePage() {
   const navigate = useNavigate();
   const { loading: userLoading } = useUser();
-  const { projects, loading: projectsLoading, createProject, deleteProject, renameProject } = useProjects();
+  const { projects, loading: projectsLoading, error: projectsError, createProject, deleteProject, renameProject } = useProjects();
   const [newProjectName, setNewProjectName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [sortMode, setSortMode] = useState<SortMode>('recent');
@@ -160,7 +164,7 @@ export default function HomePage() {
       toast.success('Project created');
       navigate(`/projects/${project.id}`);
     } catch (error) {
-      toast.error('Failed to create project');
+      toast.error(getErrorMessage(error, 'Failed to create project'), { duration: 8000 });
       console.error(error);
     } finally {
       setIsCreating(false);
@@ -311,6 +315,12 @@ export default function HomePage() {
               </div>
             )}
           </div>
+
+          {projectsError && (
+            <div className="mb-5 rounded-2xl border border-[var(--color-error)]/25 bg-[var(--color-error)]/8 px-4 py-3 text-sm text-[var(--color-error)]">
+              {projectsError.message}
+            </div>
+          )}
 
           {projects.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-bg-secondary)]/50 py-16 text-center">

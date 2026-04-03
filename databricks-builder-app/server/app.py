@@ -3,15 +3,22 @@
 import asyncio
 import logging
 import os
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
+
+# Force unbuffered output so logs appear immediately in Databricks Apps
+if hasattr(sys.stdout, 'reconfigure'):
+  sys.stdout.reconfigure(line_buffering=True)
+if hasattr(sys.stderr, 'reconfigure'):
+  sys.stderr.reconfigure(line_buffering=True)
 
 # Configure logging BEFORE importing other modules
 logging.basicConfig(
   level=logging.INFO,
   format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
   handlers=[
-    logging.StreamHandler(),
+    logging.StreamHandler(sys.stderr),
   ],
 )
 
@@ -22,7 +29,8 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.cors import CORSMiddleware
 
-from .db import is_postgres_configured, is_dynamic_token_mode, run_migrations, init_database, start_token_refresh, stop_token_refresh
+from .db import stop_token_refresh
+from .db.startup import initialize_optional_database
 from .routers import agent_router, anthropic_proxy_router, clusters_router, config_router, conversations_router, files_router, personal_workspace_router, projects_router, skills_router, warehouses_router
 from .services.backup_manager import start_backup_worker, stop_backup_worker
 from .services.skills_manager import copy_skills_to_app
@@ -47,42 +55,13 @@ async def lifespan(app: FastAPI):
   # Copy skills from databricks-skills to local cache
   copy_skills_to_app()
 
-  # Initialize database if configured
-  db_initialized = False
-  if is_postgres_configured():
-    logger.info('Initializing database...')
-    try:
-      init_database()
-      db_initialized = True
-
-      # Start token refresh for dynamic OAuth mode (Databricks Apps)
-      if is_dynamic_token_mode():
-        await start_token_refresh()
-
-      # Run migrations in background thread (non-blocking)
-      asyncio.create_task(asyncio.to_thread(run_migrations))
-
-      # Start backup worker
-      start_backup_worker()
-    except Exception as e:
-      logger.warning(
-        f'Database initialization failed: {e}\n'
-        'App will continue without database features (conversations won\'t be persisted).'
-      )
-  else:
-    logger.warning(
-      'Database not configured. Set either:\n'
-      '  - LAKEBASE_PG_URL (static URL with password), or\n'
-      '  - LAKEBASE_INSTANCE_NAME and LAKEBASE_DATABASE_NAME (dynamic OAuth)'
-    )
+  app.state.database_ready = await initialize_optional_database()
 
   yield
 
   logger.info('Shutting down application...')
 
-  # Stop token refresh if running
   await stop_token_refresh()
-
   stop_backup_worker()
 
 
@@ -91,6 +70,15 @@ app = FastAPI(
   description='Project-based Claude Code agent application',
   lifespan=lifespan,
 )
+
+
+@app.get('/healthz')
+async def healthz(request: Request):
+  """Health check endpoint - no auth required."""
+  import sys
+  headers = dict(request.headers)
+  print(f"[HEALTHZ] headers={headers}", file=sys.stderr, flush=True)
+  return {'status': 'ok', 'headers': {k: v for k, v in headers.items() if 'forwarded' in k.lower()}}
 
 
 @app.exception_handler(Exception)

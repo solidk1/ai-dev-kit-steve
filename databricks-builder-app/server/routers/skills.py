@@ -10,6 +10,7 @@ import pkgutil
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from ..mcp_registry import get_registered_mcp_tools
 from ..services import (
   get_available_skills,
   get_project_directory,
@@ -36,7 +37,7 @@ class SaveSkillFileRequest(BaseModel):
   content: str
 
 
-def _discover_mcp_tools() -> list[dict]:
+async def _discover_mcp_tools() -> list[dict]:
   """Discover MCP tools from runtime registration and descriptor files.
 
   Returns:
@@ -55,7 +56,16 @@ def _discover_mcp_tools() -> list[dict]:
       if not module_info.ispkg:
         importlib.import_module(f'databricks_mcp_server.tools.{module_info.name}')
 
-    for tool_name, mcp_tool in mcp._tool_manager._tools.items():
+    loaded_tool_modules = []
+    for module_info in pkgutil.iter_modules(tools_pkg.__path__):
+      if not module_info.ispkg:
+        loaded_tool_modules.append(
+          importlib.import_module(f'databricks_mcp_server.tools.{module_info.name}')
+        )
+
+    for tool_name, mcp_tool in (
+      await get_registered_mcp_tools(mcp, tool_modules=loaded_tool_modules)
+    ).items():
       dedupe_key = ('databricks', tool_name)
       if dedupe_key in seen_tools:
         continue
@@ -305,5 +315,5 @@ async def reload_skills(project_id: str):
 @router.get('/mcp/tools')
 async def list_mcp_tools():
   """List locally installed MCP tools with description and schema specs."""
-  tools = _discover_mcp_tools()
+  tools = await _discover_mcp_tools()
   return {'tools': tools, 'count': len(tools)}

@@ -1,11 +1,10 @@
 """Async database connection and session management.
 
-Uses PostgreSQL via Lakebase with async SQLAlchemy and psycopg3 driver.
+Uses PostgreSQL via Lakebase autoscaling with async SQLAlchemy and psycopg3.
 
-Implements automatic OAuth token refresh for Databricks Apps deployment:
-- Tokens are refreshed every 50 minutes (before 1-hour expiry)
-- SQLAlchemy's do_connect event injects fresh tokens into connections
-- Falls back to static LAKEBASE_PG_URL for local development
+The runtime expects Databricks Apps to inject `PG*` environment variables from
+the configured Lakebase database resource. OAuth tokens are generated from the
+app service principal credentials when `PGPASSWORD` is not already present.
 
 Note: Uses psycopg3 (postgresql+psycopg) driver which supports hostaddr
 parameter for DNS resolution workaround on macOS.
@@ -16,12 +15,10 @@ import logging
 import os
 import socket
 import subprocess
-import uuid
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Optional
-from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+from urllib.parse import quote_plus, urlparse
 
-from sqlalchemy import URL, event
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -37,16 +34,9 @@ logger = logging.getLogger(__name__)
 _engine: Optional[AsyncEngine] = None
 _async_session_maker: Optional[async_sessionmaker[AsyncSession]] = None
 
-# Token refresh state
-_current_token: Optional[str] = None
+# Token refresh
 _token_refresh_task: Optional[asyncio.Task] = None
-_lakebase_instance_name: Optional[str] = None
-
-# Token refresh interval (50 minutes - tokens expire after 1 hour)
-TOKEN_REFRESH_INTERVAL_SECONDS = 50 * 60
-
-# Cached resolved hostaddr for DNS workaround
-_resolved_hostaddr: Optional[str] = None
+TOKEN_REFRESH_INTERVAL = 2400  # 40 minutes (tokens last ~1 hour)
 
 
 def _resolve_hostname(hostname: str) -> Optional[str]:
@@ -55,14 +45,7 @@ def _resolve_hostname(hostname: str) -> Optional[str]:
     Python's socket.getaddrinfo() fails on macOS with long hostnames like
     Lakebase instance hostnames. This function uses the 'dig' command as
     a fallback to resolve the hostname.
-
-    Args:
-        hostname: The hostname to resolve
-
-    Returns:
-        IP address string or None if resolution fails
     """
-    # First try Python's native resolution
     try:
         result = socket.getaddrinfo(hostname, 5432)
         if result:
@@ -70,7 +53,6 @@ def _resolve_hostname(hostname: str) -> Optional[str]:
     except socket.gaierror:
         pass
 
-    # Fall back to dig command (works on macOS/Linux)
     try:
         result = subprocess.run(
             ["dig", "+short", hostname, "A"],
@@ -88,234 +70,62 @@ def _resolve_hostname(hostname: str) -> Optional[str]:
     return None
 
 
-def _has_oauth_credentials() -> bool:
-    """Check if OAuth credentials (SP) are configured in environment."""
-    import os
-    return bool(os.environ.get('DATABRICKS_CLIENT_ID') and os.environ.get('DATABRICKS_CLIENT_SECRET'))
+def _generate_oauth_token() -> str:
+    """Generate an OAuth token for Lakebase using SP credentials.
 
-
-def _get_workspace_client():
-    """Get Databricks WorkspaceClient for token generation.
-
-    In Databricks Apps, explicitly uses OAuth M2M to avoid conflicts with other auth methods.
-    Returns None if not running in a Databricks environment.
+    Uses the Databricks SDK WorkspaceClient which picks up
+    DATABRICKS_HOST, DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET
+    automatically from the environment.
     """
-    try:
-        import os
-        from databricks.sdk import WorkspaceClient
-        from databricks_tools_core.identity import PRODUCT_NAME, PRODUCT_VERSION
+    from databricks.sdk import WorkspaceClient
 
-        product_kwargs = dict(product=PRODUCT_NAME, product_version=PRODUCT_VERSION)
-        if _has_oauth_credentials():
-            # Explicitly configure OAuth M2M to prevent auth conflicts
-            return WorkspaceClient(
-                host=os.environ.get('DATABRICKS_HOST', ''),
-                client_id=os.environ.get('DATABRICKS_CLIENT_ID', ''),
-                client_secret=os.environ.get('DATABRICKS_CLIENT_SECRET', ''),
-                auth_type='oauth-m2m',
-                **product_kwargs,
-            )
-        # Development mode - use default SDK auth
-        return WorkspaceClient(**product_kwargs)
-    except Exception as e:
-        logger.debug(f"Could not create WorkspaceClient: {e}")
-        return None
+    w = WorkspaceClient()
+    headers = w.config.authenticate()
+    bearer = headers.get("Authorization", "")
+    if bearer.startswith("Bearer "):
+        return bearer[7:]
+    # If authenticate() returns something unexpected, log and try token attribute
+    logger.info(f"authenticate() returned type={type(headers)}, keys={list(headers.keys()) if isinstance(headers, dict) else 'N/A'}")
+    return bearer
 
 
-def _generate_lakebase_token(instance_name: str) -> Optional[str]:
-    """Generate a fresh OAuth token for Lakebase connection.
-
-    Supports both autoscale (LAKEBASE_ENDPOINT) and provisioned (instance_name) modes.
-
-    Args:
-        instance_name: Lakebase instance name (provisioned) or endpoint name (autoscale)
-
-    Returns:
-        OAuth token string or None if generation fails
-    """
-    client = _get_workspace_client()
-    if not client:
-        return None
-
-    try:
-        endpoint_name = os.environ.get("LAKEBASE_ENDPOINT")
-        if endpoint_name:
-            # Autoscale: use client.postgres with the endpoint resource name
-            cred = client.postgres.generate_database_credential(endpoint=endpoint_name)
-        else:
-            # Provisioned: use client.database with instance_names
-            cred = client.database.generate_database_credential(
-                request_id=str(uuid.uuid4()),
-                instance_names=[instance_name],
-            )
-        logger.info(f"Generated new Lakebase token for instance: {instance_name}")
-        return cred.token
-    except Exception as e:
-        logger.error(f"Failed to generate Lakebase token: {e}")
-        return None
-
-
-async def _token_refresh_loop():
-    """Background task to refresh Lakebase OAuth token every 50 minutes."""
-    global _current_token, _lakebase_instance_name
-
-    while True:
-        try:
-            await asyncio.sleep(TOKEN_REFRESH_INTERVAL_SECONDS)
-
-            if _lakebase_instance_name:
-                new_token = await asyncio.to_thread(
-                    _generate_lakebase_token, _lakebase_instance_name
-                )
-                if new_token:
-                    _current_token = new_token
-                    logger.info("Lakebase token refreshed successfully")
-                else:
-                    logger.warning("Failed to refresh Lakebase token")
-        except asyncio.CancelledError:
-            logger.info("Token refresh task cancelled")
-            break
-        except Exception as e:
-            logger.error(f"Error in token refresh loop: {e}")
-            # Continue the loop, will retry on next interval
-
-
-async def start_token_refresh():
-    """Start the background token refresh task."""
-    global _token_refresh_task
-
-    if _token_refresh_task is not None:
-        logger.warning("Token refresh task already running")
-        return
-
-    _token_refresh_task = asyncio.create_task(_token_refresh_loop())
-    logger.info("Started Lakebase token refresh background task")
-
-
-async def stop_token_refresh():
-    """Stop the background token refresh task."""
-    global _token_refresh_task
-
-    if _token_refresh_task is not None:
-        _token_refresh_task.cancel()
-        try:
-            await _token_refresh_task
-        except asyncio.CancelledError:
-            pass
-        _token_refresh_task = None
-        logger.info("Stopped Lakebase token refresh background task")
+def _is_oauth_mode() -> bool:
+    """Check if we need OAuth token mode (PGHOST set but no PGPASSWORD)."""
+    return bool(os.environ.get("PGHOST")) and not bool(os.environ.get("PGPASSWORD"))
 
 
 def get_database_url() -> Optional[str]:
     """Get database URL from environment.
 
-    Converts standard PostgreSQL URL to psycopg3 async format if needed.
-
     Returns:
-        Database URL string or None if not configured
+        Database URL string with psycopg3 driver prefix, or None
     """
-    url = os.environ.get("LAKEBASE_PG_URL")
-    if url and url.startswith("postgresql://"):
-        url = url.replace("postgresql://", "postgresql+psycopg://", 1)
-    return url
+    pghost = os.environ.get("PGHOST")
+    if not pghost:
+        return None
 
+    pguser = os.environ.get("PGUSER", "")
+    pgpassword = os.environ.get("PGPASSWORD", "")
+    pgdatabase = os.environ.get("PGDATABASE", "databricks_postgres")
+    pgport = os.environ.get("PGPORT", "5432")
 
-def _prepare_async_url(url: str) -> tuple[str, dict]:
-    """Prepare URL for psycopg3 async driver.
+    # If no password, generate OAuth token from SP credentials
+    if not pgpassword:
+        logger.info("No PGPASSWORD set, generating OAuth token from SP credentials...")
+        pgpassword = _generate_oauth_token()
+        logger.info(f"OAuth token generated (len={len(pgpassword)})")
 
-    Extracts hostname for DNS resolution workaround and prepares connect_args.
-
-    Args:
-        url: Database URL (may contain sslmode parameter)
-
-    Returns:
-        Tuple of (cleaned_url, connect_args)
-    """
-    global _resolved_hostaddr
-
-    if url.startswith("postgresql://"):
-        url = url.replace("postgresql://", "postgresql+psycopg://", 1)
-    elif url.startswith("postgresql+asyncpg://"):
-        url = url.replace("postgresql+asyncpg://", "postgresql+psycopg://", 1)
-
-    parsed = urlparse(url)
-    connect_args = {}
-
-    # Try to resolve hostname for DNS workaround
-    if parsed.hostname:
-        hostaddr = _resolve_hostname(parsed.hostname)
-        if hostaddr:
-            connect_args["hostaddr"] = hostaddr
-            _resolved_hostaddr = hostaddr
-            logger.info(f"Static URL: resolved {parsed.hostname} -> {hostaddr}")
-
-    return url, connect_args
-
-
-def _get_current_user_email() -> Optional[str]:
-    """Get the current user's email from Databricks SDK."""
-    client = _get_workspace_client()
-    if client:
-        try:
-            me = client.current_user.me()
-            return me.user_name
-        except Exception as e:
-            logger.debug(f"Could not get current user: {e}")
-    return None
-
-
-def _build_lakebase_url(
-    instance_name: str,
-    database_name: str,
-    username: Optional[str] = None,
-    host: Optional[str] = None,
-    port: int = 5432,
-) -> str:
-    """Build Lakebase connection URL (without password - injected via do_connect).
-
-    Args:
-        instance_name: Lakebase instance name
-        database_name: Database name to connect to
-        username: Database username (defaults to current user's email)
-        host: Database host (defaults to instance endpoint)
-        port: Database port (default 5432)
-
-    Returns:
-        PostgreSQL connection URL
-    """
-    # Username defaults to current user's email
-    if not username:
-        username = os.environ.get("LAKEBASE_USERNAME")
-    if not username:
-        username = _get_current_user_email()
-    if not username:
-        username = instance_name  # Fallback
-
-    # URL-encode the username (emails contain @)
-    from urllib.parse import quote
-    encoded_username = quote(username, safe="")
-
-    # Host defaults to the Lakebase instance endpoint
-    if not host:
-        host = os.environ.get("LAKEBASE_HOST")
-    if not host:
-        # Lakebase endpoints follow this pattern
-        host = f"{instance_name}.database.us-east-1.cloud.databricks.com"
-
-    # URL format: postgresql+asyncpg://username@host:port/database
-    # Password is injected via do_connect event
-    return f"postgresql+asyncpg://{encoded_username}@{host}:{port}/{database_name}"
+    return (
+        f"postgresql+psycopg://{quote_plus(pguser)}:{quote_plus(pgpassword)}"
+        f"@{pghost}:{pgport}/{pgdatabase}"
+    )
 
 
 def init_database(database_url: Optional[str] = None) -> AsyncEngine:
     """Initialize async database connection.
 
-    Supports two modes:
-    1. Static URL mode (local dev): Uses LAKEBASE_PG_URL with embedded password
-    2. Dynamic token mode (production): Uses Databricks SDK for OAuth tokens
-
     Args:
-        database_url: Optional database URL. If not provided, reads from environment
+        database_url: Optional database URL override.
 
     Returns:
         SQLAlchemy AsyncEngine instance
@@ -323,99 +133,49 @@ def init_database(database_url: Optional[str] = None) -> AsyncEngine:
     Raises:
         ValueError: If no database configuration is available
     """
-    global _engine, _async_session_maker, _current_token, _lakebase_instance_name
+    global _engine, _async_session_maker
 
-    # Check for static URL first (backward compatibility / local dev)
     url = database_url or get_database_url()
-
-    if url:
-        # Static URL mode - use as-is
-        logger.info("Using static LAKEBASE_PG_URL for database connection")
-        url, connect_args = _prepare_async_url(url)
-    else:
-        # Dynamic token mode - build URL from components
-        endpoint_name = os.environ.get("LAKEBASE_ENDPOINT")
-        instance_name = os.environ.get("LAKEBASE_INSTANCE_NAME")
-        database_name = os.environ.get("LAKEBASE_DATABASE_NAME")
-
-        if not (endpoint_name or instance_name) or not database_name:
-            raise ValueError(
-                "No database configuration found. Set either:\n"
-                "  - LAKEBASE_PG_URL (static URL with password), or\n"
-                "  - LAKEBASE_ENDPOINT and LAKEBASE_DATABASE_NAME (autoscale, dynamic OAuth), or\n"
-                "  - LAKEBASE_INSTANCE_NAME and LAKEBASE_DATABASE_NAME (provisioned, dynamic OAuth)"
-            )
-
-        client = _get_workspace_client()
-        if not client:
-            raise ValueError("Could not create Databricks WorkspaceClient")
-
-        if endpoint_name:
-            # Autoscale mode: look up host from endpoint resource, token via client.postgres
-            _lakebase_instance_name = endpoint_name
-            endpoint = client.postgres.get_endpoint(name=endpoint_name)
-            host = endpoint.status.hosts.host
-            logger.info(f"Using autoscale Lakebase endpoint: {endpoint_name} ({host})")
-        else:
-            # Provisioned mode: look up host from instance, token via client.database
-            _lakebase_instance_name = instance_name
-            instance = client.database.get_database_instance(name=instance_name)
-            host = instance.read_write_dns
-            logger.info(f"Using provisioned Lakebase instance: {instance_name} ({host})")
-
-        # Generate initial token
-        _current_token = _generate_lakebase_token(_lakebase_instance_name)
-        if not _current_token:
-            raise ValueError(
-                f"Failed to generate initial Lakebase token for: {_lakebase_instance_name}"
-            )
-
-        # Get username (prefer explicit env var for Databricks Apps where service principal is used)
-        username = os.environ.get("LAKEBASE_USERNAME") or _get_current_user_email() or _lakebase_instance_name
-
-        # Resolve hostname for DNS workaround (macOS Python DNS issues with long hostnames)
-        global _resolved_hostaddr
-        _resolved_hostaddr = _resolve_hostname(host)
-        if _resolved_hostaddr:
-            logger.info(f"Resolved {host} -> {_resolved_hostaddr}")
-
-        # Build URL using URL.create() with psycopg3 driver (supports hostaddr)
-        url = URL.create(
-            drivername="postgresql+psycopg",  # psycopg3 async driver
-            username=username,
-            password="",  # Will be set by do_connect event handler
-            host=host,  # Used for SNI in TLS handshake
-            port=int(os.environ.get("DATABRICKS_DATABASE_PORT", "5432")),
-            database=database_name,
+    if not url:
+        raise ValueError(
+            "No database configuration found. Configure a Lakebase autoscaling "
+            "database resource so Databricks injects PGHOST/PGUSER/PGDATABASE."
         )
 
-        # Connect args for psycopg3 with DNS workaround
-        connect_args = {
-            "sslmode": "require",
-            "options": f"-c search_path={os.environ.get('LAKEBASE_SCHEMA_NAME', 'builder_app')},public",
-        }
-        # Add hostaddr if DNS resolution was needed (bypasses Python's getaddrinfo)
-        if _resolved_hostaddr:
-            connect_args["hostaddr"] = _resolved_hostaddr
+    logger.info("Using PGHOST (Lakebase autoscaling resource) for database connection")
+
+    # Prepare connect_args with DNS workaround
+    parsed = urlparse(url)
+    connect_args = {}
+
+    if parsed.hostname:
+        hostaddr = _resolve_hostname(parsed.hostname)
+        if hostaddr:
+            connect_args["hostaddr"] = hostaddr
+            logger.info(f"Resolved {parsed.hostname} -> {hostaddr}")
+
+    # Add search_path
+    schema_name = os.environ.get('LAKEBASE_SCHEMA_NAME', 'builder_app')
+    if 'search_path' not in str(url):
+        connect_args["options"] = f"-c search_path={schema_name},public"
+
+    # Dispose old engine if re-initializing (token refresh)
+    if _engine is not None:
+        try:
+            asyncio.get_event_loop().create_task(_engine.dispose())
+        except Exception:
+            pass
 
     _engine = create_async_engine(
         url,
         pool_size=int(os.environ.get("DB_POOL_SIZE", "5")),
         max_overflow=int(os.environ.get("DB_MAX_OVERFLOW", "10")),
-        pool_pre_ping=False,  # Per cookbook
-        pool_recycle=int(os.environ.get("DB_POOL_RECYCLE_INTERVAL", "3600")),
+        pool_pre_ping=True,
+        pool_recycle=int(os.environ.get("DB_POOL_RECYCLE_INTERVAL", "1800")),
         pool_timeout=int(os.environ.get("DB_POOL_TIMEOUT", "10")),
         echo=False,
         connect_args=connect_args,
     )
-
-    # Register do_connect event to inject fresh tokens
-    if _lakebase_instance_name:
-        @event.listens_for(_engine.sync_engine, "do_connect")
-        def provide_token(dialect, conn_rec, cargs, cparams):
-            """Inject current OAuth token into connection parameters."""
-            if _current_token:
-                cparams["password"] = _current_token
 
     _async_session_maker = async_sessionmaker(
         _engine,
@@ -451,15 +211,7 @@ async def get_session() -> AsyncSession:
 
 @asynccontextmanager
 async def session_scope() -> AsyncGenerator[AsyncSession, None]:
-    """Provide a transactional scope around a series of operations.
-
-    Yields:
-        SQLAlchemy AsyncSession instance
-
-    Example:
-        async with session_scope() as session:
-            result = await session.execute(select(Model))
-    """
+    """Provide a transactional scope around a series of operations."""
     session = await get_session()
     try:
         yield session
@@ -482,28 +234,27 @@ async def create_tables():
 
 
 def is_postgres_configured() -> bool:
-    """Check if PostgreSQL is configured (either static URL or dynamic OAuth)."""
-    return bool(
-        os.environ.get("LAKEBASE_PG_URL")
-        or (
-            os.environ.get("LAKEBASE_INSTANCE_NAME")
-            and os.environ.get("LAKEBASE_DATABASE_NAME")
+    """Check if PostgreSQL is configured."""
+    return bool(os.environ.get("PGHOST"))
+
+
+def get_user_facing_database_error(exc: Exception) -> Optional[str]:
+    """Return a user-facing message for known database bootstrap failures."""
+    message = str(exc).lower()
+    missing_schema_markers = (
+        'undefinedtable',
+        'relation "projects" does not exist',
+        'relation "conversations" does not exist',
+        'relation "messages" does not exist',
+        'relation "executions" does not exist',
+        'relation "user_configs" does not exist',
+    )
+    if any(marker in message for marker in missing_schema_markers):
+        return (
+            'Project storage is not ready yet because the database schema has not '
+            'finished initializing. Please retry in a minute or check app logs.'
         )
-    )
-
-
-def is_dynamic_token_mode() -> bool:
-    """Check if using dynamic OAuth token mode (vs static URL)."""
-    return bool(
-        not os.environ.get("LAKEBASE_PG_URL")
-        and os.environ.get("LAKEBASE_INSTANCE_NAME")
-        and os.environ.get("LAKEBASE_DATABASE_NAME")
-    )
-
-
-def get_lakebase_project_id() -> Optional[str]:
-    """Get Lakebase project ID from environment."""
-    return os.environ.get("LAKEBASE_PROJECT_ID") or None
+    return None
 
 
 async def test_database_connection() -> Optional[str]:
@@ -529,6 +280,39 @@ async def test_database_connection() -> Optional[str]:
         return str(e)
 
 
+async def start_token_refresh():
+    """Start background task to refresh OAuth token periodically."""
+    global _token_refresh_task
+
+    if not _is_oauth_mode():
+        return
+
+    async def _refresh_loop():
+        while True:
+            await asyncio.sleep(TOKEN_REFRESH_INTERVAL)
+            try:
+                logger.info("Refreshing Lakebase OAuth token...")
+                init_database()
+                logger.info("Lakebase OAuth token refreshed successfully")
+            except Exception as e:
+                logger.error(f"Token refresh failed: {e}")
+
+    _token_refresh_task = asyncio.create_task(_refresh_loop())
+    logger.info(f"Token refresh scheduled every {TOKEN_REFRESH_INTERVAL}s")
+
+
+async def stop_token_refresh():
+    """Stop the token refresh background task."""
+    global _token_refresh_task
+    if _token_refresh_task:
+        _token_refresh_task.cancel()
+        try:
+            await _token_refresh_task
+        except asyncio.CancelledError:
+            pass
+        _token_refresh_task = None
+
+
 def run_migrations() -> None:
     """Run Alembic migrations programmatically.
 
@@ -547,15 +331,12 @@ def run_migrations() -> None:
     logger.info("Running database migrations...")
 
     try:
-        # Find the app root directory (where alembic.ini lives)
-        # This file is at server/db/database.py, so app root is 2 levels up
         app_root = Path(__file__).parent.parent.parent
 
-        # Check multiple possible locations for alembic.ini
         possible_paths = [
-            app_root / "alembic.ini",  # Standard location
-            Path("/app/python/source_code") / "alembic.ini",  # Databricks Apps
-            Path(".") / "alembic.ini",  # Current directory fallback
+            app_root / "alembic.ini",
+            Path("/app/python/source_code") / "alembic.ini",
+            Path(".") / "alembic.ini",
         ]
 
         alembic_ini_path = None
@@ -575,12 +356,10 @@ def run_migrations() -> None:
 
         alembic_cfg = Config(str(alembic_ini_path))
 
-        # Set script_location to absolute path to avoid working directory issues
         alembic_dir = alembic_ini_path.parent / "alembic"
         if alembic_dir.exists():
             alembic_cfg.set_main_option("script_location", str(alembic_dir))
 
-        # Pass the schema name to Alembic env.py via config
         schema_name = os.environ.get("LAKEBASE_SCHEMA_NAME", "builder_app")
         alembic_cfg.set_main_option("lakebase_schema_name", schema_name)
 

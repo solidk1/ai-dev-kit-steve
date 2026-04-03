@@ -249,7 +249,7 @@ def _load_claude_settings() -> dict:
   return _claude_settings
 
 
-def get_databricks_tools(force_reload: bool = False):
+async def get_databricks_tools(force_reload: bool = False):
   """Get Databricks tools, optionally forcing a reload.
 
   Args:
@@ -262,7 +262,7 @@ def get_databricks_tools(force_reload: bool = False):
   if _databricks_server is None or force_reload:
     if force_reload:
       logger.info('Force reloading Databricks MCP server')
-    _databricks_server, _databricks_tool_names = load_databricks_tools()
+    _databricks_server, _databricks_tool_names = await load_databricks_tools()
   return _databricks_server, _databricks_tool_names
 
 
@@ -604,12 +604,12 @@ async def stream_agent_response(
     # Get Databricks tools and filter based on enabled skills.
     # We must create a filtered MCP server (not just filter allowed_tools)
     # because bypassPermissions mode exposes all tools in registered MCP servers.
-    databricks_server, databricks_tool_names = get_databricks_tools()
+    databricks_server, databricks_tool_names = await get_databricks_tools()
     filtered_tool_names = get_allowed_mcp_tools(databricks_tool_names, enabled_skills=enabled_skills)
 
     if len(filtered_tool_names) < len(databricks_tool_names):
       # Some tools are blocked — create a filtered MCP server with only allowed tools
-      databricks_server, filtered_tool_names = create_filtered_databricks_server(filtered_tool_names)
+      databricks_server, filtered_tool_names = await create_filtered_databricks_server(filtered_tool_names)
       blocked_count = len(databricks_tool_names) - len(filtered_tool_names)
       logger.info(f'Databricks MCP server: {len(filtered_tool_names)} tools allowed, {blocked_count} blocked by disabled skills')
     else:

@@ -9,6 +9,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from ..db import get_user_facing_database_error
 from ..services.storage import ProjectStorage
 from ..services.user import get_current_user
 
@@ -40,17 +41,31 @@ class UpdateClaudeMdRequest(BaseModel):
   claude_md: Optional[str] = None
 
 
+def _raise_user_facing_db_error(exc: Exception) -> None:
+  detail = get_user_facing_database_error(exc)
+  if detail:
+    raise HTTPException(status_code=503, detail=detail) from exc
+
+
 @router.get('/projects')
 async def get_all_projects(request: Request):
   """Get all projects for the current user sorted by created_at (newest first)."""
-  user_email = await get_current_user(request)
-  storage = ProjectStorage(user_email)
+  import sys, traceback
+  try:
+    user_email = await get_current_user(request)
+    print(f"[GET_PROJECTS] user_email={user_email}", file=sys.stderr, flush=True)
+    storage = ProjectStorage(user_email)
 
-  logger.info(f'Fetching all projects for user: {user_email}')
-  projects = await storage.get_all()
-  logger.info(f'Retrieved {len(projects)} projects for user: {user_email}')
+    projects = await storage.get_all()
+    print(f"[GET_PROJECTS] SUCCESS count={len(projects)}", file=sys.stderr, flush=True)
 
-  return [project.to_dict() for project in projects]
+    return [project.to_dict() for project in projects]
+  except Exception as e:
+    _raise_user_facing_db_error(e)
+    print(f"[GET_PROJECTS] ERROR: {e}", file=sys.stderr, flush=True)
+    traceback.print_exc(file=sys.stderr)
+    sys.stderr.flush()
+    raise
 
 
 @router.get('/projects/{project_id}')
@@ -72,15 +87,24 @@ async def get_project(request: Request, project_id: str):
 @router.post('/projects')
 async def create_project(request: Request, body: CreateProjectRequest):
   """Create a new project."""
-  user_email = await get_current_user(request)
-  storage = ProjectStorage(user_email)
+  import sys, traceback
+  try:
+    user_email = await get_current_user(request)
+    print(f"[CREATE_PROJECT] user_email={user_email}, name={body.name}", file=sys.stderr, flush=True)
+    logger.info(f"Creating project '{body.name}' for user: {user_email}")
+    storage = ProjectStorage(user_email)
 
-  logger.info(f"Creating project '{body.name}' for user: {user_email}")
+    project = await storage.create(name=body.name)
+    print(f"[CREATE_PROJECT] SUCCESS project_id={project.id}", file=sys.stderr, flush=True)
+    logger.info(f'Created project {project.id} for user: {user_email}')
 
-  project = await storage.create(name=body.name)
-  logger.info(f'Created project {project.id} for user: {user_email}')
-
-  return project.to_dict()
+    return project.to_dict()
+  except Exception as e:
+    _raise_user_facing_db_error(e)
+    print(f"[CREATE_PROJECT] ERROR: {e}", file=sys.stderr, flush=True)
+    traceback.print_exc(file=sys.stderr)
+    sys.stderr.flush()
+    raise
 
 
 @router.patch('/projects/{project_id}')

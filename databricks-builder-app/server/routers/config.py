@@ -8,7 +8,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from ..db import get_lakebase_project_id, is_postgres_configured, test_database_connection
+from ..db import is_postgres_configured, test_database_connection
 from ..services.system_prompt import get_system_prompt
 from ..services.user import get_current_user, get_workspace_url
 from ..services.user_config import get_user_config, save_user_config, save_user_pat, delete_user_pat, get_user_pat
@@ -53,7 +53,6 @@ async def get_user_info(request: Request):
   user_email = await get_current_user(request)
   workspace_url = get_workspace_url()
   lakebase_configured = is_postgres_configured()
-  lakebase_project_id = get_lakebase_project_id()
 
   # Test database connection if configured
   lakebase_error = None
@@ -64,7 +63,6 @@ async def get_user_info(request: Request):
     'user': user_email,
     'workspace_url': workspace_url,
     'lakebase_configured': lakebase_configured,
-    'lakebase_project_id': lakebase_project_id,
     'lakebase_error': lakebase_error,
     'app_name': _get_app_name(request),
     'app_version': _APP_VERSION,

@@ -243,24 +243,14 @@ The `.env.local` file is gitignored and will never be committed. At a minimum, y
 DATABRICKS_HOST=https://your-workspace.cloud.databricks.com
 DATABRICKS_TOKEN=dapi...
 
-# Required: Database for project persistence (pick ONE option)
-
-# Option A — Autoscale Lakebase (recommended, scales to zero):
+# Required: Database for project persistence (autoscaling only)
 LAKEBASE_ENDPOINT=projects/<project-name>/branches/production/endpoints/primary
 LAKEBASE_DATABASE_NAME=databricks_postgres
-
-# Option B — Provisioned Lakebase (fixed capacity):
-# LAKEBASE_INSTANCE_NAME=your-lakebase-instance
-# LAKEBASE_DATABASE_NAME=databricks_postgres
-
-# Option C — Static connection URL (any type, simplest for local dev):
-# LAKEBASE_PG_URL=postgresql://user:password@host:5432/database?sslmode=require
 ```
 
-The app auto-detects the mode based on which variable is set:
-- `LAKEBASE_ENDPOINT` → autoscale mode (`client.postgres` API, host looked up automatically)
-- `LAKEBASE_INSTANCE_NAME` → provisioned mode (`client.database` API)
-- `LAKEBASE_PG_URL` → static URL mode (no OAuth token refresh)
+`./scripts/start_dev.sh` resolves `LAKEBASE_ENDPOINT` into temporary `PG*`
+variables for local development. In deployed Databricks Apps, add a matching
+Database resource so Databricks injects the same `PG*` connection variables.
 
 See `.env.example` for the full list of available settings including LLM provider, skills configuration, and MLflow tracing. The app loads `.env.local` (not `.env`) at startup.
 
@@ -287,6 +277,9 @@ uvicorn server.app:app --reload --port 8000 --reload-dir server
 # Terminal 2 — Frontend
 cd client && npm run dev
 ```
+
+If you're using `LAKEBASE_ENDPOINT` locally, prefer `./scripts/start_dev.sh`
+because it resolves temporary `PG*` connection variables before launching the backend.
 
 #### 4. Access the App
 
@@ -491,7 +484,7 @@ Before deploying, ensure you have:
 
 1. **Databricks CLI** installed and authenticated
 2. **Node.js 18+** for building the frontend
-3. **A Lakebase instance** in your Databricks workspace (for database persistence)
+3. **A Lakebase autoscaling endpoint** in your Databricks workspace (for database persistence)
 4. Access to the **full repository** (not just this directory) since the app depends on sibling packages
 
 ### Quick Deploy
@@ -503,15 +496,12 @@ databricks auth login --host https://your-workspace.cloud.databricks.com
 # 2. Create the app (first time only)
 databricks apps create my-builder-app
 
-# 3. Add Lakebase as a resource (first time only)
-databricks apps add-resource my-builder-app \
-  --resource-type database \
-  --resource-name lakebase \
-  --database-instance <your-lakebase-instance-name>
-
+# 3. Configure the app in the Databricks Apps UI with a Database resource
+#    that points to the same autoscaling project/branch/database as app.yaml.
+#
 # 4. Configure app.yaml (copy and edit the example)
 cp app.yaml.example app.yaml
-# Edit app.yaml with your Lakebase instance name and other settings
+# Edit app.yaml with your Lakebase endpoint and other settings
 
 # 5. Deploy
 ./scripts/deploy.sh my-builder-app
@@ -547,31 +537,23 @@ databricks apps create my-builder-app
 databricks apps get my-builder-app
 ```
 
-#### 3. Create a Lakebase Instance
+#### 3. Create a Lakebase Autoscaling Endpoint
 
 The app requires a PostgreSQL database (Lakebase) for storing projects, conversations, and messages.
 
-**Autoscale Lakebase** (recommended — scales to zero when idle):
 1. Go to your Databricks workspace → **Catalog** → **Lakebase**
 2. Click **Create** → select **Autoscale**
 3. Note the endpoint resource name (e.g., `projects/my-app/branches/production/endpoints/primary`)
 4. Set in `app.yaml`: `LAKEBASE_ENDPOINT=projects/my-app/branches/production/endpoints/primary`
 
-**Provisioned Lakebase** (fixed capacity):
-1. Go to **Catalog** → **Lakebase** → **Create** → select **Provisioned**
-2. Note the instance name (e.g., `my-lakebase-instance`)
-3. Set in `app.yaml`: `LAKEBASE_INSTANCE_NAME=my-lakebase-instance`
-
 #### 4. Add Lakebase as an App Resource
 
-```bash
-databricks apps add-resource my-builder-app \
-  --resource-type database \
-  --resource-name lakebase \
-  --database-instance <your-lakebase-instance-name>
-```
+In the Databricks Apps **Configure** step, add a **Database** resource and select
+the same autoscaling project/branch/database that matches `LAKEBASE_ENDPOINT`.
 
-This automatically configures the database connection environment variables (`PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`).
+This configures the database connection environment variables
+(`PGHOST`, `PGPORT`, `PGUSER`, `PGDATABASE`) for the deployed app. The app
+generates an OAuth password at runtime when Databricks does not inject one.
 
 #### 5. Configure app.yaml
 
@@ -593,19 +575,11 @@ command:
   - "$DATABRICKS_APP_PORT"
 
 env:
-  # Required: Lakebase database (pick ONE option)
-
-  # Option A — Autoscale Lakebase (recommended):
+  # Required: Lakebase autoscaling endpoint
   - name: LAKEBASE_ENDPOINT
     value: "projects/<project-name>/branches/production/endpoints/primary"
   - name: LAKEBASE_DATABASE_NAME
     value: "databricks_postgres"
-
-  # Option B — Provisioned Lakebase:
-  # - name: LAKEBASE_INSTANCE_NAME
-  #   value: "<your-lakebase-instance-name>"
-  # - name: LAKEBASE_DATABASE_NAME
-  #   value: "databricks_postgres"
 
   # Skills to enable (comma-separated)
   - name: ENABLED_SKILLS
@@ -634,11 +608,13 @@ Run the deploy script from the `databricks-builder-app` directory:
 
 The deploy script will:
 1. Build the React frontend
-2. Package the server code
-3. Bundle sibling packages (`databricks-tools-core`, `databricks-mcp-server`)
-4. Copy skills from `databricks-skills/`
-5. Upload everything to your Databricks workspace
-6. Deploy the app
+2. Validate `LAKEBASE_ENDPOINT` and check that the app already has a Database resource configured
+3. Run migrations and service-principal grants using temporary credentials derived from the autoscaling endpoint
+4. Package the server code
+5. Bundle sibling packages (`databricks-tools-core`, `databricks-mcp-server`)
+6. Copy skills from `databricks-skills/`
+7. Upload everything to your Databricks workspace
+8. Deploy the app
 
 **Skip frontend build** (if already built):
 ```bash
@@ -647,7 +623,7 @@ The deploy script will:
 
 #### 7. Grant Database Permissions
 
-After the first deployment, grant table permissions to the app's service principal:
+The deploy script attempts these grants automatically. If you need to repair them manually:
 
 ```sql
 -- Run this in a Databricks notebook or SQL editor
@@ -708,14 +684,14 @@ Skills are copied from the sibling `databricks-skills/` directory. Ensure:
 
 #### "Permission denied for table projects" or Database Errors
 
-When using a shared Lakebase instance, you need to grant the app's service principal permissions on the tables:
+When using a shared Lakebase autoscaling database, you may need to re-grant the app's service principal permissions on the tables:
 
 ```bash
 # 1. Get your app's service principal ID
 databricks apps get my-builder-app --output json | python3 -c "import sys, json; print(json.load(sys.stdin)['service_principal_id'])"
 ```
 
-2. Connect to your Lakebase instance via psql or a Databricks notebook, then run:
+2. Connect to your Lakebase autoscaling database via psql or a Databricks notebook, then run:
 
 ```sql
 -- Replace <service-principal-id> with the ID from step 1

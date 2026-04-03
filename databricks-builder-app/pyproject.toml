@@ -27,7 +27,7 @@ dependencies = [
   "greenlet>=3.0.0",
   "psycopg2-binary>=2.9.11",  # For alembic migrations (sync)
   # Claude Agent SDK (successor to claude-code-sdk)
-  "claude-agent-sdk>=0.1.19",
+  "claude-agent-sdk>=0.1.55",
   "anthropic>=0.42.0",
   # Databricks MCP tools (databricks-mcp-server installed from sibling dir in dev)
   "mcp>=1.0.0",

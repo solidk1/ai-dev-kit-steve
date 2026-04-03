@@ -27,7 +27,12 @@ async function request<T>(
   const res = await fetch(`${API_BASE}${path}`, init);
   if (!res.ok) {
     const errBody = await res.json().catch(() => ({}));
-    const message = (errBody.detail ?? res.statusText) as string;
+    const detail = errBody.detail;
+    const backendError =
+      typeof detail === 'string' && detail !== 'Internal Server Error'
+        ? detail
+        : errBody.error;
+    const message = (backendError ?? detail ?? res.statusText) as string;
     throw new Error(typeof message === 'string' ? message : JSON.stringify(message));
   }
   if (res.status === 204 || res.headers.get('content-length') === '0') {

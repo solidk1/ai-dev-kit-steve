@@ -53,7 +53,7 @@ import {
 } from '@/lib/api';
 import type { Cluster, Conversation, Execution, Message, Project, UserSettings, Warehouse, TodoItem } from '@/lib/types';
 import type { ImageAttachment } from '@/lib/api';
-import { cn } from '@/lib/utils';
+import { cn, formatToolDisplayName } from '@/lib/utils';
 
 // Local attachment types
 interface AttachedImage {
@@ -311,7 +311,7 @@ function ActivitySection({
     <div className="mb-2 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
       <Wrench className={cn('h-3 w-3 text-[var(--color-accent-primary)]', isStreaming && 'animate-pulse')} />
       <span className="truncate">
-        Using {currentTool.toolName?.replace('mcp__databricks__', '')}...
+        Using {formatToolDisplayName(currentTool.toolName)}...
       </span>
     </div>
   );
@@ -323,7 +323,7 @@ function getCodeFromToolInput(
   toolInput: Record<string, unknown> | undefined,
 ): { code: string; language: string; params?: Record<string, unknown> } | null {
   if (!toolName || !toolInput) return null;
-  const name = toolName.replace('mcp__databricks__', '');
+  const name = formatToolDisplayName(toolName);
   if (name === 'execute_sql') {
     const code = toolInput.sql_query as string;
     if (code) {
@@ -376,7 +376,7 @@ function VerboseItem({ item }: { item: ActivityItem }) {
   }
 
   if (item.type === 'tool_use') {
-    const toolName = item.toolName?.replace('mcp__databricks__', '') ?? '';
+    const toolName = formatToolDisplayName(item.toolName);
     const codeInfo = getCodeFromToolInput(item.toolName, item.toolInput);
     const inputStr = !codeInfo && item.toolInput ? JSON.stringify(item.toolInput, null, 2) : '';
     const metaParams = [
@@ -523,7 +523,7 @@ function VerboseActivityLog({
         <Wrench className={cn('h-3 w-3 text-[var(--color-accent-primary)]', isStreaming && currentTool && 'animate-pulse')} />
         <span className="font-medium text-[var(--color-text-muted)]">
           {isStreaming && currentTool
-            ? `Using ${currentTool.toolName?.replace('mcp__databricks__', '')}…`
+            ? `Using ${formatToolDisplayName(currentTool.toolName)}…`
             : `Agent trace · ${items.length} step${items.length !== 1 ? 's' : ''}`}
         </span>
         <ChevronDown className={cn('h-3 w-3 ml-auto transition-transform', !collapsed && 'rotate-180')} />

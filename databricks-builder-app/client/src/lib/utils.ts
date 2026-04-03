@@ -16,3 +16,17 @@ export function cn(...inputs: ClassValue[]): string {
 export function formatRelativeTime(date: string | Date): string {
   return formatDistanceToNow(new Date(date), { addSuffix: true });
 }
+
+/**
+ * Normalize raw tool identifiers into a user-friendly display name.
+ */
+export function formatToolDisplayName(toolName: string | null | undefined): string {
+  if (!toolName) return '';
+
+  return toolName
+    .replace(/^mcp__databricks__/, '')
+    .replace(/^tool:/, '')
+    .replace(/^tool_/, '')
+    .replace(/_+$/, '')
+    .replace(/@+$/, '');
+}

@@ -13,7 +13,7 @@ NC='\033[0m' # No Color
 BOLD='\033[1m'
 
 # Minimum required Databricks CLI version
-MIN_CLI_VERSION="0.278.0"
+MIN_CLI_VERSION="0.285.0"
 
 # Script directories
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -49,8 +49,8 @@ usage() {
   echo "Prerequisites:"
   echo "  1. Databricks CLI configured (databricks auth login)"
   echo "  2. App created in Databricks (databricks apps create <app-name>)"
-  echo "  3. Lakebase added as app resource (for database)"
-  echo "  4. app.yaml configured with your settings"
+  echo "  3. Lakebase autoscaling database resource configured on the app"
+  echo "  4. app.yaml configured with LAKEBASE_ENDPOINT and your settings"
   echo ""
   echo "Example:"
   echo "  $0 my-builder-app"
@@ -190,14 +190,19 @@ echo ""
 echo -e "${YELLOW}[3/7] Applying database migrations...${NC}"
 cd "$PROJECT_DIR"
 
+# Prefer the project venv Python so databricks-sdk is importable.
+VENV_PYTHON="${PROJECT_DIR}/.venv/bin/python3"
+[ ! -x "$VENV_PYTHON" ] && VENV_PYTHON="python3"
+
+# Honor skip flag before any Lakebase-specific validation.
 if [ "$SKIP_MIGRATIONS" = true ]; then
   echo -e "  ${GREEN}✓${NC} Skipped (--skip-migrations)"
   echo ""
-elif true; then
+else
 
-# If LAKEBASE_* vars are not present in shell, derive from app.yaml.
-if [ -z "${LAKEBASE_PG_URL:-}" ] && [ -z "${LAKEBASE_INSTANCE_NAME:-}" ]; then
-  eval "$(python3 - <<'PY'
+  # If Lakebase vars are not present in the shell, derive them from app.yaml.
+  if [ -z "${LAKEBASE_ENDPOINT:-}" ]; then
+    eval "$(python3 - <<'PY'
 import re
 from pathlib import Path
 
@@ -215,63 +220,110 @@ def get_env(name: str) -> str:
     m = pattern.search(text)
     return m.group(1) if m else ""
 
-instance = get_env("LAKEBASE_INSTANCE_NAME")
+endpoint = get_env("LAKEBASE_ENDPOINT")
 database = get_env("LAKEBASE_DATABASE_NAME")
 schema = get_env("LAKEBASE_SCHEMA_NAME")
 
-if instance:
-    print(f'export LAKEBASE_INSTANCE_NAME="{instance}"')
+if endpoint:
+    print(f'export LAKEBASE_ENDPOINT="{endpoint}"')
 if database:
     print(f'export LAKEBASE_DATABASE_NAME="{database}"')
 if schema:
     print(f'export LAKEBASE_SCHEMA_NAME="{schema}"')
 PY
 )"
-fi
+  fi
 
-# Prefer the project venv Python so databricks-sdk is importable.
-VENV_PYTHON="${PROJECT_DIR}/.venv/bin/python3"
-[ ! -x "$VENV_PYTHON" ] && VENV_PYTHON="python3"
+  if [ -z "${LAKEBASE_ENDPOINT:-}" ]; then
+    echo -e "${RED}Error: LAKEBASE_ENDPOINT is required for autoscaling deployments.${NC}"
+    echo -e "Set it in the shell or add it to app.yaml as:"
+    echo '  - name: LAKEBASE_ENDPOINT'
+    echo '    value: "projects/<project>/branches/production/endpoints/primary"'
+    exit 1
+  fi
 
-# Build a temporary tokenized LAKEBASE_PG_URL when not explicitly provided.
-# This makes local Alembic runs deterministic in CI/dev shells.
-if [ -z "${LAKEBASE_PG_URL:-}" ] && [ -n "${LAKEBASE_INSTANCE_NAME:-}" ]; then
+  _tmp_app_resources=$(mktemp)
+  databricks apps get "$APP_NAME" --output json > "$_tmp_app_resources"
+  APP_DB_RESOURCE_CHECK=$(python3 - <<PY
+import json
+
+with open("$_tmp_app_resources", "r", encoding="utf-8") as f:
+    app = json.load(f)
+
+resources = app.get("resources") or []
+db_resources = [
+    r for r in resources
+    if isinstance(r, dict) and (r.get("database") or r.get("postgres"))
+]
+
+if not db_resources:
+    print("missing")
+    raise SystemExit(0)
+
+db_names = sorted({
+    ((r.get("database") or r.get("postgres")) or {}).get("database_name")
+    or ((r.get("database") or r.get("postgres")) or {}).get("database")
+    or "<unknown>"
+    for r in db_resources
+})
+print(",".join(db_names))
+PY
+  )
+  rm -f "$_tmp_app_resources"
+
+  if [ "$APP_DB_RESOURCE_CHECK" = "missing" ]; then
+    echo -e "${RED}Error: App '${APP_NAME}' has no Lakebase database resource configured.${NC}"
+    echo "Open the app Configure page, add a Database resource, and select the"
+    echo "autoscaling project/branch/database that matches LAKEBASE_ENDPOINT."
+    exit 1
+  fi
+
+  echo -e "  ${GREEN}✓${NC} App database resource configured (${APP_DB_RESOURCE_CHECK})"
+
+  # Derive temporary PG* vars from the autoscaling endpoint for local migrations.
   eval "$($VENV_PYTHON - <<'PY'
 import os
-import urllib.parse
+import shlex
 
 from databricks.sdk import WorkspaceClient
 
-instance_name = os.environ.get("LAKEBASE_INSTANCE_NAME")
+endpoint_name = os.environ.get("LAKEBASE_ENDPOINT")
 database_name = os.environ.get("LAKEBASE_DATABASE_NAME", "databricks_postgres")
 
-if not instance_name:
-    raise SystemExit(0)
+if not endpoint_name:
+    raise SystemExit("LAKEBASE_ENDPOINT is required")
 
 w = WorkspaceClient()
-instance = w.database.get_database_instance(name=instance_name)
-cred = w.database.generate_database_credential(
-    request_id="deploy-alembic",
-    instance_names=[instance_name],
-)
+endpoint = w.postgres.get_endpoint(name=endpoint_name)
+cred = w.postgres.generate_database_credential(endpoint=endpoint_name)
 me = w.current_user.me()
+
+host = ""
+if endpoint.status and endpoint.status.hosts:
+    host = endpoint.status.hosts.host or ""
+if not host:
+    raise SystemExit(f"Lakebase endpoint {endpoint_name} does not have a host yet")
 user = me.user_name or ""
 token = cred.token or ""
 
-encoded_user = urllib.parse.quote(user, safe="")
-encoded_token = urllib.parse.quote(token, safe="")
-url = f"postgresql://{encoded_user}:{encoded_token}@{instance.read_write_dns}:5432/{database_name}?sslmode=require"
+exports = {
+    "PGHOST": host,
+    "PGPORT": "5432",
+    "PGDATABASE": database_name,
+    "PGUSER": user,
+    "PGPASSWORD": token,
+    "PGSSLMODE": "require",
+}
 
-escaped = url.replace("'", "'\"'\"'")
-print(f"export LAKEBASE_PG_URL='{escaped}'")
+for key, value in exports.items():
+    print(f"export {key}={shlex.quote(value)}")
 PY
 )"
-fi
 
 # Ensure local Alembic environment can import databricks_tools_core in dynamic auth mode.
 export PYTHONPATH="${REPO_ROOT}/databricks-tools-core:${PYTHONPATH:-}"
 
-if [ -n "${LAKEBASE_PG_URL:-}" ] || [ -n "${LAKEBASE_INSTANCE_NAME:-}" ]; then
+if [ -n "${PGHOST:-}" ]; then
   if [ -x "$PROJECT_DIR/.venv/bin/alembic" ]; then
     "$PROJECT_DIR/.venv/bin/alembic" -c "$PROJECT_DIR/alembic.ini" upgrade head
   elif command -v alembic &> /dev/null; then
@@ -287,15 +339,19 @@ if [ -n "${LAKEBASE_PG_URL:-}" ] || [ -n "${LAKEBASE_INSTANCE_NAME:-}" ]; then
   # Grant the app's service principal permissions on all tables.
   # Migrations run as the deploying user who owns the tables, but the app
   # connects as its SP at runtime and needs explicit grants.
-  if [ -n "${LAKEBASE_PG_URL:-}" ]; then
-    export APP_NAME_FOR_GRANT="${APP_NAME}"
-    export LAKEBASE_SCHEMA_FOR_GRANT="${LAKEBASE_SCHEMA_NAME:-builder_app}"
-    $VENV_PYTHON - <<'GRANT_PY'
-import os, psycopg
+  export APP_NAME_FOR_GRANT="${APP_NAME}"
+  export LAKEBASE_SCHEMA_FOR_GRANT="${LAKEBASE_SCHEMA_NAME:-builder_app}"
+  $VENV_PYTHON - <<'GRANT_PY'
+import os
+import re
 
-url = os.environ["LAKEBASE_PG_URL"]
+import psycopg
+
 app_name = os.environ["APP_NAME_FOR_GRANT"]
 schema = os.environ.get("LAKEBASE_SCHEMA_FOR_GRANT", "builder_app")
+
+if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", schema):
+    raise SystemExit(f"Invalid schema name for grants: {schema!r}")
 
 try:
     from databricks.sdk import WorkspaceClient
@@ -305,7 +361,15 @@ try:
     if not sp_role:
         raise SystemExit(0)
 
-    conn = psycopg.connect(url, autocommit=True)
+    conn = psycopg.connect(
+        host=os.environ["PGHOST"],
+        port=os.environ.get("PGPORT", "5432"),
+        dbname=os.environ.get("PGDATABASE", "databricks_postgres"),
+        user=os.environ["PGUSER"],
+        password=os.environ["PGPASSWORD"],
+        sslmode=os.environ.get("PGSSLMODE", "require"),
+        autocommit=True,
+    )
     cur = conn.cursor()
     for s in (schema, "public"):
         cur.execute(f'GRANT USAGE ON SCHEMA {s} TO "{sp_role}"')
@@ -319,9 +383,9 @@ try:
 except Exception as e:
     print(f"  \033[1;33mWarning: Could not grant SP permissions: {e}\033[0m")
 GRANT_PY
-  fi
 else
-  echo -e "  ${YELLOW}Warning: No Lakebase configuration found in env or app.yaml; skipping migrations${NC}"
+  echo -e "${RED}Error: Could not derive PGHOST from LAKEBASE_ENDPOINT.${NC}"
+  exit 1
 fi
 echo ""
 

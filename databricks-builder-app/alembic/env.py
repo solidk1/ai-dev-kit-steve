@@ -35,73 +35,27 @@ _resolved_hostaddr = None
 def get_url_and_connect_args():
   """Get database URL and connect_args from environment.
 
-  Supports two modes:
-  1. Static URL: Uses LAKEBASE_PG_URL directly
-  2. Dynamic OAuth: Builds URL from LAKEBASE_INSTANCE_NAME + generates token
-
   Returns tuple of (url, connect_args) for psycopg3 driver.
   """
   global _resolved_hostaddr
   connect_args = {}
 
-  url = os.environ.get('LAKEBASE_PG_URL')
+  from server.db.database import get_database_url
+  url = get_database_url()
 
   if not url:
-    # Try dynamic OAuth mode
-    endpoint_name = os.environ.get('LAKEBASE_ENDPOINT')
-    instance_name = os.environ.get('LAKEBASE_INSTANCE_NAME')
-    database_name = os.environ.get('LAKEBASE_DATABASE_NAME', 'databricks_postgres')
+    raise ValueError(
+      'Database not configured. Configure a Lakebase autoscaling database '
+      'resource so Databricks injects PGHOST/PGUSER/PGDATABASE.'
+    )
 
-    if not endpoint_name and not instance_name:
-      raise ValueError(
-        'Database not configured. Set either:\n'
-        '  - LAKEBASE_PG_URL (static URL with password), or\n'
-        '  - LAKEBASE_ENDPOINT and LAKEBASE_DATABASE_NAME (autoscale, dynamic OAuth), or\n'
-        '  - LAKEBASE_INSTANCE_NAME and LAKEBASE_DATABASE_NAME (provisioned, dynamic OAuth)'
-      )
-
-    # Generate token using Databricks SDK
-    import uuid
-    from databricks.sdk import WorkspaceClient
-    from databricks_tools_core.identity import PRODUCT_NAME, PRODUCT_VERSION
-
-    w = WorkspaceClient(product=PRODUCT_NAME, product_version=PRODUCT_VERSION)
-
-    if endpoint_name:
-      # Autoscale mode: look up host from endpoint, token via client.postgres
-      endpoint = w.postgres.get_endpoint(name=endpoint_name)
-      host = endpoint.status.hosts.host
-      cred = w.postgres.generate_database_credential(endpoint=endpoint_name)
-    else:
-      # Provisioned mode: look up host from instance, token via client.database
-      instance = w.database.get_database_instance(name=instance_name)
-      host = instance.read_write_dns
-      cred = w.database.generate_database_credential(
-        request_id=str(uuid.uuid4()),
-        instance_names=[instance_name],
-      )
-
-    # Get current user email for username
-    me = w.current_user.me()
-    username = me.user_name
-
-    # URL-encode username (emails contain @)
-    from urllib.parse import quote
-    encoded_username = quote(username, safe='')
-
-    # Build URL with token as password
-    url = f'postgresql://{encoded_username}:{cred.token}@{host}:5432/{database_name}?sslmode=require'
-
-    # Resolve hostname for DNS workaround (macOS issue)
-    _resolved_hostaddr = _resolve_hostname(host)
+  # Resolve hostname for DNS workaround
+  from urllib.parse import urlparse
+  parsed = urlparse(url)
+  if parsed.hostname:
+    _resolved_hostaddr = _resolve_hostname(parsed.hostname)
     if _resolved_hostaddr:
       connect_args['hostaddr'] = _resolved_hostaddr
-
-  # Ensure URL uses psycopg3 sync driver for migrations.
-  if url.startswith('postgresql+asyncpg://'):
-    url = url.replace('postgresql+asyncpg://', 'postgresql+psycopg://', 1)
-  elif url.startswith('postgresql://'):
-    url = url.replace('postgresql://', 'postgresql+psycopg://', 1)
 
   return url, connect_args
 
