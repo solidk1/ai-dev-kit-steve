@@ -53,7 +53,14 @@ import {
 } from '@/lib/api';
 import type { Cluster, Conversation, Execution, Message, Project, UserSettings, Warehouse, TodoItem } from '@/lib/types';
 import type { ImageAttachment } from '@/lib/api';
-import { cn, formatToolDisplayName } from '@/lib/utils';
+import {
+  buildTraceHistoryEntries,
+  cn,
+  formatToolDisplayName,
+  mergeTraceHistoryEntries,
+  shouldAutoScroll,
+  type TraceHistoryEntry,
+} from '@/lib/utils';
 
 // Local attachment types
 interface AttachedImage {
@@ -227,32 +234,7 @@ function applyToolResultToItems(
   });
 }
 
-function buildTraceHistoryFromExecutions(executions: Execution[]): ActivityItem[][] {
-  return [...executions]
-    .reverse()
-    .map((e) => buildActivityItemsFromExecutionEvents(e.events ?? []))
-    .filter((items) => items.length > 0);
-}
-
-function tracesEqual(a: ActivityItem[], b: ActivityItem[]): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
-}
-
-function mergeTraceHistories(
-  persisted: ActivityItem[][],
-  cached: ActivityItem[][]
-): ActivityItem[][] {
-  if (persisted.length === 0) return cached;
-  if (cached.length === 0) return persisted;
-
-  const merged = [...persisted];
-  for (const trace of cached) {
-    if (!merged.some((existing) => tracesEqual(existing, trace))) {
-      merged.push(trace);
-    }
-  }
-  return merged;
-}
+type ActivityTraceEntry = TraceHistoryEntry<ActivityItem>;
 
 function improveReadabilityForStreaming(text: string): string {
   if (!text) return text;
@@ -956,11 +938,12 @@ export default function ProjectPage() {
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [verbose, setVerbose] = useState(true);
   const [configPanelOpen, setConfigPanelOpen] = useState(false);
-  const [traceHistoryItems, setTraceHistoryItems] = useState<ActivityItem[][]>([]);
+  const [traceHistoryItems, setTraceHistoryItems] = useState<ActivityTraceEntry[]>([]);
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
 
   // Refs
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -972,7 +955,7 @@ export default function ProjectPage() {
   const streamingConversationIdsRef = useRef<Set<string>>(new Set());
   const executionIdByConversationRef = useRef<Record<string, string>>({});
   const inProgressByConversationRef = useRef<Record<string, InProgressConversationState>>({});
-  const traceHistoryByConversationRef = useRef<Record<string, ActivityItem[][]>>({});
+  const traceHistoryByConversationRef = useRef<Record<string, ActivityTraceEntry[]>>({});
   const activeQueuedMessageIdRef = useRef<string | null>(null);
   const configPanelRef = useRef<HTMLDivElement>(null);
   const reconnectAttemptedRef = useRef<string | null>(null); // Track which conversation we've checked
@@ -983,6 +966,7 @@ export default function ProjectPage() {
   const streamingImagesRef = useRef<string[]>([]);
   // Set to true when user sends a new message while streaming (interrupt-and-resend), suppresses cancel toast.
   const isInterruptingRef = useRef(false);
+  const shouldStickToBottomRef = useRef(true);
   const [streamingConversationIds, setStreamingConversationIds] = useState<string[]>([]);
   // Stores response stats (duration, tokens, cost) keyed by assistant message ID.
   const responseStatsRef = useRef<Record<string, {
@@ -1026,13 +1010,17 @@ export default function ProjectPage() {
     });
   }, []);
 
-  const appendTraceHistoryForConversation = useCallback((conversationId: string, trace: ActivityItem[]) => {
-    if (trace.length === 0) return;
+  const appendTraceHistoryForConversation = useCallback((
+    conversationId: string,
+    executionId: string,
+    trace: ActivityItem[]
+  ) => {
     const existing = traceHistoryByConversationRef.current[conversationId] || [];
-    const last = existing[existing.length - 1];
-    const next = last && tracesEqual(last, trace)
-      ? existing
-      : [...existing, trace].slice(-50);
+    const entry: ActivityTraceEntry = { executionId, items: trace };
+    const existingIdx = existing.findIndex((candidate) => candidate.executionId === executionId);
+    const next = existingIdx >= 0
+      ? existing.map((candidate, idx) => (idx === existingIdx ? entry : candidate))
+      : [...existing, entry].slice(-50);
     traceHistoryByConversationRef.current[conversationId] = next;
     if (currentConversationIdRef.current === conversationId) {
       setTraceHistoryItems(next);
@@ -1153,11 +1141,14 @@ export default function ProjectPage() {
             // Recover per-conversation streaming state after refresh/navigation.
             setConversationStreamingState(conv.id, true, executionState.active.id);
           }
-          const persistedTraceHistory = buildTraceHistoryFromExecutions(executionState.recent);
+          const persistedTraceHistory = buildTraceHistoryEntries(
+            executionState.recent,
+            (events) => buildActivityItemsFromExecutionEvents(events)
+          );
           setCurrentConversation(conv);
           setMessages(conv.messages || []);
           const cachedTraceHistory = traceHistoryByConversationRef.current[conv.id] || [];
-          const runTraceHistory = mergeTraceHistories(persistedTraceHistory, cachedTraceHistory);
+          const runTraceHistory = mergeTraceHistoryEntries(persistedTraceHistory, cachedTraceHistory);
           if (runTraceHistory.length > 0) {
             traceHistoryByConversationRef.current[conv.id] = runTraceHistory;
           }
@@ -1390,7 +1381,7 @@ export default function ProjectPage() {
               setActiveExecutionId(null);
               setActivityItems((current) => {
                 if (currentConversation.id) {
-                  appendTraceHistoryForConversation(currentConversation.id, current);
+                  appendTraceHistoryForConversation(currentConversation.id, active.id, current);
                 }
                 return [];
               });
@@ -1412,10 +1403,27 @@ export default function ProjectPage() {
     checkAndReconnect();
   }, [projectId, currentConversation?.id, isLoading, isStreaming]);
 
-  // Scroll to bottom when messages change
+  const updateShouldStickToBottom = useCallback(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    shouldStickToBottomRef.current = shouldAutoScroll({
+      scrollTop: container.scrollTop,
+      clientHeight: container.clientHeight,
+      scrollHeight: container.scrollHeight,
+    });
+  }, []);
+
+  // Scroll to bottom when messages change, but only if the user is already near the bottom.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (!shouldStickToBottomRef.current) return;
+    messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
   }, [messages, streamingText, activityItems]);
+
+  // Switching conversations should anchor the view at the latest message.
+  useEffect(() => {
+    shouldStickToBottomRef.current = true;
+    messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+  }, [currentConversation?.id]);
 
   // Close config panel on outside click
   useEffect(() => {
@@ -1446,7 +1454,10 @@ export default function ProjectPage() {
         // If local refs were reset, rebuild streaming ownership from backend truth.
         setConversationStreamingState(conversationId, true, executionState.active.id);
       }
-      const persistedTraceHistory = buildTraceHistoryFromExecutions(executionState.recent);
+      const persistedTraceHistory = buildTraceHistoryEntries(
+        executionState.recent,
+        (events) => buildActivityItemsFromExecutionEvents(events)
+      );
       const inProgress = inProgressByConversationRef.current[conversationId];
       const isConvStreaming = streamingConversationIdsRef.current.has(conversationId) || hasActiveExecution;
       const activeExecutionItems = executionState.active
@@ -1472,7 +1483,7 @@ export default function ProjectPage() {
           : []
       );
       const cachedTraceHistory = traceHistoryByConversationRef.current[conversationId] || [];
-      const runTraceHistory = mergeTraceHistories(persistedTraceHistory, cachedTraceHistory);
+      const runTraceHistory = mergeTraceHistoryEntries(persistedTraceHistory, cachedTraceHistory);
       if (runTraceHistory.length > 0) {
         traceHistoryByConversationRef.current[conversationId] = runTraceHistory;
       }
@@ -1535,11 +1546,14 @@ export default function ProjectPage() {
         if (remaining.length > 0) {
           const conv = await fetchConversation(projectId, remaining[0].id);
           const executionState = await fetchExecutions(projectId, remaining[0].id).catch(() => ({ active: null, recent: [] }));
-          const persistedTraceHistory = buildTraceHistoryFromExecutions(executionState.recent);
+          const persistedTraceHistory = buildTraceHistoryEntries(
+            executionState.recent,
+            (events) => buildActivityItemsFromExecutionEvents(events)
+          );
           setCurrentConversation(conv);
           setMessages(conv.messages || []);
           const cachedTraceHistory = traceHistoryByConversationRef.current[conv.id] || [];
-          const runTraceHistory = mergeTraceHistories(persistedTraceHistory, cachedTraceHistory);
+          const runTraceHistory = mergeTraceHistoryEntries(persistedTraceHistory, cachedTraceHistory);
           if (runTraceHistory.length > 0) {
             traceHistoryByConversationRef.current[conv.id] = runTraceHistory;
           }
@@ -1896,7 +1910,9 @@ export default function ProjectPage() {
           if (currentConversationIdRef.current === conversationId) {
             setActivityItems((current) => {
               if (conversationId) {
-                appendTraceHistoryForConversation(conversationId, current);
+                if (executionIdForRun) {
+                  appendTraceHistoryForConversation(conversationId, executionIdForRun, current);
+                }
               }
               return [];
             });
@@ -2105,7 +2121,9 @@ export default function ProjectPage() {
         delete inProgressByConversationRef.current[conversationId];
         if (currentConversationIdRef.current === conversationId) {
           setActivityItems((current) => {
-            appendTraceHistoryForConversation(conversationId!, current);
+            if (executionIdForRun) {
+              appendTraceHistoryForConversation(conversationId!, executionIdForRun, current);
+            }
             return current;
           });
           setStreamingText('');
@@ -2233,7 +2251,7 @@ export default function ProjectPage() {
   }, [projectId, input, attachedImages, attachedFiles, isStreaming, currentConversation?.id, sendPreparedMessage, sendBackgroundMessage]);
 
   // Stop generation - abort client stream AND tell backend to cancel
-  const handleStopGeneration = useCallback(async () => {
+  const handleStopGeneration = useCallback(async (nextQueuedMessage?: QueuedMessage) => {
     abortControllerRef.current?.abort();
 
     // Tell the backend to cancel the agent execution
@@ -2287,11 +2305,19 @@ export default function ProjectPage() {
     activeQueuedMessageIdRef.current = null;
     setActivityItems((current) => {
       if (stoppedConversationId) {
-        appendTraceHistoryForConversation(stoppedConversationId, current);
+        if (activeExecutionId) {
+          appendTraceHistoryForConversation(stoppedConversationId, activeExecutionId, current);
+        }
       }
       return current;
     });
-  }, [activeExecutionId, appendTraceHistoryForConversation, insertAssistantBeforeQueued, setConversationStreamingState]);
+    if (nextQueuedMessage?.queuedMessageId) {
+      toast.info(`Sending queued message (${queuedMessagesRef.current.length} remaining)...`, {
+        style: QUEUE_TOAST_STYLE,
+      });
+      await sendPreparedMessage(nextQueuedMessage, false, nextQueuedMessage.queuedMessageId);
+    }
+  }, [activeExecutionId, appendTraceHistoryForConversation, insertAssistantBeforeQueued, sendPreparedMessage, setConversationStreamingState]);
 
   const handleRemoveQueuedMessage = useCallback((queuedMessageId: string) => {
     queuedMessagesRef.current = queuedMessagesRef.current.filter(
@@ -2359,6 +2385,24 @@ export default function ProjectPage() {
       };
     }
   }, [currentConversation?.id]);
+
+  const handleSubmitQueuedMessage = useCallback(async (queuedMessageId: string) => {
+    const queuedIndex = queuedMessagesRef.current.findIndex(
+      (queued) => queued.queuedMessageId === queuedMessageId
+    );
+    if (queuedIndex < 0) return;
+
+    const [queuedMessage] = queuedMessagesRef.current.splice(queuedIndex, 1);
+    if (!queuedMessage) return;
+
+    if (isStreaming) {
+      isInterruptingRef.current = true;
+      await handleStopGeneration(queuedMessage);
+      return;
+    }
+
+    await sendPreparedMessage(queuedMessage, false, queuedMessageId);
+  }, [handleStopGeneration, isStreaming, sendPreparedMessage]);
 
   // Handle keyboard submit
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -2588,7 +2632,11 @@ export default function ProjectPage() {
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div
+          ref={messagesContainerRef}
+          onScroll={updateShouldStickToBottom}
+          className="flex-1 overflow-y-auto p-6"
+        >
           {messages.length === 0 && !streamingText ? (
             <div className="flex h-full items-center justify-center px-6">
               <div className="text-center max-w-xl w-full">
@@ -2630,8 +2678,9 @@ export default function ProjectPage() {
                 const finishedTraces = verbose ? traceHistoryItems : [];
                 let assistantTraceIdx = 0;
                 const rows = nonQueuedMessages.map((message) => {
-                  const traceForMessage =
-                    message.role === 'assistant' ? finishedTraces[assistantTraceIdx++] : null;
+                  const traceEntryForMessage =
+                    message.role === 'assistant' ? finishedTraces[assistantTraceIdx++] ?? null : null;
+                  const traceForMessage = traceEntryForMessage?.items ?? [];
                   const stats = message.role === 'assistant'
                     ? (message.duration_ms != null || message.input_tokens != null
                       ? message
@@ -2639,7 +2688,7 @@ export default function ProjectPage() {
                     : null;
                   return (
                   <div key={`msg-row-${message.id}`}>
-                    {traceForMessage && (
+                    {traceForMessage.length > 0 && (
                       <div className="mb-4 flex justify-start">
                         <VerboseActivityLog items={traceForMessage} isStreaming={false} />
                       </div>
@@ -2699,9 +2748,13 @@ export default function ProjectPage() {
                   </div>
                 )});
                 if (finishedTraces.length > 0 && nonQueuedMessages.filter((m) => m.role === 'assistant').length === 0) {
+                  const lastTrace = finishedTraces[finishedTraces.length - 1]?.items ?? [];
+                  if (lastTrace.length === 0) {
+                    return rows;
+                  }
                   rows.push(
                     <div key="finished-trace-without-assistant" className="mb-4 flex justify-start">
-                      <VerboseActivityLog items={finishedTraces[finishedTraces.length - 1]} isStreaming={false} />
+                      <VerboseActivityLog items={lastTrace} isStreaming={false} />
                     </div>
                   );
                 }
@@ -2790,6 +2843,13 @@ export default function ProjectPage() {
                             {message.content.replace(/\s+/g, ' ').trim()}
                           </span>
                           <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                            <button
+                              onClick={() => void handleSubmitQueuedMessage(message.id)}
+                              className="p-1 rounded text-[var(--color-text-muted)] hover:text-[var(--color-accent-primary)] hover:bg-[var(--color-bg-secondary)]"
+                              title="Send queued message now"
+                            >
+                              <Send className="h-3.5 w-3.5" />
+                            </button>
                             <button
                               onClick={() => {
                                 setInput(message.content);

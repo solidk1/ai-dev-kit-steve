@@ -14,6 +14,8 @@ from typing import Optional
 
 import anthropic
 
+from ..anthropic_endpoint import build_databricks_anthropic_base_url
+
 logger = logging.getLogger(__name__)
 
 
@@ -49,8 +51,7 @@ def _create_client(
   if databricks_host and databricks_token:
     # Build Databricks model serving endpoint URL
     # Format: https://<workspace>/serving-endpoints/anthropic
-    host = databricks_host.replace('https://', '').replace('http://', '').rstrip('/')
-    base_url = f'https://{host}/serving-endpoints/anthropic'
+    base_url = build_databricks_anthropic_base_url(databricks_host)
 
     return anthropic.AsyncAnthropic(
       api_key=databricks_token,

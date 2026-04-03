@@ -53,11 +53,11 @@ env:
 
   
   # =============================================================================
-  # Claude SDK Configuration (Databricks FMAPI)
+  # Claude SDK Configuration (Databricks AI Gateway)
   # =============================================================================
-  # These configure the Claude Agent SDK to use Databricks model serving endpoints
-  # instead of hitting Anthropic directly. The app dynamically sets ANTHROPIC_BASE_URL
-  # and ANTHROPIC_AUTH_TOKEN from the user's Databricks credentials at runtime.
+  # These configure the Claude Agent SDK to use Databricks Anthropic-compatible
+  # routing instead of hitting Anthropic directly. The app dynamically derives
+  # the AI Gateway base URL from the workspace URL at runtime.
   - name: ANTHROPIC_MODEL
     value: "databricks-claude-opus-4-6"
   - name: ANTHROPIC_MODEL_MINI

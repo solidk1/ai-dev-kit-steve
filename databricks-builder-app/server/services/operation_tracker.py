@@ -33,6 +33,7 @@ class TrackedOperation:
     error: Optional[str] = None
     started_at: float = field(default_factory=time.time)
     completed_at: Optional[float] = None
+    last_polled_at: Optional[float] = None
 
 
 # Thread-safe operation storage
@@ -77,6 +78,29 @@ def get_operation(op_id: str) -> Optional[TrackedOperation]:
     """
     with _lock:
         return _operations.get(op_id)
+
+
+def claim_operation_poll(op_id: str, min_interval_seconds: float = 5.0) -> tuple[Optional[TrackedOperation], float]:
+    """Get an operation and enforce a minimum poll interval.
+
+    Returns:
+        Tuple of (operation, retry_after_seconds). retry_after_seconds is > 0 when
+        the caller should reuse cached state instead of treating this as a fresh poll.
+    """
+    with _lock:
+        _cleanup_expired_operations()
+        op = _operations.get(op_id)
+        if not op:
+            return None, 0.0
+
+        now = time.time()
+        if op.last_polled_at is not None:
+            elapsed = now - op.last_polled_at
+            if elapsed < min_interval_seconds:
+                return op, round(min_interval_seconds - elapsed, 1)
+
+        op.last_polled_at = now
+        return op, 0.0
 
 
 def complete_operation(op_id: str, result: Any = None, error: str = None):

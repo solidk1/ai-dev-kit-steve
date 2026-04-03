@@ -45,8 +45,8 @@ DATABRICKS_TOKEN=dapi...
 # Claude API (Option A: Direct Anthropic)
 ANTHROPIC_API_KEY=sk-ant-...
 
-# Claude API (Option B: Databricks Model Serving)
-# ANTHROPIC_BASE_URL=https://your-workspace.cloud.databricks.com/serving-endpoints/anthropic
+# Claude API (Option B: Databricks AI Gateway)
+# ANTHROPIC_BASE_URL=https://7405612347557713.3.ai-gateway.azuredatabricks.net/anthropic
 # ANTHROPIC_AUTH_TOKEN=dapi...  # Use your Databricks PAT
 # ANTHROPIC_MODEL=databricks-claude-sonnet-4
 ```

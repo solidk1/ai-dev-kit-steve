@@ -287,15 +287,15 @@ because it resolves temporary `PG*` connection variables before launching the ba
 - **Backend API**: <http://localhost:8000>
 - **API Docs**: <http://localhost:8000/docs>
 
-#### 5. (Optional) Configure Claude via Databricks Model Serving
+#### 5. (Optional) Configure Claude via Databricks AI Gateway
 
-If you're routing Claude API calls through Databricks Model Serving instead of directly to Anthropic, create `.claude/settings.json` in the **repository root** (not in the app directory):
+If you're routing Claude API calls through Databricks AI Gateway instead of directly to Anthropic, create `.claude/settings.json` in the **repository root** (not in the app directory):
 
 ```json
 {
     "env": {
         "ANTHROPIC_MODEL": "databricks-claude-sonnet-4-5",
-        "ANTHROPIC_BASE_URL": "https://your-workspace.cloud.databricks.com/serving-endpoints/anthropic",
+        "ANTHROPIC_BASE_URL": "https://7405612347557713.3.ai-gateway.azuredatabricks.net/anthropic",
         "ANTHROPIC_AUTH_TOKEN": "dapi...",
         "ANTHROPIC_DEFAULT_OPUS_MODEL": "databricks-claude-opus-4-5",
         "ANTHROPIC_DEFAULT_SONNET_MODEL": "databricks-claude-sonnet-4-5"
@@ -306,7 +306,7 @@ If you're routing Claude API calls through Databricks Model Serving instead of d
 Notes:
 
 - `ANTHROPIC_AUTH_TOKEN` should be a Databricks PAT, not an Anthropic API key
-- `ANTHROPIC_BASE_URL` should point to your Databricks Model Serving endpoint
+- `ANTHROPIC_BASE_URL` should point to your Databricks AI Gateway Anthropic base URL
 - If this file doesn't exist, the app uses your `ANTHROPIC_API_KEY` from `.env.local`
 
 ### Configuration Details

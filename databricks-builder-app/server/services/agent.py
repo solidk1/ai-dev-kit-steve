@@ -48,6 +48,11 @@ from claude_agent_sdk.types import (
 import databricks_tools_core.auth as _dt_auth
 from databricks_tools_core.auth import set_databricks_auth, clear_databricks_auth
 
+from ..anthropic_endpoint import (
+  build_databricks_anthropic_base_url,
+  get_databricks_llm_provider,
+)
+
 _original_get_workspace_client = _dt_auth.get_workspace_client
 
 
@@ -337,14 +342,15 @@ def _get_mlflow_stop_hook(experiment_name: str | None = None):
             trace_id = trace.info.trace_id
             requested_model = os.environ.get('ANTHROPIC_MODEL', 'databricks-claude-opus-4-5')
             requested_model_mini = os.environ.get('ANTHROPIC_MODEL_MINI', 'databricks-claude-sonnet-4-5')
-            base_url = os.environ.get('ANTHROPIC_BASE_URL', '')
+            base_url = build_databricks_anthropic_base_url(os.environ.get('DATABRICKS_HOST'))
+            provider = get_databricks_llm_provider(base_url)
 
-            # Set tags to clarify the Databricks model endpoint used
+            # Set tags to clarify the Databricks Anthropic endpoint used
             client.set_trace_tag(trace_id, 'databricks.requested_model', requested_model)
             client.set_trace_tag(trace_id, 'databricks.requested_model_mini', requested_model_mini)
             if base_url:
-              client.set_trace_tag(trace_id, 'databricks.model_serving_endpoint', base_url)
-            client.set_trace_tag(trace_id, 'llm.provider', 'databricks-fmapi')
+              client.set_trace_tag(trace_id, 'databricks.anthropic_base_url', base_url)
+            client.set_trace_tag(trace_id, 'llm.provider', provider)
 
             logger.info(f'Added Databricks model tags to trace {trace_id}: {requested_model}')
           except Exception as tag_err:
@@ -653,24 +659,24 @@ async def stream_agent_response(
     effective_fmapi_host = fmapi_host or databricks_host
     effective_fmapi_token = fmapi_token or databricks_token
     if effective_fmapi_host and effective_fmapi_token:
-      host = effective_fmapi_host.replace('https://', '').replace('http://', '').rstrip('/')
-      anthropic_base_url = f'https://{host}/serving-endpoints/anthropic'
+      anthropic_base_url = build_databricks_anthropic_base_url(effective_fmapi_host)
+      provider = get_databricks_llm_provider(anthropic_base_url)
 
       # Route through the local proxy so unsupported fields/headers
       # (context_management, betas, anthropic-beta) are stripped before
-      # hitting Databricks FMAPI.
+      # hitting the Databricks Anthropic-compatible endpoint.
       app_port = os.environ.get('DATABRICKS_APP_PORT', '8000')
       proxy_base_url = f'http://localhost:{app_port}/anthropic-proxy'
       claude_env['ANTHROPIC_BASE_URL'] = proxy_base_url
       claude_env['ANTHROPIC_API_KEY'] = effective_fmapi_token
       claude_env['ANTHROPIC_AUTH_TOKEN'] = effective_fmapi_token
 
-      # Store the real FMAPI URL server-side so the proxy can read it
+      # Store the real upstream URL server-side so the proxy can read it
       # directly (avoids header-parsing issues with ANTHROPIC_CUSTOM_HEADERS).
       from ..routers.anthropic_proxy import set_fmapi_base_url
       set_fmapi_base_url(anthropic_base_url)
 
-      # Enable coding agent mode on FMAPI (matches upstream format)
+      # Enable coding agent mode on Databricks Anthropic routing.
       claude_env['ANTHROPIC_CUSTOM_HEADERS'] = 'x-databricks-use-coding-agent-mode: true'
 
       # Set the model: user setting > env var > default
@@ -682,7 +688,11 @@ async def stream_agent_response(
       # Extra safety: disable experimental betas at the SDK level too
       claude_env['CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS'] = '1'
 
-      logger.info(f'Configured Databricks model serving via proxy: {proxy_base_url} → {anthropic_base_url} with model {effective_model}')
+      logger.info(
+        f'Configured Databricks Anthropic routing via proxy: '
+        f'{proxy_base_url} → {anthropic_base_url} '
+        f'({provider}) with model {effective_model}'
+      )
       logger.info(f'Claude env vars: BASE_URL={claude_env.get("ANTHROPIC_BASE_URL")}, MODEL={claude_env.get("ANTHROPIC_MODEL")}')
 
     # Databricks SDK upstream tracking for subprocess user-agent attribution

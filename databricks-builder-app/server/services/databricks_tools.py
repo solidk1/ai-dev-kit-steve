@@ -24,9 +24,9 @@ from claude_agent_sdk import tool, create_sdk_mcp_server
 
 from ..mcp_registry import get_registered_mcp_tools
 from .operation_tracker import (
+    claim_operation_poll,
     create_operation,
     complete_operation,
-    get_operation,
     list_operations,
 )
 
@@ -221,6 +221,7 @@ async def create_filtered_databricks_server(allowed_tool_names: list[str]):
 
 def _create_check_operation_status_tool():
     """Create the check_operation_status tool for polling async operations."""
+    min_poll_interval_seconds = 5.0
 
     @tool(
         "check_operation_status",
@@ -229,10 +230,6 @@ def _create_check_operation_status_tool():
 Use this to get results of long-running operations that were moved to
 background execution. When a tool takes longer than 30 seconds, it returns
 an operation_id instead of blocking. Use this tool to poll for the result.
-
-Polling guidance:
-    - Poll no more frequently than once every 5 seconds
-    - Continue polling until status is 'completed' or 'failed'
 
 Args:
     operation_id: The operation ID returned by the long-running tool
@@ -243,13 +240,14 @@ Returns:
     - result: The operation result (if completed)
     - error: Error message (if failed)
     - elapsed_seconds: Time since operation started
+    - retry_after_seconds: Present when the last poll was too recent
 """,
         {"operation_id": str},
     )
     async def check_operation_status(args: dict[str, Any]) -> dict[str, Any]:
         operation_id = args.get("operation_id", "")
 
-        op = get_operation(operation_id)
+        op, retry_after_seconds = claim_operation_poll(operation_id, min_poll_interval_seconds=min_poll_interval_seconds)
         if not op:
             return {
                 "content": [
@@ -271,6 +269,9 @@ Returns:
             "tool_name": op.tool_name,
             "elapsed_seconds": round(time.time() - op.started_at, 1),
         }
+
+        if retry_after_seconds > 0:
+            result["retry_after_seconds"] = retry_after_seconds
 
         if op.status == "completed":
             result["result"] = _sanitize_tool_result(op.tool_name, op.result)
