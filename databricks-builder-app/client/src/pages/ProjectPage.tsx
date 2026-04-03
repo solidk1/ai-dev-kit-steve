@@ -217,6 +217,16 @@ function buildToolResultItem(
   };
 }
 
+function renderEscapedJsonControlChars(text: string): string {
+  const trimmed = text.trim();
+  if (!(trimmed.startsWith('{') || trimmed.startsWith('['))) return text;
+  return text
+    .replace(/\\r\\n/g, '\n')
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '\n')
+    .replace(/\\t/g, '\t');
+}
+
 function applyToolResultToItems(
   items: ActivityItem[],
   resultItem: ActivityItem,
@@ -510,7 +520,8 @@ function VerboseItem({ item }: { item: ActivityItem }) {
   }
 
   if (item.type === 'tool_result') {
-    const preview = item.content.slice(0, 120).replace(/\n/g, ' ');
+    const displayContent = renderEscapedJsonControlChars(item.content);
+    const preview = displayContent.slice(0, 120).replace(/\n/g, ' ');
     const hasMore = item.content.length > 120;
     const imagePaths = extractDatabricksImagePaths(item.content);
     return (
@@ -549,7 +560,7 @@ function VerboseItem({ item }: { item: ActivityItem }) {
                 ))}
               </div>
             )}
-            <div className="font-mono whitespace-pre-wrap">{item.content}</div>
+            <div className="font-mono whitespace-pre-wrap">{displayContent}</div>
             {imagePaths.length > 0 && (
               <div className="mt-2 space-y-2">
                 {imagePaths.map((path) => (
