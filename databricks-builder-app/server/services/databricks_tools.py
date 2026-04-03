@@ -37,10 +37,47 @@ logger = logging.getLogger(__name__)
 # Lower threshold ensures tool results return quickly, preventing cumulative timeout
 SAFE_EXECUTION_THRESHOLD = 10
 _ANSI_ESCAPE_RE = re.compile(r'\x1b\[[0-?]*[ -/]*[@-~]')
+_ESCAPED_ANSI_ESCAPE_RE = re.compile(r'\\u001b\[[0-?]*[ -/]*[@-~]')
+_OSC_ESCAPE_RE = re.compile(r'\x1b\].*?(?:\x07|\x1b\\)', re.DOTALL)
+_ESCAPED_OSC_ESCAPE_RE = re.compile(r'\\u001b\].*?(?:\\u0007|\\u001b\\\\)', re.DOTALL)
+_GENERIC_ESCAPE_RE = re.compile(r'\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+_ESCAPED_GENERIC_ESCAPE_RE = re.compile(r'\\u001b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+_CONTROL_CHARS_RE = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]')
+_ESCAPED_CONTROL_CHARS_RE = re.compile(r'\\u00(?:0[0-8bcef]|1[0-9a-f]|7f)', re.IGNORECASE)
+_BACKSPACE_RUN_RE = re.compile(r'.?\x08')
+_ESCAPED_BACKSPACE_RUN_RE = re.compile(r'(?:[^\\]|^)?\\u0008')
 
 
 def _strip_ansi(text: str) -> str:
-    return _ANSI_ESCAPE_RE.sub('', text).replace('\r', '')
+    clean = text.replace('\r', '')
+    previous = None
+    while previous != clean:
+        previous = clean
+        clean = _BACKSPACE_RUN_RE.sub('', clean)
+    previous = None
+    while previous != clean:
+        previous = clean
+        clean = _ESCAPED_BACKSPACE_RUN_RE.sub('', clean)
+    clean = _OSC_ESCAPE_RE.sub('', clean)
+    clean = _ESCAPED_OSC_ESCAPE_RE.sub('', clean)
+    clean = _ESCAPED_ANSI_ESCAPE_RE.sub('', clean)
+    clean = _ANSI_ESCAPE_RE.sub('', clean)
+    clean = _ESCAPED_GENERIC_ESCAPE_RE.sub('', clean)
+    clean = _GENERIC_ESCAPE_RE.sub('', clean)
+    clean = _ESCAPED_CONTROL_CHARS_RE.sub('', clean)
+    clean = _CONTROL_CHARS_RE.sub('', clean)
+    return clean
+
+
+def _sanitize_log_value(value: Any) -> Any:
+    """Recursively strip ANSI escape sequences while preserving JSON structure."""
+    if isinstance(value, str):
+        return _strip_ansi(value)
+    if isinstance(value, dict):
+        return {key: _sanitize_log_value(val) for key, val in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_log_value(item) for item in value]
+    return value
 
 
 def _coerce_result_dict(result: Any) -> Any:
@@ -84,19 +121,12 @@ def _summarize_error_text(raw_error: str) -> str:
 
 
 def _sanitize_compute_like_result(result: Any) -> Any:
-    """Sanitize compute tool results so errors are compact and token-efficient."""
+    """Sanitize compute tool results while preserving the original JSON shape."""
     result = _coerce_result_dict(result)
     if not isinstance(result, dict):
-        return result
+        return _sanitize_log_value(result)
 
-    sanitized = dict(result)
-
-    # Direct execute_databricks_command / run_python_file_on_databricks output.
-    if sanitized.get('success') is False and isinstance(sanitized.get('error'), str):
-        raw = sanitized['error']
-        sanitized['error'] = _summarize_error_text(raw)
-        sanitized['error_summary'] = sanitized['error']
-        sanitized['error_truncated'] = len(raw) > len(sanitized['error'])
+    sanitized = _sanitize_log_value(dict(result))
 
     # check_operation_status wraps original tool output under result.
     nested = sanitized.get('result')
@@ -163,46 +193,9 @@ def _format_direct_compute_result(result: dict[str, Any]) -> str:
 
 
 def _format_compute_like_result(tool_name: str, result: Any) -> str:
-    """Format compute results for model-visible text and UI display."""
+    """Serialize compute results as sanitized JSON for model-visible text and UI display."""
     sanitized = _sanitize_tool_result(tool_name, result)
-    if not isinstance(sanitized, dict):
-        return str(sanitized)
-
-    if tool_name == 'check_operation_status':
-        status = sanitized.get('status')
-        lines: list[str] = []
-        if isinstance(status, str) and status:
-            lines.append(f'Operation status: {status}')
-        operation_id = sanitized.get('operation_id')
-        if isinstance(operation_id, str) and operation_id:
-            lines.append(f'Operation ID: {operation_id}')
-        nested_tool = sanitized.get('tool_name')
-        if isinstance(nested_tool, str) and nested_tool:
-            lines.append(f'Tool: {nested_tool}')
-        cluster_name = sanitized.get('cluster_name')
-        cluster_id = sanitized.get('cluster_id')
-        if isinstance(cluster_name, str) and cluster_name:
-            lines.append(f'Cluster: {cluster_name}')
-        elif isinstance(cluster_id, str) and cluster_id:
-            lines.append(f'Cluster ID: {cluster_id}')
-        elapsed = sanitized.get('elapsed_seconds')
-        if elapsed is not None:
-            lines.append(f'Elapsed: {elapsed}s')
-
-        if status == 'completed' and 'result' in sanitized:
-            nested_result = _coerce_result_dict(sanitized['result'])
-            lines.append('')
-            if isinstance(nested_result, dict):
-                lines.append(_format_direct_compute_result(nested_result))
-            else:
-                lines.append(str(nested_result))
-        elif status == 'failed':
-            error = sanitized.get('error')
-            if isinstance(error, str) and error.strip():
-                lines.append(f'Error: {error.strip()}')
-        return '\n'.join(lines).strip() or json.dumps(sanitized, default=str)
-
-    return _format_direct_compute_result(sanitized)
+    return json.dumps(sanitized, default=str, ensure_ascii=False)
 
 
 def _infer_async_command_execution_metadata(

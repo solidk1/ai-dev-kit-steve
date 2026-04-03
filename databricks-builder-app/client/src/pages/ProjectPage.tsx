@@ -416,7 +416,7 @@ function VerboseItem({ item }: { item: ActivityItem }) {
   ].filter((entry): entry is [string, string] => Boolean(entry));
 
   if (item.type === 'thinking') {
-    const readableThinking = improveReadabilityForStreaming(item.content);
+    const rawThinking = item.content;
     return (
       <div className="border-b border-[var(--color-border)]/20 last:border-0">
         <button
@@ -426,14 +426,14 @@ function VerboseItem({ item }: { item: ActivityItem }) {
           <Brain className="h-3 w-3 flex-shrink-0 text-red-400" />
           <span className="text-[11px] text-[var(--color-text-muted)] flex-1 truncate">
             {expanded
-              ? `Thinking · ${readableThinking.length} chars`
-              : readableThinking.slice(0, 220).replace(/\n/g, ' ')}
+              ? `Thinking · ${rawThinking.length} chars`
+              : rawThinking.slice(0, 220).replace(/\n/g, ' ')}
           </span>
           <ChevronDown className={cn('h-3 w-3 flex-shrink-0 text-[var(--color-text-muted)] transition-transform', expanded && 'rotate-180')} />
         </button>
         {expanded && (
           <div className="px-3 pb-2 ml-5 font-mono text-[10px] text-[var(--color-text-muted)] whitespace-pre-wrap leading-relaxed max-h-96 overflow-y-auto">
-            {readableThinking}
+            {rawThinking}
           </div>
         )}
       </div>
