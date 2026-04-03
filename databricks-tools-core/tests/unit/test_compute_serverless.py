@@ -6,6 +6,11 @@ from databricks_tools_core.compute import (
     run_file_on_serverless,
 )
 from databricks_tools_core.compute.execution import ClusterSelectionResult, ExecutionResult
+from databricks_tools_core.compute.serverless import (
+    _CAPTURE_PAYLOAD_PREFIX,
+    _get_run_output,
+    _render_notebook_source,
+)
 
 
 def test_compute_package_exports_serverless_helpers():
@@ -89,6 +94,34 @@ class TestRunCodeOnServerlessResultShape:
         assert result.run_id == 123
         assert result.run_url == 'https://example/run/123'
         assert result.state == 'SUCCESS'
+
+    @mock.patch('databricks_tools_core.compute.serverless.get_workspace_client')
+    def test_get_run_output_extracts_captured_stdout(self, mock_get_client):
+        mock_client = mock.Mock()
+        mock_get_client.return_value = mock_client
+        payload = {
+            'stdout': 'hello from stdout\n',
+            'stderr': '',
+            'error': None,
+        }
+        mock_client.jobs.get_run_output.return_value = mock.Mock(
+            notebook_output=mock.Mock(result=f'{_CAPTURE_PAYLOAD_PREFIX}{__import__("json").dumps(payload)}'),
+            logs=None,
+            error=None,
+            error_trace=None,
+        )
+
+        output = _get_run_output(123)
+
+        assert output['output'] == 'hello from stdout\n'
+        assert output['error'] is None
+
+    def test_render_notebook_source_wraps_python_for_stdout_capture(self):
+        rendered = _render_notebook_source('print("hi")', 'python')
+
+        assert 'redirect_stdout' in rendered
+        assert _CAPTURE_PAYLOAD_PREFIX in rendered
+        assert 'dbutils.notebook.exit' in rendered
 
 
 class TestExecuteDatabricksCommandRouting:

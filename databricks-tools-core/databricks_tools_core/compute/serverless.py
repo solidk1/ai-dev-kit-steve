@@ -2,6 +2,7 @@
 
 import base64
 import datetime
+import json
 import logging
 import time
 import uuid
@@ -16,6 +17,7 @@ from databricks.sdk.service.workspace import ImportFormat, Language
 from ..auth import get_current_username, get_workspace_client
 
 logger = logging.getLogger(__name__)
+_CAPTURE_PAYLOAD_PREFIX = '__AI_DEV_KIT_CAPTURE__'
 
 _LANGUAGE_MAP = {
     'python': Language.PYTHON,
@@ -79,9 +81,37 @@ def _get_temp_notebook_path(run_label: str) -> str:
 def _render_notebook_source(code: str, language: str) -> str:
     if language == 'sql':
         header = '-- Databricks notebook source'
-    else:
-        header = '# Databricks notebook source'
-    return f'{header}\n{code}'
+        return f'{header}\n{code}'
+
+    header = '# Databricks notebook source'
+    if 'dbutils.notebook.exit' in code:
+        return f'{header}\n{code}'
+
+    wrapped_code = f"""
+import contextlib
+import io
+import json
+import traceback
+
+_ai_dev_kit_stdout = io.StringIO()
+_ai_dev_kit_stderr = io.StringIO()
+_ai_dev_kit_error = None
+
+try:
+    with contextlib.redirect_stdout(_ai_dev_kit_stdout), contextlib.redirect_stderr(_ai_dev_kit_stderr):
+        exec(compile({code!r}, "<ai_dev_kit_serverless>", "exec"), {{"__name__": "__main__"}})
+except Exception:
+    _ai_dev_kit_error = traceback.format_exc()
+
+dbutils.notebook.exit(
+    {_CAPTURE_PAYLOAD_PREFIX!r} + json.dumps({{
+        "stdout": _ai_dev_kit_stdout.getvalue(),
+        "stderr": _ai_dev_kit_stderr.getvalue(),
+        "error": _ai_dev_kit_error,
+    }})
+)
+""".strip()
+    return f'{header}\n{wrapped_code}'
 
 
 def _upload_temp_notebook(code: str, language: str, workspace_path: str) -> None:
@@ -110,7 +140,22 @@ def _get_run_output(task_run_id: int) -> Dict[str, Optional[str]]:
     output = None
     error = None
     if getattr(run_output, 'notebook_output', None) and run_output.notebook_output.result:
-        output = run_output.notebook_output.result
+        result = run_output.notebook_output.result
+        if isinstance(result, str) and result.startswith(_CAPTURE_PAYLOAD_PREFIX):
+            payload_text = result[len(_CAPTURE_PAYLOAD_PREFIX):]
+            try:
+                payload = json.loads(payload_text)
+                stdout = payload.get('stdout')
+                stderr = payload.get('stderr')
+                payload_error = payload.get('error')
+                parts = [part for part in [stdout, stderr] if isinstance(part, str) and part.strip()]
+                output = '\n'.join(parts) if parts else None
+                if isinstance(payload_error, str) and payload_error.strip():
+                    error = payload_error
+            except Exception:
+                output = result
+        else:
+            output = result
     if getattr(run_output, 'logs', None):
         output = f'{output}\n\n--- Logs ---\n{run_output.logs}' if output else run_output.logs
     if getattr(run_output, 'error', None):

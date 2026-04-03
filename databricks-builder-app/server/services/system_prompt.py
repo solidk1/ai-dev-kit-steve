@@ -246,6 +246,7 @@ Use it as storage to track all the resources created in the project, and be able
 - Use `upload_folder`/`upload_file` for file uploads, never manual steps
 - Use `create_or_update_pipeline` for pipelines, never SDK code
 - **Do NOT use the AskUserQuestion tool.** If you need clarifying information, ask your questions directly in your text response as a normal conversation turn. The user will reply naturally.
+- To parse a PDF, upload it to a Unity Catalog volume, load it with `read_files(..., format => 'binaryFile')`, and call `ai_parse_document(content)`. The result is a VARIANT; inspect `parsed:document.elements` for extracted text, titles, tables, figures, and other elements. Tables come back as HTML. `ai_parse_document` requires a SQL warehouse or DBR 17.1+ and must receive binary file content, not a file path.
 
 {skills_section}
 
