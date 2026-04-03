@@ -1,6 +1,7 @@
 import { type ClassValue, clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { formatDistanceToNow } from 'date-fns';
+import type { TodoItem } from './types';
 
 /**
  * Merge Tailwind CSS classes with clsx and tailwind-merge.
@@ -29,6 +30,74 @@ export function formatToolDisplayName(toolName: string | null | undefined): stri
     .replace(/^tool_/, '')
     .replace(/_+$/, '')
     .replace(/@+$/, '');
+}
+
+/**
+ * Extract structured todo items from a TodoWrite tool payload.
+ */
+export function getTodoItemsFromToolInput(
+  toolName: string | null | undefined,
+  toolInput: Record<string, unknown> | undefined,
+): TodoItem[] | null {
+  if (formatToolDisplayName(toolName) !== 'TodoWrite' || !toolInput) return null;
+  const rawTodos = toolInput.todos;
+  if (!Array.isArray(rawTodos)) return null;
+
+  const todos = rawTodos.flatMap((rawTodo) => {
+    if (!rawTodo || typeof rawTodo !== 'object') return [];
+    const todo = rawTodo as Record<string, unknown>;
+    const content = typeof todo.content === 'string' ? todo.content.trim() : '';
+    const status = todo.status;
+    if (
+      !content ||
+      (status !== 'pending' && status !== 'in_progress' && status !== 'completed')
+    ) {
+      return [];
+    }
+    return [{
+      id: typeof todo.id === 'string' ? todo.id : undefined,
+      content,
+      status,
+    }];
+  });
+
+  return todos.length > 0 ? todos : null;
+}
+
+/**
+ * Extract the latest persisted todo list from execution events.
+ */
+export function getLatestTodosFromExecutionEvents(events: unknown[] | null | undefined): TodoItem[] {
+  if (!Array.isArray(events)) return [];
+
+  for (let idx = events.length - 1; idx >= 0; idx -= 1) {
+    const rawEvent = events[idx];
+    if (!rawEvent || typeof rawEvent !== 'object') continue;
+    const event = rawEvent as Record<string, unknown>;
+    if (event.type !== 'todos' || !Array.isArray(event.todos)) continue;
+
+    const todos = event.todos.flatMap((rawTodo) => {
+      if (!rawTodo || typeof rawTodo !== 'object') return [];
+      const todo = rawTodo as Record<string, unknown>;
+      const content = typeof todo.content === 'string' ? todo.content.trim() : '';
+      const status = todo.status;
+      if (
+        !content ||
+        (status !== 'pending' && status !== 'in_progress' && status !== 'completed')
+      ) {
+        return [];
+      }
+      return [{
+        id: typeof todo.id === 'string' ? todo.id : undefined,
+        content,
+        status,
+      }];
+    });
+
+    if (todos.length > 0) return todos;
+  }
+
+  return [];
 }
 
 /**
@@ -85,4 +154,23 @@ export function mergeTraceHistoryEntries<T>(
     }
   }
   return merged;
+}
+
+export function alignTraceHistoryToMessages<T>(
+  messages: Array<{ id: string; role: 'user' | 'assistant' }>,
+  traces: TraceHistoryEntry<T>[]
+): Record<string, TraceHistoryEntry<T> | null> {
+  const assistantMessages = messages.filter((message) => message.role === 'assistant');
+  const assistantOffset = Math.max(assistantMessages.length - traces.length, 0);
+  const traceOffset = Math.max(traces.length - assistantMessages.length, 0);
+  const aligned: Record<string, TraceHistoryEntry<T> | null> = {};
+
+  assistantMessages.forEach((message, index) => {
+    const traceIndex = index - assistantOffset + traceOffset;
+    aligned[message.id] = traceIndex >= 0 && traceIndex < traces.length
+      ? traces[traceIndex]
+      : null;
+  });
+
+  return aligned;
 }

@@ -43,6 +43,19 @@ def _strip_ansi(text: str) -> str:
     return _ANSI_ESCAPE_RE.sub('', text).replace('\r', '')
 
 
+def _coerce_result_dict(result: Any) -> Any:
+    """Convert SDK result objects to dicts when possible."""
+    if isinstance(result, dict):
+        return result
+    to_dict = getattr(result, 'to_dict', None)
+    if callable(to_dict):
+        try:
+            return to_dict()
+        except Exception:
+            logger.debug('Failed to coerce result via to_dict()', exc_info=True)
+    return result
+
+
 def _summarize_error_text(raw_error: str) -> str:
     """Collapse verbose tracebacks into a short human-readable cause."""
     clean = _strip_ansi(raw_error).strip()
@@ -72,6 +85,7 @@ def _summarize_error_text(raw_error: str) -> str:
 
 def _sanitize_compute_like_result(result: Any) -> Any:
     """Sanitize compute tool results so errors are compact and token-efficient."""
+    result = _coerce_result_dict(result)
     if not isinstance(result, dict):
         return result
 
@@ -97,6 +111,149 @@ def _sanitize_tool_result(tool_name: str, result: Any) -> Any:
     if tool_name in {'execute_databricks_command', 'run_python_file_on_databricks', 'check_operation_status'}:
         return _sanitize_compute_like_result(result)
     return result
+
+
+def _format_direct_compute_result(result: dict[str, Any]) -> str:
+    """Render execute_databricks_command-like output in a compact readable form."""
+    lines: list[str] = []
+    success = result.get('success')
+    execution_mode = result.get('execution_mode')
+    cluster_name = result.get('cluster_name')
+    cluster_id = result.get('cluster_id')
+    context_id = result.get('context_id')
+    context_destroyed = result.get('context_destroyed')
+    run_url = result.get('run_url')
+    output = result.get('output')
+    error = result.get('error')
+
+    if success is True:
+        lines.append('Command executed successfully.')
+    elif success is False:
+        lines.append('Command failed.')
+
+    if execution_mode == 'serverless':
+        lines.append('Execution mode: serverless')
+    elif execution_mode == 'cluster':
+        lines.append('Execution mode: cluster')
+
+    if isinstance(cluster_name, str) and cluster_name:
+        lines.append(f'Cluster: {cluster_name}')
+    elif isinstance(cluster_id, str) and cluster_id:
+        lines.append(f'Cluster ID: {cluster_id}')
+
+    if isinstance(context_id, str) and context_id and context_destroyed is False:
+        lines.append(f'Context: reusable ({context_id})')
+
+    if isinstance(run_url, str) and run_url:
+        lines.append(f'Run URL: {run_url}')
+
+    if isinstance(error, str) and error.strip():
+        lines.append(f'Error: {error.strip()}')
+
+    if isinstance(output, str) and output.strip():
+        lines.append('')
+        lines.append('Output:')
+        lines.append(output.strip())
+    elif success is True and not error:
+        message = result.get('message')
+        if isinstance(message, str) and message.strip():
+            lines.append(message.strip())
+
+    return '\n'.join(lines).strip() or json.dumps(result, default=str)
+
+
+def _format_compute_like_result(tool_name: str, result: Any) -> str:
+    """Format compute results for model-visible text and UI display."""
+    sanitized = _sanitize_tool_result(tool_name, result)
+    if not isinstance(sanitized, dict):
+        return str(sanitized)
+
+    if tool_name == 'check_operation_status':
+        status = sanitized.get('status')
+        lines: list[str] = []
+        if isinstance(status, str) and status:
+            lines.append(f'Operation status: {status}')
+        operation_id = sanitized.get('operation_id')
+        if isinstance(operation_id, str) and operation_id:
+            lines.append(f'Operation ID: {operation_id}')
+        nested_tool = sanitized.get('tool_name')
+        if isinstance(nested_tool, str) and nested_tool:
+            lines.append(f'Tool: {nested_tool}')
+        cluster_name = sanitized.get('cluster_name')
+        cluster_id = sanitized.get('cluster_id')
+        if isinstance(cluster_name, str) and cluster_name:
+            lines.append(f'Cluster: {cluster_name}')
+        elif isinstance(cluster_id, str) and cluster_id:
+            lines.append(f'Cluster ID: {cluster_id}')
+        elapsed = sanitized.get('elapsed_seconds')
+        if elapsed is not None:
+            lines.append(f'Elapsed: {elapsed}s')
+
+        if status == 'completed' and 'result' in sanitized:
+            nested_result = _coerce_result_dict(sanitized['result'])
+            lines.append('')
+            if isinstance(nested_result, dict):
+                lines.append(_format_direct_compute_result(nested_result))
+            else:
+                lines.append(str(nested_result))
+        elif status == 'failed':
+            error = sanitized.get('error')
+            if isinstance(error, str) and error.strip():
+                lines.append(f'Error: {error.strip()}')
+        return '\n'.join(lines).strip() or json.dumps(sanitized, default=str)
+
+    return _format_direct_compute_result(sanitized)
+
+
+def _infer_async_command_execution_metadata(
+    tool_name: str,
+    parsed_args: dict[str, Any],
+) -> dict[str, str]:
+    """Best-effort command execution metadata for async handoff responses."""
+    if tool_name not in {'execute_databricks_command', 'run_python_file_on_databricks'}:
+        return {}
+
+    cluster_id = parsed_args.get('cluster_id')
+    context_id = parsed_args.get('context_id')
+    cluster_name = parsed_args.get('cluster_name')
+
+    if cluster_id in {'', 'serverless', '__serverless__'}:
+        cluster_id = None
+
+    if isinstance(cluster_id, str) and cluster_id and not cluster_name:
+        try:
+            from databricks_tools_core.auth import get_workspace_client
+
+            cluster = get_workspace_client().clusters.get(cluster_id=cluster_id)
+            cluster_name = getattr(cluster, 'cluster_name', None)
+        except Exception:
+            logger.debug('Failed to resolve explicit cluster name for async handoff', exc_info=True)
+
+    if not cluster_id:
+        try:
+            from databricks_tools_core.compute.execution import (
+                SERVERLESS_CLUSTER_NAME,
+                _select_best_cluster,
+            )
+
+            selection = _select_best_cluster()
+            if selection.cluster_id:
+                cluster_id = selection.cluster_id
+                cluster_name = selection.cluster_name or cluster_name
+                parsed_args['cluster_id'] = selection.cluster_id
+            elif tool_name in {'execute_databricks_command', 'run_python_file_on_databricks'}:
+                cluster_name = SERVERLESS_CLUSTER_NAME
+        except Exception:
+            logger.debug('Failed to infer auto-selected cluster for async handoff', exc_info=True)
+
+    metadata: dict[str, str] = {}
+    if isinstance(cluster_id, str) and cluster_id:
+        metadata['cluster_id'] = cluster_id
+    if isinstance(cluster_name, str) and cluster_name:
+        metadata['cluster_name'] = cluster_name
+    if isinstance(context_id, str) and context_id:
+        metadata['context_id'] = context_id
+    return metadata
 
 
 async def load_databricks_tools():
@@ -167,9 +324,13 @@ async def _get_all_sdk_tools():
     # Add operation tracking tools (for async handoff pattern)
     sdk_tools.append(_create_check_operation_status_tool())
     tool_names.append('mcp__databricks__check_operation_status')
+    sdk_tools.append(_create_check_operation_status_tool('tool_check_operation_status'))
+    tool_names.append('mcp__databricks__tool_check_operation_status')
 
     sdk_tools.append(_create_list_operations_tool())
     tool_names.append('mcp__databricks__list_operations')
+    sdk_tools.append(_create_list_operations_tool('tool_list_operations'))
+    tool_names.append('mcp__databricks__tool_list_operations')
 
     _all_sdk_tools = sdk_tools
     _all_tool_names = tool_names
@@ -219,12 +380,12 @@ async def create_filtered_databricks_server(allowed_tool_names: list[str]):
     return result
 
 
-def _create_check_operation_status_tool():
+def _create_check_operation_status_tool(registered_name: str = "check_operation_status"):
     """Create the check_operation_status tool for polling async operations."""
     min_poll_interval_seconds = 5.0
 
     @tool(
-        "check_operation_status",
+        registered_name,
         """Check status of an async operation.
 
 Use this to get results of long-running operations that were moved to
@@ -247,7 +408,16 @@ Returns:
     async def check_operation_status(args: dict[str, Any]) -> dict[str, Any]:
         operation_id = args.get("operation_id", "")
 
-        op, retry_after_seconds = claim_operation_poll(operation_id, min_poll_interval_seconds=min_poll_interval_seconds)
+        op, retry_after_seconds = claim_operation_poll(
+            operation_id,
+            min_interval_seconds=min_poll_interval_seconds,
+        )
+        if retry_after_seconds > 0:
+            await asyncio.sleep(retry_after_seconds)
+            op, retry_after_seconds = claim_operation_poll(
+                operation_id,
+                min_interval_seconds=min_poll_interval_seconds,
+            )
         if not op:
             return {
                 "content": [
@@ -270,24 +440,33 @@ Returns:
             "elapsed_seconds": round(time.time() - op.started_at, 1),
         }
 
-        if retry_after_seconds > 0:
-            result["retry_after_seconds"] = retry_after_seconds
+        for key in ("cluster_id", "cluster_name", "context_id"):
+            value = op.args.get(key)
+            if isinstance(value, str) and value:
+                result[key] = value
 
         if op.status == "completed":
             result["result"] = _sanitize_tool_result(op.tool_name, op.result)
         elif op.status == "failed":
             result["error"] = op.error
 
-        return {"content": [{"type": "text", "text": json.dumps(result, default=str)}]}
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": _format_compute_like_result("check_operation_status", result),
+                }
+            ]
+        }
 
     return check_operation_status
 
 
-def _create_list_operations_tool():
+def _create_list_operations_tool(registered_name: str = "list_operations"):
     """Create the list_operations tool for viewing all tracked operations."""
 
     @tool(
-        "list_operations",
+        registered_name,
         """List all tracked async operations.
 
 Use this to see all operations that are running or recently completed.
@@ -376,6 +555,8 @@ def _make_wrapper(name: str, description: str, schema: dict, fn):
             # FastMCP tools are sync - run in thread pool with heartbeat
             print(f'[MCP TOOL] Running {name} in thread pool with heartbeat...', file=sys.stderr, flush=True)
 
+            command_execution = _infer_async_command_execution_metadata(name, parsed_args)
+
             # Copy context to propagate Databricks auth contextvars to the thread
             ctx = copy_context()
 
@@ -412,7 +593,9 @@ def _make_wrapper(name: str, description: str, schema: dict, fn):
 
                     # Check if we should switch to async mode to avoid connection timeout
                     if elapsed > SAFE_EXECUTION_THRESHOLD:
-                        op_id = create_operation(name, parsed_args)
+                        tracking_args = dict(parsed_args)
+                        tracking_args.update(command_execution)
+                        op_id = create_operation(name, tracking_args)
                         print(
                             f'[MCP ASYNC] {name} exceeded {SAFE_EXECUTION_THRESHOLD}s, '
                             f'switching to async mode (operation_id: {op_id})',
@@ -471,6 +654,7 @@ def _make_wrapper(name: str, description: str, schema: dict, fn):
                                         'status': 'async',
                                         'operation_id': op_id,
                                         'tool_name': name,
+                                        **command_execution,
                                         'message': (
                                             f'Operation is taking longer than {SAFE_EXECUTION_THRESHOLD}s '
                                             f'and has been moved to background execution. '
@@ -488,7 +672,10 @@ def _make_wrapper(name: str, description: str, schema: dict, fn):
 
             elapsed = time.time() - start_time
             result = _sanitize_tool_result(name, result)
-            result_str = json.dumps(result, default=str)
+            if name in {'execute_databricks_command', 'run_python_file_on_databricks'}:
+                result_str = _format_compute_like_result(name, result)
+            else:
+                result_str = json.dumps(result, default=str)
             print(f'[MCP TOOL] {name} completed in {elapsed:.2f}s, result length: {len(result_str)}', file=sys.stderr, flush=True)
             logger.info(f'[MCP] Tool {name} completed in {elapsed:.2f}s')
             return {'content': [{'type': 'text', 'text': result_str}]}

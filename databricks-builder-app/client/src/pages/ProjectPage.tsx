@@ -6,6 +6,7 @@ import {
   Brain,
   Check,
   ChevronDown,
+  Clock3,
   ExternalLink,
   FileText,
   Image as ImageIcon,
@@ -54,9 +55,12 @@ import {
 import type { Cluster, Conversation, Execution, Message, Project, UserSettings, Warehouse, TodoItem } from '@/lib/types';
 import type { ImageAttachment } from '@/lib/api';
 import {
+  alignTraceHistoryToMessages,
   buildTraceHistoryEntries,
   cn,
   formatToolDisplayName,
+  getLatestTodosFromExecutionEvents,
+  getTodoItemsFromToolInput,
   mergeTraceHistoryEntries,
   shouldAutoScroll,
   type TraceHistoryEntry,
@@ -89,6 +93,7 @@ interface InProgressConversationState {
   streamingText: string;
   activityItems?: ActivityItem[];
   queuedMessages?: Message[];
+  todos?: TodoItem[];
 }
 
 const PENDING_CONVERSATION_KEY = '__pending__';
@@ -328,6 +333,77 @@ function getCodeFromToolInput(
   return null;
 }
 
+function extractTodoItemsFromActivityItems(items: ActivityItem[]): TodoItem[] {
+  for (let idx = items.length - 1; idx >= 0; idx -= 1) {
+    const item = items[idx];
+    if (item.type !== 'tool_use') continue;
+    const todoItems = getTodoItemsFromToolInput(item.toolName, item.toolInput);
+    if (todoItems) return todoItems;
+  }
+  return [];
+}
+
+function TodoPanel({ todos, className }: { todos: TodoItem[]; className?: string }) {
+  if (todos.length === 0) return null;
+
+  const completedCount = todos.filter((todo) => todo.status === 'completed').length;
+
+  return (
+    <div className={cn('mb-3 rounded-lg border border-[var(--color-border)]/35 bg-[var(--color-bg-primary)]/25 px-3 py-2.5', className)}>
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <div className="text-[10px] font-medium uppercase tracking-[0.14em] text-[var(--color-text-muted)]">
+          Todo List
+        </div>
+        <div className="text-[10px] text-[var(--color-text-muted)]/80">
+          {completedCount}/{todos.length}
+        </div>
+      </div>
+      <div className="divide-y divide-[var(--color-border)]/15">
+        {todos.map((todo, idx) => {
+          const isCompleted = todo.status === 'completed';
+          const isActive = todo.status === 'in_progress';
+          return (
+            <div
+              key={todo.id ?? `${todo.content}-${idx}`}
+              className={cn(
+                'flex items-center gap-2 py-1.5 first:pt-0.5 last:pb-0',
+                isActive && 'rounded-md bg-[var(--color-accent-primary)]/6 px-2 -mx-2'
+              )}
+            >
+              <div
+                className={cn(
+                  'flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border',
+                  isCompleted && 'border-emerald-500/25 bg-emerald-500/10 text-emerald-400',
+                  isActive && 'border-[var(--color-accent-primary)]/30 bg-[var(--color-accent-primary)]/10 text-[var(--color-accent-primary)]',
+                  !isCompleted && !isActive && 'border-[var(--color-border)]/35 bg-transparent text-[var(--color-text-muted)]/55'
+                )}
+              >
+                {isCompleted ? (
+                  <Check className="h-2.5 w-2.5" />
+                ) : isActive ? (
+                  <Clock3 className="h-2.5 w-2.5" />
+                ) : (
+                  <div className="h-1.5 w-1.5 rounded-full bg-current" />
+                )}
+              </div>
+              <div
+                className={cn(
+                  'min-w-0 flex-1 text-[12px] leading-5',
+                  isCompleted && 'text-[var(--color-text-muted)]/75',
+                  isActive && 'font-medium text-[var(--color-text-primary)]',
+                  !isCompleted && !isActive && 'text-[var(--color-text-primary)]/90'
+                )}
+              >
+                {todo.content}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // Single item in the verbose trace
 function VerboseItem({ item }: { item: ActivityItem }) {
   const [expanded, setExpanded] = useState(item.type === 'thinking');
@@ -367,7 +443,8 @@ function VerboseItem({ item }: { item: ActivityItem }) {
   if (item.type === 'tool_use') {
     const toolName = formatToolDisplayName(item.toolName);
     const codeInfo = getCodeFromToolInput(item.toolName, item.toolInput);
-    const inputStr = !codeInfo && item.toolInput ? JSON.stringify(item.toolInput, null, 2) : '';
+    const todoItems = getTodoItemsFromToolInput(item.toolName, item.toolInput);
+    const inputStr = !codeInfo && !todoItems && item.toolInput ? JSON.stringify(item.toolInput, null, 2) : '';
     const metaParams = commandMeta.filter(([key]) => key !== 'context_id');
     const metaKeys = new Set(metaParams.map(([k]) => k));
     if (item.commandExecution) {
@@ -1092,6 +1169,30 @@ export default function ProjectPage() {
     }
   }, []);
 
+  const updateConversationTodos = useCallback((
+    conversationId: string | null | undefined,
+    nextTodos: TodoItem[]
+  ): void => {
+    const progressKey = conversationId ?? PENDING_CONVERSATION_KEY;
+    const existing = inProgressByConversationRef.current[progressKey] ?? { streamingText: '' };
+    inProgressByConversationRef.current[progressKey] = {
+      ...existing,
+      todos: nextTodos,
+    };
+    if (currentConversationIdRef.current === conversationId) {
+      setTodos(nextTodos);
+    }
+  }, []);
+
+  const getPersistedTodos = useCallback((active: Execution | null, recent: Execution[]): TodoItem[] => {
+    const executions = active ? [active, ...recent] : recent;
+    for (const execution of executions) {
+      const todoItems = getLatestTodosFromExecutionEvents(execution.events);
+      if (todoItems.length > 0) return todoItems;
+    }
+    return [];
+  }, []);
+
   // Keep queued user messages visually below the response that is currently finishing.
   const insertAssistantBeforeQueued = useCallback(
     (prev: Message[], assistant: Message, conversationId: string | null): Message[] => {
@@ -1163,8 +1264,10 @@ export default function ProjectPage() {
             executionState.recent,
             (events) => buildActivityItemsFromExecutionEvents(events)
           );
+          const persistedTodos = getPersistedTodos(executionState.active, executionState.recent);
           setCurrentConversation(conv);
           setMessages(conv.messages || []);
+          setTodos(persistedTodos);
           const cachedTraceHistory = traceHistoryByConversationRef.current[conv.id] || [];
           const runTraceHistory = mergeTraceHistoryEntries(persistedTraceHistory, cachedTraceHistory);
           if (runTraceHistory.length > 0) {
@@ -1192,6 +1295,7 @@ export default function ProjectPage() {
           setWorkspaceFolder(conv.workspace_folder || userSettingsData?.workspace_folder || '');
         } else {
           shouldAutoCreateOnNextSendRef.current = false;
+          setTodos([]);
           // No conversation yet — apply user config defaults
           if (clustersData.length > 0) {
             setSelectedClusterId(clustersData[0].cluster_id);
@@ -1213,7 +1317,7 @@ export default function ProjectPage() {
     };
 
     loadData();
-  }, [projectId, navigate, setConversationStreamingState]);
+  }, [projectId, navigate, setConversationStreamingState, getPersistedTodos]);
 
   // Keep selected conversation ID available to async stream callbacks.
   useEffect(() => {
@@ -1226,6 +1330,7 @@ export default function ProjectPage() {
       setIsStreaming(false);
       activeStreamingConversationIdRef.current = null;
       setActiveExecutionId(null);
+      setTodos([]);
       return;
     }
     const isActive = streamingConversationIdsRef.current.has(conversationId);
@@ -1331,7 +1436,7 @@ export default function ProjectPage() {
               } else if (type === 'todos') {
                 const todoItems = event.todos as TodoItem[];
                 if (todoItems) {
-                  setTodos(todoItems);
+                  updateConversationTodos(currentConversation.id, todoItems);
                 }
               } else if (type === 'keepalive') {
                 const elapsed = Number(event.elapsed_since_last_event ?? 0);
@@ -1481,6 +1586,7 @@ export default function ProjectPage() {
       const activeExecutionItems = executionState.active
         ? buildActivityItemsFromExecutionEvents(executionState.active.events || [])
         : [];
+      const persistedTodos = getPersistedTodos(executionState.active, executionState.recent);
       const baseMessages = conv.messages || [];
       const viewMessages = inProgress?.userMessage
         ? [...baseMessages, inProgress.userMessage, ...(inProgress.queuedMessages || [])]
@@ -1500,6 +1606,7 @@ export default function ProjectPage() {
               : activeExecutionItems)
           : []
       );
+      setTodos(inProgress?.todos ?? persistedTodos);
       const cachedTraceHistory = traceHistoryByConversationRef.current[conversationId] || [];
       const runTraceHistory = mergeTraceHistoryEntries(persistedTraceHistory, cachedTraceHistory);
       if (runTraceHistory.length > 0) {
@@ -1539,6 +1646,7 @@ export default function ProjectPage() {
       setMessages([]);
       setActivityItems([]);
       setTraceHistoryItems([]);
+      setTodos([]);
       // Reset to user config defaults for new conversations
       setDefaultCatalog(userConfig?.default_catalog || '');
       setDefaultSchema(userConfig?.default_schema || '');
@@ -1568,8 +1676,10 @@ export default function ProjectPage() {
             executionState.recent,
             (events) => buildActivityItemsFromExecutionEvents(events)
           );
+          const persistedTodos = getPersistedTodos(executionState.active, executionState.recent);
           setCurrentConversation(conv);
           setMessages(conv.messages || []);
+          setTodos(persistedTodos);
           const cachedTraceHistory = traceHistoryByConversationRef.current[conv.id] || [];
           const runTraceHistory = mergeTraceHistoryEntries(persistedTraceHistory, cachedTraceHistory);
           if (runTraceHistory.length > 0) {
@@ -1582,6 +1692,7 @@ export default function ProjectPage() {
           setCurrentConversation(null);
           setMessages([]);
           setTraceHistoryItems([]);
+          setTodos([]);
           shouldAutoCreateOnNextSendRef.current = false;
         }
         setActivityItems([]);
@@ -1844,8 +1955,8 @@ export default function ProjectPage() {
           } else if (type === 'todos') {
             // Update todo list from agent
             const todoItems = event.todos as TodoItem[];
-            if (todoItems && currentConversationIdRef.current === conversationId) {
-              setTodos(todoItems);
+            if (todoItems) {
+              updateConversationTodos(conversationId, todoItems);
             }
           } else if (type === 'keepalive') {
             const elapsed = Number(event.elapsed_since_last_event ?? 0);
@@ -2694,11 +2805,13 @@ export default function ProjectPage() {
             <div className="mx-auto max-w-5xl space-y-4">
               {(() => {
                 const finishedTraces = verbose ? traceHistoryItems : [];
-                let assistantTraceIdx = 0;
+                const traceEntryByMessageId = alignTraceHistoryToMessages(nonQueuedMessages, finishedTraces);
                 const rows = nonQueuedMessages.map((message) => {
                   const traceEntryForMessage =
-                    message.role === 'assistant' ? finishedTraces[assistantTraceIdx++] ?? null : null;
+                    message.role === 'assistant' ? traceEntryByMessageId[message.id] ?? null : null;
                   const traceForMessage = traceEntryForMessage?.items ?? [];
+                  const todoItemsForMessage =
+                    message.role === 'assistant' ? extractTodoItemsFromActivityItems(traceForMessage) : [];
                   const stats = message.role === 'assistant'
                     ? (message.duration_ms != null || message.input_tokens != null
                       ? message
@@ -2728,6 +2841,7 @@ export default function ProjectPage() {
                       >
                         {message.role === 'assistant' ? (
                           <div className="prose prose-xs max-w-none text-[var(--color-text-primary)] text-[13px] leading-relaxed">
+                            <TodoPanel todos={todoItemsForMessage} />
                             <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
                               {normalizeImagePathsToMarkdown(message.content)}
                             </ReactMarkdown>
@@ -2791,6 +2905,7 @@ export default function ProjectPage() {
                 <div className="flex justify-start">
                   <div className="max-w-[85%] rounded-lg px-3 py-2 shadow-sm bg-[var(--color-bg-secondary)] border border-[var(--color-border)]/50">
                     <div className="prose prose-xs max-w-none text-[var(--color-text-primary)] text-[13px] leading-relaxed">
+                      <TodoPanel todos={todos} />
                       <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
                         {normalizeImagePathsToMarkdown(improveReadabilityForStreaming(streamingText))}
                       </ReactMarkdown>
@@ -2825,6 +2940,7 @@ export default function ProjectPage() {
                     <div className="flex justify-start">
                       <div className="max-w-[85%] rounded-lg px-3 py-2 shadow-sm bg-[var(--color-bg-secondary)] border border-[var(--color-border)]/50">
                         <div className="prose prose-xs max-w-none text-[var(--color-text-primary)] text-[13px] leading-relaxed">
+                          <TodoPanel todos={todos} />
                           <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
                             {normalizeImagePathsToMarkdown(improveReadabilityForStreaming(streamingText))}
                           </ReactMarkdown>
