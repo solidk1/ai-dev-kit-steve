@@ -46,6 +46,24 @@ def set_fmapi_base_url(url: str):
     _fmapi_base_url = url
 
 
+def _is_databricks_anthropic_upstream(base_url: str) -> bool:
+    """Return whether the upstream is a Databricks Anthropic-compatible endpoint."""
+    normalized = (base_url or '').lower()
+    return 'ai-gateway.' in normalized or normalized.endswith('/serving-endpoints/anthropic')
+
+
+def _rewrite_auth_headers(headers: dict[str, str], base_url: str) -> dict[str, str]:
+    """Rewrite SDK-style API key auth into Databricks Bearer auth when needed."""
+    if not _is_databricks_anthropic_upstream(base_url):
+        return headers
+
+    rewritten = dict(headers)
+    api_key = rewritten.pop('x-api-key', '').strip()
+    if api_key:
+        rewritten['authorization'] = f'Bearer {api_key}'
+    return rewritten
+
+
 @router.api_route('/v1/{path:path}', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
 async def proxy(path: str, request: Request):
     """Proxy to Databricks FMAPI, stripping unsupported fields."""
@@ -74,6 +92,7 @@ async def proxy(path: str, request: Request):
         k: v for k, v in request.headers.items()
         if k.lower() not in _STRIP_HEADERS
     }
+    forward_headers = _rewrite_auth_headers(forward_headers, real_base_url)
     forward_headers['accept-encoding'] = 'identity'
 
     # Strip unsupported body fields
@@ -103,20 +122,33 @@ async def proxy(path: str, request: Request):
     client = _get_client()
 
     if is_streaming:
+        upstream_request = client.build_request(
+            request.method,
+            target_url,
+            content=body_bytes,
+            headers=forward_headers,
+        )
+        resp = await client.send(upstream_request, stream=True)
+        if resp.status_code >= 400:
+            body_text = await resp.aread()
+            await resp.aclose()
+            logger.error(f'FMAPI streaming error {resp.status_code}: {body_text[:500]}')
+            resp_headers = {
+                k: v for k, v in resp.headers.items()
+                if k.lower() not in ('content-encoding', 'content-length', 'transfer-encoding')
+            }
+            return Response(
+                content=body_text,
+                status_code=resp.status_code,
+                headers=resp_headers,
+            )
+
         async def stream_gen():
-            async with client.stream(
-                request.method,
-                target_url,
-                content=body_bytes,
-                headers=forward_headers,
-            ) as resp:
-                if resp.status_code >= 400:
-                    body_text = await resp.aread()
-                    logger.error(f'FMAPI streaming error {resp.status_code}: {body_text[:500]}')
-                    yield body_text
-                    return
+            try:
                 async for chunk in resp.aiter_bytes():
                     yield chunk
+            finally:
+                await resp.aclose()
 
         return StreamingResponse(
             stream_gen(),

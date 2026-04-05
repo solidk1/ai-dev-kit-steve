@@ -243,6 +243,15 @@ async function streamProgress(params: {
   } = params;
 
   let lastTs: number = lastEventTimestamp ?? 0;
+  let errorReported = false;
+
+  const reportError = (error: Error): Error => {
+    if (!errorReported) {
+      errorReported = true;
+      onError(error);
+    }
+    return error;
+  };
 
   while (true) {
     if (signal?.aborted) return;
@@ -268,14 +277,14 @@ async function streamProgress(params: {
         }
         const errBody = await res.json().catch(() => ({}));
         const message = (errBody.detail ?? res.statusText) as string;
-        onError(new Error(typeof message === 'string' ? message : JSON.stringify(message)));
-        return;
+        throw reportError(
+          new Error(typeof message === 'string' ? message : JSON.stringify(message))
+        );
       }
 
       const reader = res.body?.getReader();
       if (!reader) {
-        onError(new Error('No response body'));
-        return;
+        throw reportError(new Error('No response body'));
       }
 
       const decoder = new TextDecoder();
@@ -319,8 +328,7 @@ async function streamProgress(params: {
       }
     } catch (e) {
       if ((e as Error).name === 'AbortError') return;
-      onError(e instanceof Error ? e : new Error(String(e)));
-      return;
+      throw reportError(e instanceof Error ? e : new Error(String(e)));
     }
 
     if (!shouldReconnect) {

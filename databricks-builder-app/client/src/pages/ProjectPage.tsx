@@ -1994,11 +1994,6 @@ export default function ProjectPage() {
         },
         onError: (error) => {
           console.error('Stream error:', error);
-          // Show the actual error message instead of generic text
-          const errorMessage = error.message || 'Failed to get response';
-          toast.error(errorMessage, {
-            duration: 8000, // Show error for 8 seconds
-          });
         },
         onDone: async () => {
           const fullText = confirmedText || deltaText;
@@ -2088,14 +2083,18 @@ export default function ProjectPage() {
       toast.error(errorMessage, {
         duration: 8000,
       });
-      if (activeStreamingConversationIdRef.current === targetConversationId) {
-        if (targetConversationId) setConversationStreamingState(targetConversationId, false);
-      }
-      if (targetConversationId) {
-        delete inProgressByConversationRef.current[targetConversationId];
+      const cleanupConversationId = activeStreamingConversationIdRef.current ?? targetConversationId;
+      if (cleanupConversationId) {
+        setConversationStreamingState(cleanupConversationId, false);
+        delete inProgressByConversationRef.current[cleanupConversationId];
       }
       delete inProgressByConversationRef.current[PENDING_CONVERSATION_KEY];
       activeQueuedMessageIdRef.current = null;
+      activeStreamingConversationIdRef.current = null;
+      setIsStreaming(false);
+      setStreamingText('');
+      setActivityItems([]);
+      setActiveExecutionId(null);
 
       const nextIdx = queuedMessagesRef.current.findIndex((m) => m.conversationId === targetConversationId);
       const next = nextIdx >= 0 ? queuedMessagesRef.current.splice(nextIdx, 1)[0] : undefined;
@@ -2141,24 +2140,25 @@ export default function ProjectPage() {
       ]);
     }
 
-    await invokeAgent({
-      projectId,
-      conversationId,
-      message: userMessage,
-      images: imagesToSend.length > 0 ? imagesToSend : null,
-      clusterId: selectedClusterId,
-      defaultCatalog,
-      defaultSchema,
-      warehouseId: selectedWarehouseId,
-      workspaceFolder,
-      mlflowExperimentName: mlflowExperimentName || null,
-      onExecutionId: (executionId) => {
-        executionIdForRun = executionId;
-        if (conversationId) {
-          setConversationStreamingState(conversationId, true, executionId);
-        }
-      },
-      onEvent: (event) => {
+    try {
+      await invokeAgent({
+        projectId,
+        conversationId,
+        message: userMessage,
+        images: imagesToSend.length > 0 ? imagesToSend : null,
+        clusterId: selectedClusterId,
+        defaultCatalog,
+        defaultSchema,
+        warehouseId: selectedWarehouseId,
+        workspaceFolder,
+        mlflowExperimentName: mlflowExperimentName || null,
+        onExecutionId: (executionId) => {
+          executionIdForRun = executionId;
+          if (conversationId) {
+            setConversationStreamingState(conversationId, true, executionId);
+          }
+        },
+        onEvent: (event) => {
         const type = event.type as string;
 
         if (type === 'conversation.created') {
@@ -2244,36 +2244,41 @@ export default function ProjectPage() {
             (items) => applyToolResultToItems(items, resultItem, event.tool_use_id as string | undefined, resultItem.commandExecution)
           );
         }
-      },
-      onError: (error) => {
-        if (conversationId) {
+        },
+        onError: (error) => {
+          console.error('Background stream error:', error);
+        },
+        onDone: async () => {
+          if (!conversationId) return;
           setConversationStreamingState(conversationId, false);
           delete inProgressByConversationRef.current[conversationId];
-        }
-        if (currentConversationIdRef.current === conversationId) {
-          setStreamingText('');
-        }
-        toast.error(error.message, { duration: 8000 });
-      },
-      onDone: async () => {
-        if (!conversationId) return;
+          if (currentConversationIdRef.current === conversationId) {
+            setActivityItems((current) => {
+              if (executionIdForRun) {
+                appendTraceHistoryForConversation(conversationId!, executionIdForRun, current);
+              }
+              return current;
+            });
+            setStreamingText('');
+            const conv = await fetchConversation(projectId, conversationId);
+            setCurrentConversation(conv);
+            setMessages(conv.messages || []);
+          }
+          fetchConversations(projectId).then(setConversations).catch(() => undefined);
+        },
+      });
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') return;
+      console.error('Failed to send background message:', error);
+      if (conversationId) {
         setConversationStreamingState(conversationId, false);
         delete inProgressByConversationRef.current[conversationId];
-        if (currentConversationIdRef.current === conversationId) {
-          setActivityItems((current) => {
-            if (executionIdForRun) {
-              appendTraceHistoryForConversation(conversationId!, executionIdForRun, current);
-            }
-            return current;
-          });
-          setStreamingText('');
-          const conv = await fetchConversation(projectId, conversationId);
-          setCurrentConversation(conv);
-          setMessages(conv.messages || []);
-        }
-        fetchConversations(projectId).then(setConversations).catch(() => undefined);
-      },
-    });
+      }
+      if (currentConversationIdRef.current === conversationId) {
+        setStreamingText('');
+      }
+      toast.error(error instanceof Error ? error.message : 'Failed to send message', { duration: 8000 });
+    }
   }, [projectId, selectedClusterId, defaultCatalog, defaultSchema, selectedWarehouseId, workspaceFolder, mlflowExperimentName, appendTraceHistoryForConversation, setConversationStreamingState, updateConversationActivityItems]);
 
   // Send message — allows new messages while streaming by queueing them.
