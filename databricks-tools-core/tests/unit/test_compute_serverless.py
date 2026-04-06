@@ -1,5 +1,9 @@
+import base64
+import json
 from unittest import mock
+from urllib.parse import quote
 
+from databricks.sdk.errors.sdk import OperationFailed
 from databricks_tools_core.compute import (
     execute_databricks_command,
     run_code_on_serverless,
@@ -7,10 +11,17 @@ from databricks_tools_core.compute import (
 )
 from databricks_tools_core.compute.execution import ClusterSelectionResult, ExecutionResult
 from databricks_tools_core.compute.serverless import (
-    _CAPTURE_PAYLOAD_PREFIX,
     _get_run_output,
     _render_notebook_source,
 )
+
+
+def _notebook_model_html(model: dict) -> str:
+    encoded_model = base64.b64encode(quote(json.dumps(model)).encode('utf-8')).decode('utf-8')
+    return (
+        '<!DOCTYPE html><html><head><title>serverless_test - Databricks</title></head>'
+        f"<body><script>var __DATABRICKS_NOTEBOOK_MODEL = '{encoded_model}';</script></body></html>"
+    )
 
 
 def test_compute_package_exports_serverless_helpers():
@@ -96,16 +107,11 @@ class TestRunCodeOnServerlessResultShape:
         assert result.state == 'SUCCESS'
 
     @mock.patch('databricks_tools_core.compute.serverless.get_workspace_client')
-    def test_get_run_output_extracts_captured_stdout(self, mock_get_client):
+    def test_get_run_output_returns_plain_notebook_result(self, mock_get_client):
         mock_client = mock.Mock()
         mock_get_client.return_value = mock_client
-        payload = {
-            'stdout': 'hello from stdout\n',
-            'stderr': '',
-            'error': None,
-        }
         mock_client.jobs.get_run_output.return_value = mock.Mock(
-            notebook_output=mock.Mock(result=f'{_CAPTURE_PAYLOAD_PREFIX}{__import__("json").dumps(payload)}'),
+            notebook_output=mock.Mock(result='hello from notebook'),
             logs=None,
             error=None,
             error_trace=None,
@@ -113,15 +119,174 @@ class TestRunCodeOnServerlessResultShape:
 
         output = _get_run_output(123)
 
-        assert output['output'] == 'hello from stdout\n'
+        assert output['output'] == 'hello from notebook'
         assert output['error'] is None
 
-    def test_render_notebook_source_wraps_python_for_stdout_capture(self):
+    @mock.patch('databricks_tools_core.compute.serverless.get_workspace_client')
+    def test_get_run_output_falls_back_to_exported_notebook_view_as_clean_text(self, mock_get_client):
+        mock_client = mock.Mock()
+        mock_get_client.return_value = mock_client
+        mock_client.jobs.get_run_output.return_value = mock.Mock(
+            notebook_output=None,
+            logs=None,
+            error=None,
+            error_trace=None,
+        )
+        mock_client.jobs.export_run.return_value = mock.Mock(
+            views=[
+                mock.Mock(
+                    content=(
+                        '<html><body>'
+                        '<h1>Run Output</h1>'
+                        '<p>Hello <b>world</b></p>'
+                        '<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>'
+                        '</body></html>'
+                    )
+                )
+            ]
+        )
+
+        output = _get_run_output(123, 456)
+
+        assert output['output'] == 'Run Output\n\nHello world\n\nA | B\n1 | 2'
+        assert output['error'] is None
+
+    @mock.patch('databricks_tools_core.compute.serverless.get_workspace_client')
+    def test_get_run_output_reads_output_and_error_from_exported_notebook_model(self, mock_get_client):
+        mock_client = mock.Mock()
+        mock_get_client.return_value = mock_client
+        mock_client.jobs.get_run_output.return_value = mock.Mock(
+            notebook_output=mock.Mock(result='serverless_test - Databricks'),
+            logs=None,
+            error=None,
+            error_trace=None,
+        )
+        mock_client.jobs.export_run.return_value = mock.Mock(
+            views=[
+                mock.Mock(
+                    content=_notebook_model_html(
+                        {
+                            'name': 'serverless_test',
+                            'commands': [
+                                {
+                                    'results': {
+                                        'type': 'raw',
+                                        'data': '1\n',
+                                    },
+                                    'errorSummary': 'Traceback: boom',
+                                }
+                            ],
+                        }
+                    )
+                )
+            ]
+        )
+
+        output = _get_run_output(123, 456)
+
+        assert output['output'] == '1'
+        assert output['error'] == 'Traceback: boom'
+
+    @mock.patch('databricks_tools_core.compute.serverless.get_workspace_client')
+    def test_get_run_output_reads_list_results_from_exported_notebook_model(self, mock_get_client):
+        mock_client = mock.Mock()
+        mock_get_client.return_value = mock_client
+        mock_client.jobs.get_run_output.return_value = mock.Mock(
+            notebook_output=None,
+            logs=None,
+            error=None,
+            error_trace=None,
+        )
+        mock_client.jobs.export_run.return_value = mock.Mock(
+            views=[
+                mock.Mock(
+                    content=_notebook_model_html(
+                        {
+                            'name': 'serverless_test',
+                            'commands': [
+                                {
+                                    'results': {
+                                        'type': 'listResults',
+                                        'data': [
+                                            {
+                                                'type': 'ansi',
+                                                'data': '3\n',
+                                                'name': 'stdout',
+                                            }
+                                        ],
+                                    }
+                                }
+                            ],
+                        }
+                    )
+                )
+            ]
+        )
+
+        output = _get_run_output(123, 456)
+
+        assert output['output'] == '3'
+        assert output['error'] is None
+
+    def test_render_notebook_source_keeps_python_code_as_is(self):
         rendered = _render_notebook_source('print("hi")', 'python')
 
-        assert 'redirect_stdout' in rendered
-        assert _CAPTURE_PAYLOAD_PREFIX in rendered
-        assert 'dbutils.notebook.exit' in rendered
+        assert rendered == '# Databricks notebook source\nprint("hi")'
+
+    @mock.patch('databricks_tools_core.compute.serverless.get_current_username', return_value='user@example.com')
+    @mock.patch('databricks_tools_core.compute.serverless.get_workspace_client')
+    def test_failed_run_returns_exported_output_when_wait_raises_operation_failed(self, mock_get_client, _mock_user):
+        mock_client = mock.Mock()
+        mock_get_client.return_value = mock_client
+
+        wait = mock.Mock()
+        wait.run_id = 123
+        wait.result.side_effect = OperationFailed('job failed')
+        mock_client.jobs.submit.return_value = wait
+
+        failed_run = mock.Mock()
+        failed_run.run_page_url = 'https://example/run/123'
+        failed_run.tasks = [mock.Mock(run_id=456)]
+        failed_run.state = mock.Mock(result_state=mock.Mock(value='FAILED'), state_message='Task failed')
+        mock_client.jobs.get_run.return_value = failed_run
+        mock_client.jobs.get_run_output.return_value = mock.Mock(
+            notebook_output=None,
+            logs=None,
+            error=None,
+            error_trace=None,
+        )
+        mock_client.jobs.export_run.return_value = mock.Mock(
+            views=[
+                mock.Mock(
+                    content=_notebook_model_html(
+                        {
+                            'name': 'serverless_test',
+                            'commands': [
+                                {
+                                    'results': {
+                                        'type': 'listResults',
+                                        'data': [
+                                            {
+                                                'type': 'ansi',
+                                                'data': '1\n',
+                                                'name': 'stdout',
+                                            }
+                                        ],
+                                    },
+                                    'errorSummary': 'ValueError: boom',
+                                }
+                            ],
+                        }
+                    )
+                )
+            ]
+        )
+
+        result = run_code_on_serverless(code='print(1)\nraise ValueError("boom")')
+
+        assert result.success is False
+        assert result.output == '1'
+        assert result.error == 'ValueError: boom'
 
 
 class TestExecuteDatabricksCommandRouting:

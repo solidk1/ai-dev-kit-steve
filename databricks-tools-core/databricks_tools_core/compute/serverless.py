@@ -4,12 +4,17 @@ import base64
 import datetime
 import json
 import logging
+import re
 import time
 import uuid
 from dataclasses import dataclass
+from html import unescape
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Dict, Optional
+from urllib.parse import unquote
 
+from databricks.sdk.errors.sdk import OperationFailed
 from databricks.sdk.service.compute import Environment
 from databricks.sdk.service.jobs import JobEnvironment, NotebookTask, RunResultState, SubmitTask
 from databricks.sdk.service.workspace import ImportFormat, Language
@@ -17,7 +22,8 @@ from databricks.sdk.service.workspace import ImportFormat, Language
 from ..auth import get_current_username, get_workspace_client
 
 logger = logging.getLogger(__name__)
-_CAPTURE_PAYLOAD_PREFIX = '__AI_DEV_KIT_CAPTURE__'
+_INLINE_WHITESPACE_RE = re.compile(r'[ \t\f\v]+')
+_NOTEBOOK_MODEL_RE = re.compile(r"__DATABRICKS_NOTEBOOK_MODEL = '([^']+)';")
 
 _LANGUAGE_MAP = {
     'python': Language.PYTHON,
@@ -28,6 +34,231 @@ _FILE_LANGUAGE_MAP = {
     '.py': 'python',
     '.sql': 'sql',
 }
+
+
+class _NotebookHTMLTextExtractor(HTMLParser):
+    """Convert exported notebook HTML into readable plain text."""
+
+    _BLOCK_TAGS = {
+        'article',
+        'blockquote',
+        'div',
+        'dl',
+        'fieldset',
+        'figcaption',
+        'figure',
+        'footer',
+        'form',
+        'h1',
+        'h2',
+        'h3',
+        'h4',
+        'h5',
+        'h6',
+        'header',
+        'main',
+        'nav',
+        'ol',
+        'p',
+        'pre',
+        'section',
+        'ul',
+    }
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._parts: list[str] = []
+        self._skip_depth = 0
+        self._row_has_cells = False
+
+    def _append(self, text: str) -> None:
+        if text:
+            self._parts.append(text)
+
+    def _append_newline(self, count: int = 1) -> None:
+        if count <= 0:
+            return
+        trailing_newlines = 0
+        if self._parts:
+            trailing_newlines = len(self._parts[-1]) - len(self._parts[-1].rstrip('\n'))
+        needed = max(count - trailing_newlines, 0)
+        if needed:
+            self._parts.append('\n' * needed)
+
+    def handle_starttag(self, tag: str, attrs) -> None:  # type: ignore[override]
+        tag = tag.lower()
+        if tag in {'script', 'style'}:
+            self._skip_depth += 1
+            return
+        if self._skip_depth:
+            return
+        if tag == 'br':
+            self._append_newline()
+        elif tag == 'li':
+            self._append_newline()
+            self._append('- ')
+        elif tag == 'tr':
+            self._append_newline()
+            self._row_has_cells = False
+        elif tag in {'td', 'th'}:
+            if self._row_has_cells:
+                self._append(' | ')
+            self._row_has_cells = True
+
+    def handle_endtag(self, tag: str) -> None:  # type: ignore[override]
+        tag = tag.lower()
+        if tag in {'script', 'style'}:
+            self._skip_depth = max(0, self._skip_depth - 1)
+            return
+        if self._skip_depth:
+            return
+        if tag == 'tr':
+            self._append_newline()
+            self._row_has_cells = False
+        elif tag in self._BLOCK_TAGS:
+            self._append_newline(2)
+
+    def handle_data(self, data: str) -> None:  # type: ignore[override]
+        if self._skip_depth:
+            return
+        text = unescape(data)
+        if text:
+            self._append(text)
+
+    def get_text(self) -> str:
+        return ''.join(self._parts)
+
+
+def _normalize_rendered_text(text: str | None) -> str | None:
+    """Collapse parser output into readable text while preserving paragraphs."""
+    if not text:
+        return None
+
+    normalized_lines: list[str] = []
+    pending_blank_lines = 0
+    for raw_line in text.replace('\r', '\n').split('\n'):
+        line = _INLINE_WHITESPACE_RE.sub(' ', raw_line).strip()
+        if not line:
+            pending_blank_lines = min(pending_blank_lines + 1, 2)
+            continue
+        if normalized_lines and pending_blank_lines:
+            normalized_lines.extend([''] * min(pending_blank_lines, 1))
+        pending_blank_lines = 0
+        normalized_lines.append(line)
+
+    normalized = '\n'.join(normalized_lines).strip()
+    return normalized or None
+
+
+def _render_exported_notebook_view_as_text(content: str) -> str | None:
+    """Convert exported notebook HTML to clean plain text."""
+    if not content or not content.strip():
+        return None
+    if '<' not in content or '>' not in content:
+        return _normalize_rendered_text(content)
+
+    parser = _NotebookHTMLTextExtractor()
+    parser.feed(content)
+    parser.close()
+    return _normalize_rendered_text(parser.get_text())
+
+
+def _looks_like_databricks_export_title(text: str | None) -> bool:
+    """Ignore export fallbacks that only captured the notebook page title."""
+    normalized = (text or '').strip()
+    return bool(normalized) and '\n' not in normalized and normalized.endswith(' - Databricks')
+
+
+def _decode_exported_notebook_model(content: str) -> dict[str, Any] | None:
+    """Decode the embedded notebook model from an exported run page."""
+    match = _NOTEBOOK_MODEL_RE.search(content)
+    if not match:
+        return None
+
+    try:
+        encoded = match.group(1)
+        quoted_json = base64.b64decode(encoded).decode('utf-8')
+        return json.loads(unquote(quoted_json))
+    except Exception as exc:
+        logger.debug('Failed to decode exported notebook model: %s', exc)
+        return None
+
+
+def _extract_exported_notebook_model_output(content: str) -> dict[str, str | None]:
+    """Read command results from the embedded Databricks notebook model."""
+    model = _decode_exported_notebook_model(content)
+    if not isinstance(model, dict):
+        return {'output': None, 'error': None}
+
+    commands = model.get('commands')
+    if not isinstance(commands, list):
+        return {'output': None, 'error': None}
+
+    for command in reversed(commands):
+        if not isinstance(command, dict):
+            continue
+
+        command_output = None
+        command_error = None
+
+        results = command.get('results')
+        if isinstance(results, dict):
+            result_type = results.get('type')
+            result_data = results.get('data')
+            if isinstance(result_data, str):
+                output = _normalize_rendered_text(result_data)
+                if output and not _looks_like_databricks_export_title(output):
+                    command_output = output
+            elif result_type == 'listResults' and isinstance(result_data, list):
+                rendered_parts: list[str] = []
+                for item in result_data:
+                    if not isinstance(item, dict):
+                        continue
+                    item_data = item.get('data')
+                    if isinstance(item_data, str):
+                        rendered = _normalize_rendered_text(item_data)
+                        if rendered:
+                            rendered_parts.append(rendered)
+                if rendered_parts:
+                    command_output = '\n'.join(rendered_parts)
+
+        for key in ('error', 'errorSummary', 'resultDbfsErrorMessage'):
+            value = command.get(key)
+            if isinstance(value, str):
+                error = _normalize_rendered_text(value)
+                if error:
+                    command_error = error
+                    break
+
+        if command_output or command_error:
+            return {'output': command_output, 'error': command_error}
+
+    return {'output': None, 'error': None}
+
+
+def _get_exported_run_data(run_id: int) -> Dict[str, Optional[str]]:
+    """Best-effort extraction of output/error data from exported run content."""
+    try:
+        export = get_workspace_client().jobs.export_run(run_id=run_id)
+    except Exception as exc:
+        logger.debug('Failed to export serverless run %s: %s', run_id, exc)
+        return {'output': None, 'error': None}
+
+    views = getattr(export, 'views', None)
+    if not isinstance(views, list):
+        return {'output': None, 'error': None}
+
+    for view in views:
+        content = getattr(view, 'content', None)
+        if isinstance(content, str):
+            model_output = _extract_exported_notebook_model_output(content)
+            if model_output['output'] or model_output['error']:
+                return model_output
+
+            rendered = _render_exported_notebook_view_as_text(content)
+            if rendered and not _looks_like_databricks_export_title(rendered):
+                return {'output': rendered, 'error': None}
+    return {'output': None, 'error': None}
 
 
 @dataclass
@@ -84,34 +315,7 @@ def _render_notebook_source(code: str, language: str) -> str:
         return f'{header}\n{code}'
 
     header = '# Databricks notebook source'
-    if 'dbutils.notebook.exit' in code:
-        return f'{header}\n{code}'
-
-    wrapped_code = f"""
-import contextlib
-import io
-import json
-import traceback
-
-_ai_dev_kit_stdout = io.StringIO()
-_ai_dev_kit_stderr = io.StringIO()
-_ai_dev_kit_error = None
-
-try:
-    with contextlib.redirect_stdout(_ai_dev_kit_stdout), contextlib.redirect_stderr(_ai_dev_kit_stderr):
-        exec(compile({code!r}, "<ai_dev_kit_serverless>", "exec"), {{"__name__": "__main__"}})
-except Exception:
-    _ai_dev_kit_error = traceback.format_exc()
-
-dbutils.notebook.exit(
-    {_CAPTURE_PAYLOAD_PREFIX!r} + json.dumps({{
-        "stdout": _ai_dev_kit_stdout.getvalue(),
-        "stderr": _ai_dev_kit_stderr.getvalue(),
-        "error": _ai_dev_kit_error,
-    }})
-)
-""".strip()
-    return f'{header}\n{wrapped_code}'
+    return f'{header}\n{code}'
 
 
 def _upload_temp_notebook(code: str, language: str, workspace_path: str) -> None:
@@ -135,27 +339,21 @@ def _cleanup_temp_notebook(workspace_path: str) -> None:
         logger.debug('Cleanup of %s failed: %s', workspace_path, exc)
 
 
-def _get_run_output(task_run_id: int) -> Dict[str, Optional[str]]:
+def _get_run_output(task_run_id: int, run_id: int | None = None) -> Dict[str, Optional[str]]:
     run_output = get_workspace_client().jobs.get_run_output(run_id=task_run_id)
     output = None
     error = None
     if getattr(run_output, 'notebook_output', None) and run_output.notebook_output.result:
         result = run_output.notebook_output.result
-        if isinstance(result, str) and result.startswith(_CAPTURE_PAYLOAD_PREFIX):
-            payload_text = result[len(_CAPTURE_PAYLOAD_PREFIX):]
-            try:
-                payload = json.loads(payload_text)
-                stdout = payload.get('stdout')
-                stderr = payload.get('stderr')
-                payload_error = payload.get('error')
-                parts = [part for part in [stdout, stderr] if isinstance(part, str) and part.strip()]
-                output = '\n'.join(parts) if parts else None
-                if isinstance(payload_error, str) and payload_error.strip():
-                    error = payload_error
-            except Exception:
-                output = result
-        else:
-            output = result
+        output = result
+    if run_id is not None and (not output or _looks_like_databricks_export_title(output)):
+        exported = _get_exported_run_data(run_id)
+        if _looks_like_databricks_export_title(output) and not exported['output']:
+            output = None
+        if exported['output'] and (not output or _looks_like_databricks_export_title(output)):
+            output = exported['output']
+        if not error and exported['error']:
+            error = exported['error']
     if getattr(run_output, 'logs', None):
         output = f'{output}\n\n--- Logs ---\n{run_output.logs}' if output else run_output.logs
     if getattr(run_output, 'error', None):
@@ -243,10 +441,15 @@ def run_code_on_serverless(
         )
 
         run_id = getattr(wait, 'run_id', None) or getattr(getattr(wait, 'response', None), 'run_id', None)
-        run = wait.result(timeout=datetime.timedelta(seconds=timeout))
+        try:
+            run = wait.result(timeout=datetime.timedelta(seconds=timeout))
+        except OperationFailed:
+            if run_id is None:
+                raise
+            run = w.jobs.get_run(run_id=run_id)
         run_url = run.run_page_url or (w.jobs.get_run(run_id=run_id).run_page_url if run_id else None)
         task_run_id = run.tasks[0].run_id if run.tasks else None
-        output_data = _get_run_output(task_run_id) if task_run_id else {'output': None, 'error': None}
+        output_data = _get_run_output(task_run_id, run_id=run_id) if task_run_id else {'output': None, 'error': None}
         result_state = run.state.result_state if run.state else None
         state_str = result_state.value if result_state else 'UNKNOWN'
         elapsed = round(time.time() - start_time, 2)
@@ -265,6 +468,7 @@ def run_code_on_serverless(
 
         return ServerlessRunResult(
             success=False,
+            output=output_data['output'],
             error=output_data['error']
             or (run.state.state_message if run.state else f'Run ended with state: {state_str}'),
             run_id=run_id,
