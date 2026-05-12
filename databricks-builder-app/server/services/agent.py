@@ -51,6 +51,7 @@ from databricks_tools_core.auth import set_databricks_auth, clear_databricks_aut
 from ..anthropic_endpoint import (
   build_databricks_anthropic_base_url,
   get_databricks_llm_provider,
+  select_databricks_anthropic_model,
 )
 
 _original_get_workspace_client = _dt_auth.get_workspace_client
@@ -657,7 +658,9 @@ async def stream_agent_response(
     # operations target a different workspace (cross-workspace mode).
     # Fall back to databricks_host/token for callers that don't split FMAPI creds.
     effective_fmapi_host = fmapi_host or databricks_host
-    effective_fmapi_token = fmapi_token or databricks_token
+    # Prefer a user-scoped token when available. Otherwise fall back to the
+    # app service principal token for model calls.
+    effective_fmapi_token = user_access_token or fmapi_token or databricks_token
     if effective_fmapi_host and effective_fmapi_token:
       anthropic_base_url = build_databricks_anthropic_base_url(effective_fmapi_host)
       provider = get_databricks_llm_provider(anthropic_base_url)
@@ -680,7 +683,12 @@ async def stream_agent_response(
       claude_env['ANTHROPIC_CUSTOM_HEADERS'] = 'x-databricks-use-coding-agent-mode: true'
 
       # Set the model: user setting > env var > default
-      effective_model = anthropic_model or os.environ.get('ANTHROPIC_MODEL', 'databricks-claude-opus-4-6')
+      app_auth_only = not bool(user_access_token)
+      effective_model = select_databricks_anthropic_model(
+        app_auth_only=app_auth_only,
+        model=anthropic_model,
+        small_model=anthropic_model_mini,
+      )
       claude_env['ANTHROPIC_MODEL'] = effective_model
       if anthropic_model_mini:
         claude_env['ANTHROPIC_SMALL_FAST_MODEL'] = anthropic_model_mini
@@ -693,6 +701,8 @@ async def stream_agent_response(
         f'{proxy_base_url} → {anthropic_base_url} '
         f'({provider}) with model {effective_model}'
       )
+      if app_auth_only:
+        logger.info('Using app-authorization model fallback because no user token is available')
       logger.info(f'Claude env vars: BASE_URL={claude_env.get("ANTHROPIC_BASE_URL")}, MODEL={claude_env.get("ANTHROPIC_MODEL")}')
 
     # Databricks SDK upstream tracking for subprocess user-agent attribution

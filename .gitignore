@@ -2,6 +2,7 @@
 .ai-dev-kit/
 .claude/
 .local
+.worktrees/
 
 # Python
 __pycache__/

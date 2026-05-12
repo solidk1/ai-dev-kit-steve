@@ -131,11 +131,6 @@ def main():
         help="Token budget ceiling. Candidates exceeding this are penalized.",
     )
     parser.add_argument(
-        "--align",
-        action="store_true",
-        help="Use MemAlign to align judges with human feedback (requires alignment traces)",
-    )
-    parser.add_argument(
         "--run-dir",
         type=str,
         default=None,
@@ -350,7 +345,6 @@ def main():
                 max_metric_calls=args.max_metric_calls,
                 token_budget=args.token_budget,
                 judge_model=args.judge_model,
-                align=args.align,
                 run_dir=args.run_dir,
                 agent_eval=args.agent_eval,
                 agent_eval_full=args.agent_eval_full,
@@ -412,7 +406,6 @@ def main():
                     max_metric_calls=args.max_metric_calls,
                     token_budget=args.token_budget,
                     judge_model=args.judge_model,
-                    align=args.align,
                     run_dir=f"{args.run_dir}/{name}" if args.run_dir else None,
                     agent_eval=args.agent_eval,
                     agent_eval_full=args.agent_eval_full,
@@ -459,7 +452,6 @@ def main():
                 max_metric_calls=args.max_metric_calls,
                 token_budget=args.token_budget,
                 judge_model=args.judge_model,
-                align=args.align,
                 run_dir=args.run_dir,
                 agent_eval=args.agent_eval,
                 agent_eval_full=args.agent_eval_full,

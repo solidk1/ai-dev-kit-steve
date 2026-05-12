@@ -8,12 +8,14 @@ def test_claim_operation_poll_enforces_minimum_interval():
 
     operation, retry_after = claim_operation_poll(operation_id, min_interval_seconds=5.0)
     assert operation is not None
-    assert retry_after == 0.0
+    assert retry_after > 0
+    assert retry_after <= 5.0
+
+    time.sleep(5.05)
 
     operation, retry_after = claim_operation_poll(operation_id, min_interval_seconds=5.0)
     assert operation is not None
-    assert retry_after > 0
-    assert retry_after <= 5.0
+    assert retry_after == 0.0
 
 
 def test_claim_operation_poll_allows_retry_after_interval():

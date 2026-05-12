@@ -26,7 +26,7 @@ env:
   - name: PROJECTS_BASE_DIR
     value: "./projects"
   - name: PYTHONPATH
-    value: "/app/python/source_code/packages"
+    value: "/app/python/source_code:/app/python/source_code/packages"
   
   # =============================================================================
   # Skills Configuration
@@ -45,7 +45,7 @@ env:
   # - The deployment script validates LAKEBASE_ENDPOINT and the app resource.
   # - Databricks auto-injects PGHOST, PGUSER, PGDATABASE, PGPORT.
   - name: LAKEBASE_ENDPOINT
-    value: "projects/<project-name>/branches/production/endpoints/primary"
+    value: "projects/builder-app-steve/branches/production/endpoints/primary"
   - name: LAKEBASE_DATABASE_NAME
     value: "databricks_postgres"
   - name: LAKEBASE_SCHEMA_NAME
@@ -56,11 +56,16 @@ env:
   # Claude SDK Configuration (Databricks AI Gateway)
   # =============================================================================
   # These configure the Claude Agent SDK to use Databricks Anthropic-compatible
-  # routing instead of hitting Anthropic directly. The app dynamically derives
-  # the AI Gateway base URL from the workspace URL at runtime.
+  # routing instead of hitting Anthropic directly. For this workspace we pin
+  # the AI Gateway base URL explicitly.
+  # Auto-derived from DATABRICKS_HOST when unset.
   - name: ANTHROPIC_MODEL
     value: "databricks-claude-opus-4-6"
   - name: ANTHROPIC_MODEL_MINI
+    value: "databricks-claude-sonnet-4-6"
+  # Used when the app must call Claude with its own service principal instead of
+  # a forwarded user token or saved PAT.
+  - name: ANTHROPIC_APP_AUTH_MODEL
     value: "databricks-claude-sonnet-4-6"
   - name: CLAUDE_CODE_STREAM_CLOSE_TIMEOUT
     value: "3600000"

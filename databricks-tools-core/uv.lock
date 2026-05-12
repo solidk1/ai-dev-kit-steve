@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.8"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -12,7 +12,7 @@ resolution-markers = [
 [[package]]
 name = "aiohappyeyeballs"
 version = "2.4.4"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
@@ -25,7 +25,7 @@ wheels = [
 [[package]]
 name = "aiohappyeyeballs"
 version = "2.6.1"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
@@ -39,19 +39,19 @@ wheels = [
 [[package]]
 name = "aiohttp"
 version = "3.10.11"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
 ]
 dependencies = [
-    { name = "aiohappyeyeballs", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "aiosignal", version = "1.3.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "aiohappyeyeballs", version = "2.4.4", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
+    { name = "aiosignal", version = "1.3.1", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
     { name = "async-timeout", marker = "python_full_version < '3.9'" },
-    { name = "attrs", version = "25.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "frozenlist", version = "1.5.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "multidict", version = "6.1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "yarl", version = "1.15.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "attrs", version = "25.3.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
+    { name = "frozenlist", version = "1.5.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
+    { name = "multidict", version = "6.1.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
+    { name = "yarl", version = "1.15.2", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/25/a8/8e2ba36c6e3278d62e0c88aa42bb92ddbef092ac363b390dab4421da5cf5/aiohttp-3.10.11.tar.gz", hash = "sha256:9dc2b8f3dcab2e39e0fa309c8da50c3b55e6f34ab25f1a71d3288f24924d33a7", size = 7551886, upload-time = "2024-11-13T16:40:33.335Z" }
 wheels = [
@@ -150,21 +150,21 @@ wheels = [
 [[package]]
 name = "aiohttp"
 version = "3.13.3"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
     "python_full_version == '3.9.*'",
 ]
 dependencies = [
-    { name = "aiohappyeyeballs", version = "2.6.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
-    { name = "aiosignal", version = "1.4.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+    { name = "aiohappyeyeballs", version = "2.6.1", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
+    { name = "aiosignal", version = "1.4.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
     { name = "async-timeout", marker = "python_full_version >= '3.9' and python_full_version < '3.11'" },
-    { name = "attrs", version = "25.4.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
-    { name = "frozenlist", version = "1.8.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
-    { name = "multidict", version = "6.7.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
-    { name = "propcache", version = "0.4.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
-    { name = "yarl", version = "1.22.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+    { name = "attrs", version = "25.4.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
+    { name = "frozenlist", version = "1.8.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
+    { name = "multidict", version = "6.7.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
+    { name = "propcache", version = "0.4.1", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
+    { name = "yarl", version = "1.22.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/50/42/32cf8e7704ceb4481406eb87161349abb46a57fee3f008ba9cb610968646/aiohttp-3.13.3.tar.gz", hash = "sha256:a949eee43d3782f2daae4f4a2819b2cb9b0c5d3b7f7a927067cc84dafdbb9f88", size = 7844556, upload-time = "2026-01-03T17:33:05.204Z" }
 wheels = [
@@ -292,13 +292,13 @@ wheels = [
 [[package]]
 name = "aiosignal"
 version = "1.3.1"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
 ]
 dependencies = [
-    { name = "frozenlist", version = "1.5.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "frozenlist", version = "1.5.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/ae/67/0952ed97a9793b4958e5736f6d2b346b414a2cd63e82d05940032f45b32f/aiosignal-1.3.1.tar.gz", hash = "sha256:54cd96e15e1649b75d6c87526a6ff0b6c1b0dd3459f43d9ca11d48c339b68cfc", size = 19422, upload-time = "2022-11-08T16:03:58.806Z" }
 wheels = [
@@ -308,15 +308,15 @@ wheels = [
 [[package]]
 name = "aiosignal"
 version = "1.4.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
     "python_full_version == '3.9.*'",
 ]
 dependencies = [
-    { name = "frozenlist", version = "1.8.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
-    { name = "typing-extensions", version = "4.15.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9' and python_full_version < '3.13'" },
+    { name = "frozenlist", version = "1.8.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
+    { name = "typing-extensions", version = "4.15.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9' and python_full_version < '3.13'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/61/62/06741b579156360248d1ec624842ad0edf697050bbaf7c3e46394e106ad1/aiosignal-1.4.0.tar.gz", hash = "sha256:f47eecd9468083c2029cc99945502cb7708b082c232f9aca65da147157b251c7", size = 25007, upload-time = "2025-07-03T22:54:43.528Z" }
 wheels = [
@@ -326,9 +326,9 @@ wheels = [
 [[package]]
 name = "annotated-types"
 version = "0.7.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 dependencies = [
-    { name = "typing-extensions", version = "4.13.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "typing-extensions", version = "4.13.2", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/ee/67/531ea369ba64dcff5ec9c3402f9f51bf748cec26dde048a2f973a4eea7f5/annotated_types-0.7.0.tar.gz", hash = "sha256:aff07c09a53a08bc8cfccb9c85b05f1aa9a2a6f23728d790723543408344ce89", size = 16081, upload-time = "2024-05-20T21:33:25.928Z" }
 wheels = [
@@ -338,7 +338,7 @@ wheels = [
 [[package]]
 name = "anyio"
 version = "4.5.2"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
@@ -347,7 +347,7 @@ dependencies = [
     { name = "exceptiongroup", marker = "python_full_version < '3.9'" },
     { name = "idna", marker = "python_full_version < '3.9'" },
     { name = "sniffio", marker = "python_full_version < '3.9'" },
-    { name = "typing-extensions", version = "4.13.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "typing-extensions", version = "4.13.2", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/4d/f9/9a7ce600ebe7804daf90d4d48b1c0510a4561ddce43a596be46676f82343/anyio-4.5.2.tar.gz", hash = "sha256:23009af4ed04ce05991845451e11ef02fc7c5ed29179ac9a420e5ad0ac7ddc5b", size = 171293, upload-time = "2024-10-13T22:18:03.307Z" }
 wheels = [
@@ -357,7 +357,7 @@ wheels = [
 [[package]]
 name = "anyio"
 version = "4.12.1"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
@@ -366,7 +366,7 @@ resolution-markers = [
 dependencies = [
     { name = "exceptiongroup", marker = "python_full_version >= '3.9' and python_full_version < '3.11'" },
     { name = "idna", marker = "python_full_version >= '3.9'" },
-    { name = "typing-extensions", version = "4.15.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9' and python_full_version < '3.13'" },
+    { name = "typing-extensions", version = "4.15.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9' and python_full_version < '3.13'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/96/f0/5eb65b2bb0d09ac6776f2eb54adee6abe8228ea05b20a5ad0e4945de8aac/anyio-4.12.1.tar.gz", hash = "sha256:41cfcc3a4c85d3f05c932da7c26d0201ac36f72abd4435ba90d0464a3ffed703", size = 228685, upload-time = "2026-01-06T11:45:21.246Z" }
 wheels = [
@@ -376,7 +376,7 @@ wheels = [
 [[package]]
 name = "async-timeout"
 version = "5.0.1"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 sdist = { url = "https://files.pythonhosted.org/packages/a5/ae/136395dfbfe00dfc94da3f3e136d0b13f394cba8f4841120e34226265780/async_timeout-5.0.1.tar.gz", hash = "sha256:d9321a7a3d5a6a5e187e824d2fa0793ce379a202935782d555d6e9d2735677d3", size = 9274, upload-time = "2024-11-06T16:41:39.6Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/fe/ba/e2081de779ca30d473f21f5b30e0e737c438205440784c7dfc81efc2b029/async_timeout-5.0.1-py3-none-any.whl", hash = "sha256:39e3809566ff85354557ec2398b55e096c8364bacac9405a7a1fa429e77fe76c", size = 6233, upload-time = "2024-11-06T16:41:37.9Z" },
@@ -385,7 +385,7 @@ wheels = [
 [[package]]
 name = "attrs"
 version = "25.3.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
@@ -398,7 +398,7 @@ wheels = [
 [[package]]
 name = "attrs"
 version = "25.4.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
@@ -412,19 +412,19 @@ wheels = [
 [[package]]
 name = "black"
 version = "24.8.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
 ]
 dependencies = [
-    { name = "click", version = "8.1.8", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "click", version = "8.1.8", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
     { name = "mypy-extensions", marker = "python_full_version < '3.9'" },
     { name = "packaging", marker = "python_full_version < '3.9'" },
     { name = "pathspec", marker = "python_full_version < '3.9'" },
-    { name = "platformdirs", version = "4.3.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "platformdirs", version = "4.3.6", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
     { name = "tomli", marker = "python_full_version < '3.9'" },
-    { name = "typing-extensions", version = "4.13.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "typing-extensions", version = "4.13.2", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/04/b0/46fb0d4e00372f4a86a6f8efa3cb193c9f64863615e39010b1477e010578/black-24.8.0.tar.gz", hash = "sha256:2500945420b6784c38b9ee885af039f5e7471ef284ab03fa35ecdde4688cd83f", size = 644810, upload-time = "2024-08-02T17:43:18.405Z" }
 wheels = [
@@ -454,19 +454,19 @@ wheels = [
 [[package]]
 name = "black"
 version = "25.11.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version == '3.9.*'",
 ]
 dependencies = [
-    { name = "click", version = "8.1.8", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
+    { name = "click", version = "8.1.8", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version == '3.9.*'" },
     { name = "mypy-extensions", marker = "python_full_version == '3.9.*'" },
     { name = "packaging", marker = "python_full_version == '3.9.*'" },
     { name = "pathspec", marker = "python_full_version == '3.9.*'" },
-    { name = "platformdirs", version = "4.4.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
+    { name = "platformdirs", version = "4.4.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version == '3.9.*'" },
     { name = "pytokens", marker = "python_full_version == '3.9.*'" },
     { name = "tomli", marker = "python_full_version == '3.9.*'" },
-    { name = "typing-extensions", version = "4.15.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
+    { name = "typing-extensions", version = "4.15.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version == '3.9.*'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/8c/ad/33adf4708633d047950ff2dfdea2e215d84ac50ef95aff14a614e4b6e9b2/black-25.11.0.tar.gz", hash = "sha256:9a323ac32f5dc75ce7470501b887250be5005a01602e931a15e45593f70f6e08", size = 655669, upload-time = "2025-11-10T01:53:50.558Z" }
 wheels = [
@@ -500,20 +500,20 @@ wheels = [
 [[package]]
 name = "black"
 version = "25.12.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
 ]
 dependencies = [
-    { name = "click", version = "8.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "click", version = "8.3.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.10'" },
     { name = "mypy-extensions", marker = "python_full_version >= '3.10'" },
     { name = "packaging", marker = "python_full_version >= '3.10'" },
     { name = "pathspec", marker = "python_full_version >= '3.10'" },
-    { name = "platformdirs", version = "4.5.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "platformdirs", version = "4.5.1", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.10'" },
     { name = "pytokens", marker = "python_full_version >= '3.10'" },
     { name = "tomli", marker = "python_full_version == '3.10.*'" },
-    { name = "typing-extensions", version = "4.15.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.10.*'" },
+    { name = "typing-extensions", version = "4.15.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version == '3.10.*'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/c4/d9/07b458a3f1c525ac392b5edc6b191ff140b596f9d77092429417a54e249d/black-25.12.0.tar.gz", hash = "sha256:8d3dd9cea14bff7ddc0eb243c811cdb1a011ebb4800a5f0335a01a68654796a7", size = 659264, upload-time = "2025-12-08T01:40:52.501Z" }
 wheels = [
@@ -548,7 +548,7 @@ wheels = [
 [[package]]
 name = "cachetools"
 version = "5.5.2"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
@@ -561,7 +561,7 @@ wheels = [
 [[package]]
 name = "cachetools"
 version = "6.2.4"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
@@ -575,7 +575,7 @@ wheels = [
 [[package]]
 name = "certifi"
 version = "2025.11.12"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 sdist = { url = "https://files.pythonhosted.org/packages/a2/8c/58f469717fa48465e4a50c014a0400602d3c437d7c0c468e17ada824da3a/certifi-2025.11.12.tar.gz", hash = "sha256:d8ab5478f2ecd78af242878415affce761ca6bc54a22a27e026d7c25357c3316", size = 160538, upload-time = "2025-11-12T02:54:51.517Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/70/7d/9bc192684cea499815ff478dfcdc13835ddf401365057044fb721ec6bddb/certifi-2025.11.12-py3-none-any.whl", hash = "sha256:97de8790030bbd5c2d96b7ec782fc2f7820ef8dba6db909ccf95449f2d062d4b", size = 159438, upload-time = "2025-11-12T02:54:49.735Z" },
@@ -584,7 +584,7 @@ wheels = [
 [[package]]
 name = "chardet"
 version = "5.2.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 sdist = { url = "https://files.pythonhosted.org/packages/f3/0d/f7b6ab21ec75897ed80c17d79b15951a719226b9fababf1e40ea74d69079/chardet-5.2.0.tar.gz", hash = "sha256:1b3b6ff479a8c414bc3fa2c0852995695c4a026dcd6d0633b2dd092ca39c1cf7", size = 2069618, upload-time = "2023-08-01T19:23:02.662Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/38/6f/f5fbc992a329ee4e0f288c1fe0e2ad9485ed064cac731ed2fe47dcc38cbf/chardet-5.2.0-py3-none-any.whl", hash = "sha256:e1cf59446890a00105fe7b7912492ea04b6e6f06d4b742b2c788469e34c82970", size = 199385, upload-time = "2023-08-01T19:23:00.661Z" },
@@ -593,7 +593,7 @@ wheels = [
 [[package]]
 name = "charset-normalizer"
 version = "3.4.4"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 sdist = { url = "https://files.pythonhosted.org/packages/13/69/33ddede1939fdd074bce5434295f38fae7136463422fe4fd3e0e89b98062/charset_normalizer-3.4.4.tar.gz", hash = "sha256:94537985111c35f28720e43603b8e7b43a6ecfb2ce1d3058bbe955b73404e21a", size = 129418, upload-time = "2025-10-14T04:42:32.879Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/1f/b8/6d51fc1d52cbd52cd4ccedd5b5b2f0f6a11bbf6765c782298b0f3e808541/charset_normalizer-3.4.4-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:e824f1492727fa856dd6eda4f7cee25f8518a12f3c4a56a74e8095695089cf6d", size = 209709, upload-time = "2025-10-14T04:40:11.385Z" },
@@ -713,7 +713,7 @@ wheels = [
 [[package]]
 name = "click"
 version = "8.1.8"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version == '3.9.*'",
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
@@ -730,7 +730,7 @@ wheels = [
 [[package]]
 name = "click"
 version = "8.3.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
@@ -746,7 +746,7 @@ wheels = [
 [[package]]
 name = "colorama"
 version = "0.4.6"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 sdist = { url = "https://files.pythonhosted.org/packages/d8/53/6f443c9a4a8358a93a6792e2acffb9d9d5cb0a5cfd8802644b7b1c9a02e4/colorama-0.4.6.tar.gz", hash = "sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44", size = 27697, upload-time = "2022-10-25T02:36:22.414Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d1/d6/3965ed04c63042e047cb6a3e6ed1a63a35087b6a609aa3a15ed8ac56c221/colorama-0.4.6-py2.py3-none-any.whl", hash = "sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6", size = 25335, upload-time = "2022-10-25T02:36:20.889Z" },
@@ -754,18 +754,18 @@ wheels = [
 
 [[package]]
 name = "databricks-sdk"
-version = "0.76.0"
-source = { registry = "https://pypi.org/simple" }
+version = "0.102.0"
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 dependencies = [
     { name = "google-auth" },
-    { name = "protobuf", version = "5.29.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "protobuf", version = "6.33.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
-    { name = "requests", version = "2.32.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "requests", version = "2.32.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+    { name = "protobuf", version = "5.29.5", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
+    { name = "protobuf", version = "6.33.2", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
+    { name = "requests", version = "2.32.4", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
+    { name = "requests", version = "2.32.5", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/70/82/5efcfdca8779c84b5c6f61cc110d0938c9818e422f55c36a68d96b98c61f/databricks_sdk-0.76.0.tar.gz", hash = "sha256:fcfce4561b090b3c8e9cac2101f549766d9fb3bece31bb5720571919fa37d210", size = 822376, upload-time = "2025-12-17T17:11:31.907Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ab/b3/41ff1c3afe092df9085e084e0dc81c45bca5ed65f7b60dc59df0ade43c76/databricks_sdk-0.102.0.tar.gz", hash = "sha256:8fa5f82317ee27cc46323c6e2543d2cfefb4468653f92ba558271043c6f72fb9", size = 887450, upload-time = "2026-03-19T08:15:54.428Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8e/96/ee7742b94f996560c57d6fb8d2e10eab3c489e8a72187369ed0917baf8aa/databricks_sdk-0.76.0-py3-none-any.whl", hash = "sha256:6696dda22bc52c8f50a50d24e6ccd1c855f92c0f68f5afe4eb2e77d5b1b1a65f", size = 774688, upload-time = "2025-12-17T17:11:29.925Z" },
+    { url = "https://files.pythonhosted.org/packages/02/8c/d082bd5f72d7613524d5b35dfe1f71732b2246be2704fad68cd0e3fdd020/databricks_sdk-0.102.0-py3-none-any.whl", hash = "sha256:75d1253276ee8f3dd5e7b00d62594b7051838435e618f74a8570a6dbd723ec12", size = 838533, upload-time = "2026-03-19T08:15:52.248Z" },
 ]
 
 [[package]]
@@ -774,29 +774,30 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "databricks-sdk" },
-    { name = "litellm", version = "1.80.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "litellm", version = "1.80.16", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
-    { name = "pydantic", version = "2.10.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "pydantic", version = "2.12.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
-    { name = "pymupdf", version = "1.24.11", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "pymupdf", version = "1.26.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
-    { name = "pymupdf", version = "1.26.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
-    { name = "requests", version = "2.32.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "requests", version = "2.32.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
-    { name = "sqlfluff", version = "3.3.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "sqlfluff", version = "3.5.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
-    { name = "sqlglot", version = "26.33.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "sqlglot", version = "28.5.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+    { name = "litellm", version = "1.80.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
+    { name = "litellm", version = "1.80.16", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
+    { name = "pydantic", version = "2.10.6", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
+    { name = "pydantic", version = "2.12.5", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
+    { name = "pymupdf", version = "1.24.11", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
+    { name = "pymupdf", version = "1.26.5", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version == '3.9.*'" },
+    { name = "pymupdf", version = "1.26.7", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.10'" },
+    { name = "pyyaml" },
+    { name = "requests", version = "2.32.4", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
+    { name = "requests", version = "2.32.5", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
+    { name = "sqlfluff", version = "3.3.1", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
+    { name = "sqlfluff", version = "3.5.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
+    { name = "sqlglot", version = "26.33.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
+    { name = "sqlglot", version = "28.5.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
 ]
 
 [package.optional-dependencies]
 dev = [
-    { name = "black", version = "24.8.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "black", version = "25.11.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
-    { name = "black", version = "25.12.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
-    { name = "pytest", version = "8.3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "pytest", version = "8.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
-    { name = "pytest", version = "9.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "black", version = "24.8.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
+    { name = "black", version = "25.11.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version == '3.9.*'" },
+    { name = "black", version = "25.12.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.10'" },
+    { name = "pytest", version = "8.3.5", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
+    { name = "pytest", version = "8.4.2", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version == '3.9.*'" },
+    { name = "pytest", version = "9.0.2", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.10'" },
     { name = "pytest-timeout" },
     { name = "ruff" },
 ]
@@ -804,12 +805,13 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "black", marker = "extra == 'dev'", specifier = ">=23.0.0" },
-    { name = "databricks-sdk", specifier = ">=0.20.0" },
+    { name = "databricks-sdk", specifier = ">=0.81.0" },
     { name = "litellm", specifier = ">=1.0.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pymupdf", specifier = ">=1.24.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "pytest-timeout", marker = "extra == 'dev'", specifier = ">=2.0.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "requests", specifier = ">=2.31.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
     { name = "sqlfluff", specifier = ">=3.0.0" },
@@ -820,14 +822,14 @@ provides-extras = ["dev"]
 [[package]]
 name = "diff-cover"
 version = "7.7.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version < '3.8.10'",
 ]
 dependencies = [
     { name = "chardet", marker = "python_full_version < '3.8.10'" },
     { name = "jinja2", marker = "python_full_version < '3.8.10'" },
-    { name = "pluggy", version = "1.5.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.8.10'" },
+    { name = "pluggy", version = "1.5.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.8.10'" },
     { name = "pygments", marker = "python_full_version < '3.8.10'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/37/c2/f1919023fea5079b479d97793c368db8dd337170a7dbc4b5e76c1fc29d12/diff_cover-7.7.0.tar.gz", hash = "sha256:60614cf7e722cf7fb1bde497afac0b514294e1e26534449622dac4da296123fb", size = 93844, upload-time = "2023-07-15T01:51:16.778Z" }
@@ -838,14 +840,14 @@ wheels = [
 [[package]]
 name = "diff-cover"
 version = "9.2.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
 ]
 dependencies = [
     { name = "chardet", marker = "python_full_version >= '3.8.10' and python_full_version < '3.9'" },
     { name = "jinja2", marker = "python_full_version >= '3.8.10' and python_full_version < '3.9'" },
-    { name = "pluggy", version = "1.5.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.8.10' and python_full_version < '3.9'" },
+    { name = "pluggy", version = "1.5.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.8.10' and python_full_version < '3.9'" },
     { name = "pygments", marker = "python_full_version >= '3.8.10' and python_full_version < '3.9'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/44/3a/e49ccba052a4dda264fbad4f467739ecc63498f7223bfc03d4bfac23ea95/diff_cover-9.2.0.tar.gz", hash = "sha256:85a0b353ebbb678f9e87ea303f75b545bd0baca38f563219bb72f2ae862bba36", size = 94857, upload-time = "2024-09-08T00:38:06.913Z" }
@@ -856,14 +858,14 @@ wheels = [
 [[package]]
 name = "diff-cover"
 version = "10.0.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version == '3.9.*'",
 ]
 dependencies = [
     { name = "chardet", marker = "python_full_version == '3.9.*'" },
     { name = "jinja2", marker = "python_full_version == '3.9.*'" },
-    { name = "pluggy", version = "1.6.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
+    { name = "pluggy", version = "1.6.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version == '3.9.*'" },
     { name = "pygments", marker = "python_full_version == '3.9.*'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/84/f4/5d876c7d262bb40108ac6109c426ee97e49d975e8623031ae5e1d69f2d1d/diff_cover-10.0.0.tar.gz", hash = "sha256:92ead026726055bf4c1a90cd7ff83544049d467840e07c66289a4351126dbe25", size = 100934, upload-time = "2025-12-10T02:50:29.791Z" }
@@ -874,7 +876,7 @@ wheels = [
 [[package]]
 name = "diff-cover"
 version = "10.1.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
@@ -882,7 +884,7 @@ resolution-markers = [
 dependencies = [
     { name = "chardet", marker = "python_full_version >= '3.10'" },
     { name = "jinja2", marker = "python_full_version >= '3.10'" },
-    { name = "pluggy", version = "1.6.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "pluggy", version = "1.6.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.10'" },
     { name = "pygments", marker = "python_full_version >= '3.10'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/30/d2/764a9889d14c30600dea9ddb745ab64af2ca41dcd3cfd272e45654352ccb/diff_cover-10.1.0.tar.gz", hash = "sha256:fd21db41eebe9a6facac5c8f49e4bb164d010211b40694c05b151aa99331dd5e", size = 101730, upload-time = "2025-12-31T03:36:49.493Z" }
@@ -893,7 +895,7 @@ wheels = [
 [[package]]
 name = "distro"
 version = "1.9.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 sdist = { url = "https://files.pythonhosted.org/packages/fc/f8/98eea607f65de6527f8a2e8885fc8015d3e6f5775df186e443e0964a11c3/distro-1.9.0.tar.gz", hash = "sha256:2fa77c6fd8940f116ee1d6b94a2f90b13b5ea8d019b98bc8bafdcabcdd9bdbed", size = 60722, upload-time = "2023-12-24T09:54:32.31Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/12/b3/231ffd4ab1fc9d679809f356cebee130ac7daa00d6d6f3206dd4fd137e9e/distro-1.9.0-py3-none-any.whl", hash = "sha256:7bffd925d65168f85027d8da9af6bddab658135b840670a223589bc0c8ef02b2", size = 20277, upload-time = "2023-12-24T09:54:30.421Z" },
@@ -902,10 +904,10 @@ wheels = [
 [[package]]
 name = "exceptiongroup"
 version = "1.3.1"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 dependencies = [
-    { name = "typing-extensions", version = "4.13.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "typing-extensions", version = "4.15.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9' and python_full_version < '3.13'" },
+    { name = "typing-extensions", version = "4.13.2", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
+    { name = "typing-extensions", version = "4.15.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9' and python_full_version < '3.13'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/50/79/66800aadf48771f6b62f7eb014e352e5d06856655206165d775e675a02c9/exceptiongroup-1.3.1.tar.gz", hash = "sha256:8b412432c6055b0b7d14c310000ae93352ed6754f70fa8f7c34141f91c4e3219", size = 30371, upload-time = "2025-11-21T23:01:54.787Z" }
 wheels = [
@@ -915,7 +917,7 @@ wheels = [
 [[package]]
 name = "fastuuid"
 version = "0.14.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 sdist = { url = "https://files.pythonhosted.org/packages/c3/7d/d9daedf0f2ebcacd20d599928f8913e9d2aea1d56d2d355a93bfa2b611d7/fastuuid-0.14.0.tar.gz", hash = "sha256:178947fc2f995b38497a74172adee64fdeb8b7ec18f2a5934d037641ba265d26", size = 18232, upload-time = "2025-10-19T22:19:22.402Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ad/b2/731a6696e37cd20eed353f69a09f37a984a43c9713764ee3f7ad5f57f7f9/fastuuid-0.14.0-cp310-cp310-macosx_10_12_x86_64.macosx_11_0_arm64.macosx_10_12_universal2.whl", hash = "sha256:6e6243d40f6c793c3e2ee14c13769e341b90be5ef0c23c82fa6515a96145181a", size = 516760, upload-time = "2025-10-19T22:25:21.509Z" },
@@ -1000,7 +1002,7 @@ wheels = [
 [[package]]
 name = "filelock"
 version = "3.16.1"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
@@ -1013,7 +1015,7 @@ wheels = [
 [[package]]
 name = "filelock"
 version = "3.19.1"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version == '3.9.*'",
 ]
@@ -1025,7 +1027,7 @@ wheels = [
 [[package]]
 name = "filelock"
 version = "3.20.3"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
@@ -1038,7 +1040,7 @@ wheels = [
 [[package]]
 name = "frozenlist"
 version = "1.5.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
@@ -1141,7 +1143,7 @@ wheels = [
 [[package]]
 name = "frozenlist"
 version = "1.8.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
@@ -1283,7 +1285,7 @@ wheels = [
 [[package]]
 name = "fsspec"
 version = "2025.3.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
@@ -1296,7 +1298,7 @@ wheels = [
 [[package]]
 name = "fsspec"
 version = "2025.10.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version == '3.9.*'",
 ]
@@ -1308,7 +1310,7 @@ wheels = [
 [[package]]
 name = "fsspec"
 version = "2026.1.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
@@ -1321,10 +1323,10 @@ wheels = [
 [[package]]
 name = "google-auth"
 version = "2.45.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 dependencies = [
-    { name = "cachetools", version = "5.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "cachetools", version = "6.2.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+    { name = "cachetools", version = "5.5.2", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
+    { name = "cachetools", version = "6.2.4", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
     { name = "pyasn1-modules" },
     { name = "rsa" },
 ]
@@ -1336,9 +1338,9 @@ wheels = [
 [[package]]
 name = "grpcio"
 version = "1.76.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 dependencies = [
-    { name = "typing-extensions", version = "4.15.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+    { name = "typing-extensions", version = "4.15.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/b6/e0/318c1ce3ae5a17894d5791e87aea147587c9e702f24122cc7a5c8bbaeeb1/grpcio-1.76.0.tar.gz", hash = "sha256:7be78388d6da1a25c0d5ec506523db58b18be22d9c37d8d3a32c08be4987bd73", size = 12785182, upload-time = "2025-10-21T16:23:12.106Z" }
 wheels = [
@@ -1407,7 +1409,7 @@ wheels = [
 [[package]]
 name = "h11"
 version = "0.16.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 sdist = { url = "https://files.pythonhosted.org/packages/01/ee/02a2c011bdab74c6fb3c75474d40b3052059d95df7e73351460c8588d963/h11-0.16.0.tar.gz", hash = "sha256:4e35b956cf45792e4caa5885e69fba00bdbc6ffafbfa020300e549b208ee5ff1", size = 101250, upload-time = "2025-04-24T03:35:25.427Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/04/4b/29cac41a4d98d144bf5f6d33995617b185d14b22401f75ca86f384e87ff1/h11-0.16.0-py3-none-any.whl", hash = "sha256:63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86", size = 37515, upload-time = "2025-04-24T03:35:24.344Z" },
@@ -1416,7 +1418,7 @@ wheels = [
 [[package]]
 name = "hf-xet"
 version = "1.2.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 sdist = { url = "https://files.pythonhosted.org/packages/5e/6e/0f11bacf08a67f7fb5ee09740f2ca54163863b07b70d579356e9222ce5d8/hf_xet-1.2.0.tar.gz", hash = "sha256:a8c27070ca547293b6890c4bf389f713f80e8c478631432962bb7f4bc0bd7d7f", size = 506020, upload-time = "2025-10-24T19:04:32.129Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/9e/a5/85ef910a0aa034a2abcfadc360ab5ac6f6bc4e9112349bd40ca97551cff0/hf_xet-1.2.0-cp313-cp313t-macosx_10_12_x86_64.whl", hash = "sha256:ceeefcd1b7aed4956ae8499e2199607765fbd1c60510752003b6cc0b8413b649", size = 2861870, upload-time = "2025-10-24T19:04:11.422Z" },
@@ -1445,7 +1447,7 @@ wheels = [
 [[package]]
 name = "httpcore"
 version = "1.0.9"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 dependencies = [
     { name = "certifi" },
     { name = "h11" },
@@ -1458,10 +1460,10 @@ wheels = [
 [[package]]
 name = "httpx"
 version = "0.28.1"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 dependencies = [
-    { name = "anyio", version = "4.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "anyio", version = "4.12.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+    { name = "anyio", version = "4.5.2", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
+    { name = "anyio", version = "4.12.1", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
     { name = "certifi" },
     { name = "httpcore" },
     { name = "idna" },
@@ -1474,20 +1476,20 @@ wheels = [
 [[package]]
 name = "huggingface-hub"
 version = "0.36.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
 ]
 dependencies = [
-    { name = "filelock", version = "3.16.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "fsspec", version = "2025.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "filelock", version = "3.16.1", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
+    { name = "fsspec", version = "2025.3.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
     { name = "hf-xet", marker = "(python_full_version < '3.9' and platform_machine == 'aarch64') or (python_full_version < '3.9' and platform_machine == 'amd64') or (python_full_version < '3.9' and platform_machine == 'arm64') or (python_full_version < '3.9' and platform_machine == 'x86_64')" },
     { name = "packaging", marker = "python_full_version < '3.9'" },
     { name = "pyyaml", marker = "python_full_version < '3.9'" },
-    { name = "requests", version = "2.32.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "requests", version = "2.32.4", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
     { name = "tqdm", marker = "python_full_version < '3.9'" },
-    { name = "typing-extensions", version = "4.13.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "typing-extensions", version = "4.13.2", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/98/63/4910c5fa9128fdadf6a9c5ac138e8b1b6cee4ca44bf7915bbfbce4e355ee/huggingface_hub-0.36.0.tar.gz", hash = "sha256:47b3f0e2539c39bf5cde015d63b72ec49baff67b6931c3d97f3f84532e2b8d25", size = 463358, upload-time = "2025-10-23T12:12:01.413Z" }
 wheels = [
@@ -1497,17 +1499,17 @@ wheels = [
 [[package]]
 name = "huggingface-hub"
 version = "1.3.2"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
     "python_full_version == '3.9.*'",
 ]
 dependencies = [
-    { name = "filelock", version = "3.19.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
-    { name = "filelock", version = "3.20.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
-    { name = "fsspec", version = "2025.10.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
-    { name = "fsspec", version = "2026.1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "filelock", version = "3.19.1", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version == '3.9.*'" },
+    { name = "filelock", version = "3.20.3", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.10'" },
+    { name = "fsspec", version = "2025.10.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version == '3.9.*'" },
+    { name = "fsspec", version = "2026.1.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.10'" },
     { name = "hf-xet", marker = "(python_full_version >= '3.9' and platform_machine == 'AMD64') or (python_full_version >= '3.9' and platform_machine == 'aarch64') or (python_full_version >= '3.9' and platform_machine == 'amd64') or (python_full_version >= '3.9' and platform_machine == 'arm64') or (python_full_version >= '3.9' and platform_machine == 'x86_64')" },
     { name = "httpx", marker = "python_full_version >= '3.9'" },
     { name = "packaging", marker = "python_full_version >= '3.9'" },
@@ -1515,7 +1517,7 @@ dependencies = [
     { name = "shellingham", marker = "python_full_version >= '3.9'" },
     { name = "tqdm", marker = "python_full_version >= '3.9'" },
     { name = "typer-slim", marker = "python_full_version >= '3.9'" },
-    { name = "typing-extensions", version = "4.15.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+    { name = "typing-extensions", version = "4.15.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/ba/d6/02d1c505e1d3364230e5fa16d2b58c8f36a39c5efe8e99bc4d03d06fd0ca/huggingface_hub-1.3.2.tar.gz", hash = "sha256:15d7902e154f04174a0816d1e9594adcf15cdad57596920a5dc70fadb5d896c7", size = 624018, upload-time = "2026-01-14T13:57:39.635Z" }
 wheels = [
@@ -1525,7 +1527,7 @@ wheels = [
 [[package]]
 name = "idna"
 version = "3.11"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 sdist = { url = "https://files.pythonhosted.org/packages/6f/6d/0703ccc57f3a7233505399edb88de3cbd678da106337b9fcde432b65ed60/idna-3.11.tar.gz", hash = "sha256:795dafcc9c04ed0c1fb032c2aa73654d8e8c5023a7df64a53f39190ada629902", size = 194582, upload-time = "2025-10-12T14:55:20.501Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/0e/61/66938bbb5fc52dbdf84594873d5b51fb1f7c7794e9c0f5bd885f30bc507b/idna-3.11-py3-none-any.whl", hash = "sha256:771a87f49d9defaf64091e6e6fe9c18d4833f140bd19464795bc32d966ca37ea", size = 71008, upload-time = "2025-10-12T14:55:18.883Z" },
@@ -1534,7 +1536,7 @@ wheels = [
 [[package]]
 name = "importlib-metadata"
 version = "8.5.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
@@ -1550,7 +1552,7 @@ wheels = [
 [[package]]
 name = "importlib-metadata"
 version = "8.7.1"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
@@ -1567,7 +1569,7 @@ wheels = [
 [[package]]
 name = "importlib-resources"
 version = "6.4.5"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 dependencies = [
     { name = "zipp", marker = "python_full_version < '3.9'" },
 ]
@@ -1579,7 +1581,7 @@ wheels = [
 [[package]]
 name = "iniconfig"
 version = "2.1.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version == '3.9.*'",
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
@@ -1593,7 +1595,7 @@ wheels = [
 [[package]]
 name = "iniconfig"
 version = "2.3.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
@@ -1606,10 +1608,10 @@ wheels = [
 [[package]]
 name = "jinja2"
 version = "3.1.6"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 dependencies = [
-    { name = "markupsafe", version = "2.1.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "markupsafe", version = "3.0.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+    { name = "markupsafe", version = "2.1.5", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
+    { name = "markupsafe", version = "3.0.3", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/df/bf/f7da0350254c0ed7c72f3e33cef02e048281fec7ecec5f032d4aac52226b/jinja2-3.1.6.tar.gz", hash = "sha256:0137fb05990d35f1275a587e9aee6d56da821fc83491a0fb838183be43f66d6d", size = 245115, upload-time = "2025-03-05T20:05:02.478Z" }
 wheels = [
@@ -1619,7 +1621,7 @@ wheels = [
 [[package]]
 name = "jiter"
 version = "0.9.1"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
@@ -1706,7 +1708,7 @@ wheels = [
 [[package]]
 name = "jiter"
 version = "0.12.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
@@ -1820,18 +1822,18 @@ wheels = [
 [[package]]
 name = "jsonschema"
 version = "4.23.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
 ]
 dependencies = [
-    { name = "attrs", version = "25.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "attrs", version = "25.3.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
     { name = "importlib-resources", marker = "python_full_version < '3.9'" },
-    { name = "jsonschema-specifications", version = "2023.12.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "jsonschema-specifications", version = "2023.12.1", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
     { name = "pkgutil-resolve-name", marker = "python_full_version < '3.9'" },
-    { name = "referencing", version = "0.35.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "rpds-py", version = "0.20.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "referencing", version = "0.35.1", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
+    { name = "rpds-py", version = "0.20.1", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/38/2e/03362ee4034a4c917f697890ccd4aec0800ccf9ded7f511971c75451deec/jsonschema-4.23.0.tar.gz", hash = "sha256:d71497fef26351a33265337fa77ffeb82423f3ea21283cd9467bb03999266bc4", size = 325778, upload-time = "2024-07-08T18:40:05.546Z" }
 wheels = [
@@ -1841,15 +1843,15 @@ wheels = [
 [[package]]
 name = "jsonschema"
 version = "4.25.1"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version == '3.9.*'",
 ]
 dependencies = [
-    { name = "attrs", version = "25.4.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
-    { name = "jsonschema-specifications", version = "2025.9.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
-    { name = "referencing", version = "0.36.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
-    { name = "rpds-py", version = "0.27.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
+    { name = "attrs", version = "25.4.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version == '3.9.*'" },
+    { name = "jsonschema-specifications", version = "2025.9.1", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version == '3.9.*'" },
+    { name = "referencing", version = "0.36.2", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version == '3.9.*'" },
+    { name = "rpds-py", version = "0.27.1", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version == '3.9.*'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/74/69/f7185de793a29082a9f3c7728268ffb31cb5095131a9c139a74078e27336/jsonschema-4.25.1.tar.gz", hash = "sha256:e4a9655ce0da0c0b67a085847e00a3a51449e1157f4f75e9fb5aa545e122eb85", size = 357342, upload-time = "2025-08-18T17:03:50.038Z" }
 wheels = [
@@ -1859,16 +1861,16 @@ wheels = [
 [[package]]
 name = "jsonschema"
 version = "4.26.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
 ]
 dependencies = [
-    { name = "attrs", version = "25.4.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
-    { name = "jsonschema-specifications", version = "2025.9.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
-    { name = "referencing", version = "0.37.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
-    { name = "rpds-py", version = "0.30.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "attrs", version = "25.4.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.10'" },
+    { name = "jsonschema-specifications", version = "2025.9.1", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.10'" },
+    { name = "referencing", version = "0.37.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.10'" },
+    { name = "rpds-py", version = "0.30.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.10'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/b3/fc/e067678238fa451312d4c62bf6e6cf5ec56375422aee02f9cb5f909b3047/jsonschema-4.26.0.tar.gz", hash = "sha256:0c26707e2efad8aa1bfc5b7ce170f3fccc2e4918ff85989ba9ffa9facb2be326", size = 366583, upload-time = "2026-01-07T13:41:07.246Z" }
 wheels = [
@@ -1878,14 +1880,14 @@ wheels = [
 [[package]]
 name = "jsonschema-specifications"
 version = "2023.12.1"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
 ]
 dependencies = [
     { name = "importlib-resources", marker = "python_full_version < '3.9'" },
-    { name = "referencing", version = "0.35.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "referencing", version = "0.35.1", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/f8/b9/cc0cc592e7c195fb8a650c1d5990b10175cf13b4c97465c72ec841de9e4b/jsonschema_specifications-2023.12.1.tar.gz", hash = "sha256:48a76787b3e70f5ed53f1160d2b81f586e4ca6d1548c5de7085d1682674764cc", size = 13983, upload-time = "2023-12-25T15:16:53.63Z" }
 wheels = [
@@ -1895,15 +1897,15 @@ wheels = [
 [[package]]
 name = "jsonschema-specifications"
 version = "2025.9.1"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
     "python_full_version == '3.9.*'",
 ]
 dependencies = [
-    { name = "referencing", version = "0.36.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
-    { name = "referencing", version = "0.37.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "referencing", version = "0.36.2", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version == '3.9.*'" },
+    { name = "referencing", version = "0.37.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.10'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/19/74/a633ee74eb36c44aa6d1095e7cc5569bebf04342ee146178e2d36600708b/jsonschema_specifications-2025.9.1.tar.gz", hash = "sha256:b540987f239e745613c7a9176f3edb72b832a4ac465cf02712288397832b5e8d", size = 32855, upload-time = "2025-09-08T01:34:59.186Z" }
 wheels = [
@@ -1913,24 +1915,24 @@ wheels = [
 [[package]]
 name = "litellm"
 version = "1.80.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
 ]
 dependencies = [
-    { name = "aiohttp", version = "3.10.11", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "click", version = "8.1.8", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "aiohttp", version = "3.10.11", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
+    { name = "click", version = "8.1.8", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
     { name = "fastuuid", marker = "python_full_version < '3.9'" },
     { name = "httpx", marker = "python_full_version < '3.9'" },
-    { name = "importlib-metadata", version = "8.5.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "importlib-metadata", version = "8.5.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
     { name = "jinja2", marker = "python_full_version < '3.9'" },
-    { name = "jsonschema", version = "4.23.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "openai", version = "2.2.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "pydantic", version = "2.10.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "python-dotenv", version = "1.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "tiktoken", version = "0.7.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "tokenizers", version = "0.21.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "jsonschema", version = "4.23.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
+    { name = "openai", version = "2.2.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
+    { name = "pydantic", version = "2.10.6", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
+    { name = "python-dotenv", version = "1.0.1", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
+    { name = "tiktoken", version = "0.7.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
+    { name = "tokenizers", version = "0.21.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/bd/8c/48d533affdbc6d485b7ad4221cd3b40b8c12f9f5568edfe0be0b11e7b945/litellm-1.80.0.tar.gz", hash = "sha256:eeac733eb6b226f9e5fb020f72fe13a32b3354b001dc62bcf1bc4d9b526d6231", size = 11591976, upload-time = "2025-11-16T00:03:51.812Z" }
 wheels = [
@@ -1940,28 +1942,28 @@ wheels = [
 [[package]]
 name = "litellm"
 version = "1.80.16"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
     "python_full_version == '3.9.*'",
 ]
 dependencies = [
-    { name = "aiohttp", version = "3.13.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
-    { name = "click", version = "8.1.8", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
-    { name = "click", version = "8.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "aiohttp", version = "3.13.3", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
+    { name = "click", version = "8.1.8", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version == '3.9.*'" },
+    { name = "click", version = "8.3.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.10'" },
     { name = "fastuuid", marker = "python_full_version >= '3.9'" },
     { name = "grpcio", marker = "python_full_version >= '3.9'" },
     { name = "httpx", marker = "python_full_version >= '3.9'" },
-    { name = "importlib-metadata", version = "8.7.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+    { name = "importlib-metadata", version = "8.7.1", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
     { name = "jinja2", marker = "python_full_version >= '3.9'" },
-    { name = "jsonschema", version = "4.25.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
-    { name = "jsonschema", version = "4.26.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
-    { name = "openai", version = "2.15.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
-    { name = "pydantic", version = "2.12.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
-    { name = "python-dotenv", version = "1.2.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
-    { name = "tiktoken", version = "0.12.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
-    { name = "tokenizers", version = "0.22.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+    { name = "jsonschema", version = "4.25.1", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version == '3.9.*'" },
+    { name = "jsonschema", version = "4.26.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.10'" },
+    { name = "openai", version = "2.15.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
+    { name = "pydantic", version = "2.12.5", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
+    { name = "python-dotenv", version = "1.2.1", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
+    { name = "tiktoken", version = "0.12.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
+    { name = "tokenizers", version = "0.22.2", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/ac/cc/03bf7849c62587db0fb7c46f427d6a49290750752d3189a0bd95d4b78587/litellm-1.80.16.tar.gz", hash = "sha256:f96233649f99ab097f7d8a3ff9898680207b9eea7d2e23f438074a3dbcf50cca", size = 13384256, upload-time = "2026-01-13T08:52:23.067Z" }
 wheels = [
@@ -1971,7 +1973,7 @@ wheels = [
 [[package]]
 name = "markupsafe"
 version = "2.1.5"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
@@ -2033,7 +2035,7 @@ wheels = [
 [[package]]
 name = "markupsafe"
 version = "3.0.3"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
@@ -2134,13 +2136,13 @@ wheels = [
 [[package]]
 name = "multidict"
 version = "6.1.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
 ]
 dependencies = [
-    { name = "typing-extensions", version = "4.13.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "typing-extensions", version = "4.13.2", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/d6/be/504b89a5e9ca731cd47487e91c469064f8ae5af93b7259758dcfc2b9c848/multidict-6.1.0.tar.gz", hash = "sha256:22ae2ebf9b0c69d206c003e2f6a914ea33f0a932d4aa16f236afc049d9958f4a", size = 64002, upload-time = "2024-09-09T23:49:38.163Z" }
 wheels = [
@@ -2240,14 +2242,14 @@ wheels = [
 [[package]]
 name = "multidict"
 version = "6.7.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
     "python_full_version == '3.9.*'",
 ]
 dependencies = [
-    { name = "typing-extensions", version = "4.15.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9' and python_full_version < '3.11'" },
+    { name = "typing-extensions", version = "4.15.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9' and python_full_version < '3.11'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/80/1e/5492c365f222f907de1039b91f922b93fa4f764c713ee858d235495d8f50/multidict-6.7.0.tar.gz", hash = "sha256:c6e99d9a65ca282e578dfea819cfa9c0a62b2499d8677392e09feaf305e9e6f5", size = 101834, upload-time = "2025-10-06T14:52:30.657Z" }
 wheels = [
@@ -2401,7 +2403,7 @@ wheels = [
 [[package]]
 name = "mypy-extensions"
 version = "1.1.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 sdist = { url = "https://files.pythonhosted.org/packages/a2/6e/371856a3fb9d31ca8dac321cda606860fa4548858c0cc45d9d1d4ca2628b/mypy_extensions-1.1.0.tar.gz", hash = "sha256:52e68efc3284861e772bbcd66823fde5ae21fd2fdb51c62a211403730b916558", size = 6343, upload-time = "2025-04-22T14:54:24.164Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/79/7b/2c79738432f5c924bef5071f933bcc9efd0473bac3b4aa584a6f7c1c8df8/mypy_extensions-1.1.0-py3-none-any.whl", hash = "sha256:1be4cccdb0f2482337c4743e60421de3a356cd97508abadd57d47403e94f5505", size = 4963, upload-time = "2025-04-22T14:54:22.983Z" },
@@ -2410,20 +2412,20 @@ wheels = [
 [[package]]
 name = "openai"
 version = "2.2.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
 ]
 dependencies = [
-    { name = "anyio", version = "4.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "anyio", version = "4.5.2", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
     { name = "distro", marker = "python_full_version < '3.9'" },
     { name = "httpx", marker = "python_full_version < '3.9'" },
-    { name = "jiter", version = "0.9.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "pydantic", version = "2.10.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "jiter", version = "0.9.1", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
+    { name = "pydantic", version = "2.10.6", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
     { name = "sniffio", marker = "python_full_version < '3.9'" },
     { name = "tqdm", marker = "python_full_version < '3.9'" },
-    { name = "typing-extensions", version = "4.13.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "typing-extensions", version = "4.13.2", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/b8/b1/8201e321a7d64a25c6f5a560320272d8be70547add40311fceb916518632/openai-2.2.0.tar.gz", hash = "sha256:bc49d077a8bf0e370eec4d038bc05e232c20855a19df0b58e5b3e5a8da7d33e0", size = 588512, upload-time = "2025-10-06T18:08:13.665Z" }
 wheels = [
@@ -2433,21 +2435,21 @@ wheels = [
 [[package]]
 name = "openai"
 version = "2.15.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
     "python_full_version == '3.9.*'",
 ]
 dependencies = [
-    { name = "anyio", version = "4.12.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+    { name = "anyio", version = "4.12.1", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
     { name = "distro", marker = "python_full_version >= '3.9'" },
     { name = "httpx", marker = "python_full_version >= '3.9'" },
-    { name = "jiter", version = "0.12.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
-    { name = "pydantic", version = "2.12.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+    { name = "jiter", version = "0.12.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
+    { name = "pydantic", version = "2.12.5", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
     { name = "sniffio", marker = "python_full_version >= '3.9'" },
     { name = "tqdm", marker = "python_full_version >= '3.9'" },
-    { name = "typing-extensions", version = "4.15.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+    { name = "typing-extensions", version = "4.15.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/94/f4/4690ecb5d70023ce6bfcfeabfe717020f654bde59a775058ec6ac4692463/openai-2.15.0.tar.gz", hash = "sha256:42eb8cbb407d84770633f31bf727d4ffb4138711c670565a41663d9439174fba", size = 627383, upload-time = "2026-01-09T22:10:08.603Z" }
 wheels = [
@@ -2457,7 +2459,7 @@ wheels = [
 [[package]]
 name = "packaging"
 version = "25.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 sdist = { url = "https://files.pythonhosted.org/packages/a1/d4/1fc4078c65507b51b96ca8f8c3ba19e6a61c8253c72794544580a7b6c24d/packaging-25.0.tar.gz", hash = "sha256:d443872c98d677bf60f6a1f2f8c1cb748e8fe762d2bf9d3148b5599295b0fc4f", size = 165727, upload-time = "2025-04-19T11:48:59.673Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/20/12/38679034af332785aac8774540895e234f4d07f7545804097de4b666afd8/packaging-25.0-py3-none-any.whl", hash = "sha256:29572ef2b1f17581046b3a2227d5c611fb25ec70ca1ba8554b24b0e69331a484", size = 66469, upload-time = "2025-04-19T11:48:57.875Z" },
@@ -2466,7 +2468,7 @@ wheels = [
 [[package]]
 name = "pathspec"
 version = "0.12.1"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 sdist = { url = "https://files.pythonhosted.org/packages/ca/bc/f35b8446f4531a7cb215605d100cd88b7ac6f44ab3fc94870c120ab3adbf/pathspec-0.12.1.tar.gz", hash = "sha256:a482d51503a1ab33b1c67a6c3813a26953dbdc71c31dacaef9a838c4e29f5712", size = 51043, upload-time = "2023-12-10T22:30:45Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/cc/20/ff623b09d963f88bfde16306a54e12ee5ea43e9b597108672ff3a408aad6/pathspec-0.12.1-py3-none-any.whl", hash = "sha256:a0d503e138a4c123b27490a4f7beda6a01c6f288df0e4a8b79c7eb0dc7b4cc08", size = 31191, upload-time = "2023-12-10T22:30:43.14Z" },
@@ -2475,7 +2477,7 @@ wheels = [
 [[package]]
 name = "pkgutil-resolve-name"
 version = "1.3.10"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 sdist = { url = "https://files.pythonhosted.org/packages/70/f2/f2891a9dc37398696ddd945012b90ef8d0a034f0012e3f83c3f7a70b0f79/pkgutil_resolve_name-1.3.10.tar.gz", hash = "sha256:357d6c9e6a755653cfd78893817c0853af365dd51ec97f3d358a819373bbd174", size = 5054, upload-time = "2021-07-21T08:19:05.096Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c9/5c/3d4882ba113fd55bdba9326c1e4c62a15e674a2501de4869e6bd6301f87e/pkgutil_resolve_name-1.3.10-py3-none-any.whl", hash = "sha256:ca27cc078d25c5ad71a9de0a7a330146c4e014c2462d9af19c6b828280649c5e", size = 4734, upload-time = "2021-07-21T08:19:03.106Z" },
@@ -2484,7 +2486,7 @@ wheels = [
 [[package]]
 name = "platformdirs"
 version = "4.3.6"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
@@ -2497,7 +2499,7 @@ wheels = [
 [[package]]
 name = "platformdirs"
 version = "4.4.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version == '3.9.*'",
 ]
@@ -2509,7 +2511,7 @@ wheels = [
 [[package]]
 name = "platformdirs"
 version = "4.5.1"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
@@ -2522,7 +2524,7 @@ wheels = [
 [[package]]
 name = "pluggy"
 version = "1.5.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
@@ -2535,7 +2537,7 @@ wheels = [
 [[package]]
 name = "pluggy"
 version = "1.6.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
@@ -2549,7 +2551,7 @@ wheels = [
 [[package]]
 name = "propcache"
 version = "0.2.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
@@ -2658,7 +2660,7 @@ wheels = [
 [[package]]
 name = "propcache"
 version = "0.4.1"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
@@ -2792,7 +2794,7 @@ wheels = [
 [[package]]
 name = "protobuf"
 version = "5.29.5"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
@@ -2814,7 +2816,7 @@ wheels = [
 [[package]]
 name = "protobuf"
 version = "6.33.2"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
@@ -2836,7 +2838,7 @@ wheels = [
 [[package]]
 name = "pyasn1"
 version = "0.6.1"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 sdist = { url = "https://files.pythonhosted.org/packages/ba/e9/01f1a64245b89f039897cb0130016d79f77d52669aae6ee7b159a6c4c018/pyasn1-0.6.1.tar.gz", hash = "sha256:6f580d2bdd84365380830acf45550f2511469f673cb4a5ae3857a3170128b034", size = 145322, upload-time = "2024-09-10T22:41:42.55Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c8/f1/d6a797abb14f6283c0ddff96bbdd46937f64122b8c925cab503dd37f8214/pyasn1-0.6.1-py3-none-any.whl", hash = "sha256:0d632f46f2ba09143da3a8afe9e33fb6f92fa2320ab7e886e2d0f7672af84629", size = 83135, upload-time = "2024-09-11T16:00:36.122Z" },
@@ -2845,7 +2847,7 @@ wheels = [
 [[package]]
 name = "pyasn1-modules"
 version = "0.4.2"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 dependencies = [
     { name = "pyasn1" },
 ]
@@ -2857,15 +2859,15 @@ wheels = [
 [[package]]
 name = "pydantic"
 version = "2.10.6"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
 ]
 dependencies = [
     { name = "annotated-types", marker = "python_full_version < '3.9'" },
-    { name = "pydantic-core", version = "2.27.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "typing-extensions", version = "4.13.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "pydantic-core", version = "2.27.2", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
+    { name = "typing-extensions", version = "4.13.2", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/b7/ae/d5220c5c52b158b1de7ca89fc5edb72f304a70a4c540c84c8844bf4008de/pydantic-2.10.6.tar.gz", hash = "sha256:ca5daa827cce33de7a42be142548b0096bf05a7e7b365aebfa5f8eeec7128236", size = 761681, upload-time = "2025-01-24T01:42:12.693Z" }
 wheels = [
@@ -2875,7 +2877,7 @@ wheels = [
 [[package]]
 name = "pydantic"
 version = "2.12.5"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
@@ -2883,8 +2885,8 @@ resolution-markers = [
 ]
 dependencies = [
     { name = "annotated-types", marker = "python_full_version >= '3.9'" },
-    { name = "pydantic-core", version = "2.41.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
-    { name = "typing-extensions", version = "4.15.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+    { name = "pydantic-core", version = "2.41.5", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
+    { name = "typing-extensions", version = "4.15.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
     { name = "typing-inspection", marker = "python_full_version >= '3.9'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/69/44/36f1a6e523abc58ae5f928898e4aca2e0ea509b5aa6f6f392a5d882be928/pydantic-2.12.5.tar.gz", hash = "sha256:4d351024c75c0f085a9febbb665ce8c0c6ec5d30e903bdb6394b7ede26aebb49", size = 821591, upload-time = "2025-11-26T15:11:46.471Z" }
@@ -2895,13 +2897,13 @@ wheels = [
 [[package]]
 name = "pydantic-core"
 version = "2.27.2"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
 ]
 dependencies = [
-    { name = "typing-extensions", version = "4.13.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "typing-extensions", version = "4.13.2", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/fc/01/f3e5ac5e7c25833db5eb555f7b7ab24cd6f8c322d3a3ad2d67a952dc0abc/pydantic_core-2.27.2.tar.gz", hash = "sha256:eb026e5a4c1fee05726072337ff51d1efb6f59090b7da90d30ea58625b1ffb39", size = 413443, upload-time = "2024-12-18T11:31:54.917Z" }
 wheels = [
@@ -3009,14 +3011,14 @@ wheels = [
 [[package]]
 name = "pydantic-core"
 version = "2.41.5"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
     "python_full_version == '3.9.*'",
 ]
 dependencies = [
-    { name = "typing-extensions", version = "4.15.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+    { name = "typing-extensions", version = "4.15.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/71/70/23b021c950c2addd24ec408e9ab05d59b035b39d97cdc1130e1bce647bb6/pydantic_core-2.41.5.tar.gz", hash = "sha256:08daa51ea16ad373ffd5e7606252cc32f07bc72b28284b6bc9c6df804816476e", size = 460952, upload-time = "2025-11-04T13:43:49.098Z" }
 wheels = [
@@ -3145,7 +3147,7 @@ wheels = [
 [[package]]
 name = "pygments"
 version = "2.19.2"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 sdist = { url = "https://files.pythonhosted.org/packages/b0/77/a5b8c569bf593b0140bde72ea885a803b82086995367bf2037de0159d924/pygments-2.19.2.tar.gz", hash = "sha256:636cb2477cec7f8952536970bc533bc43743542f70392ae026374600add5b887", size = 4968631, upload-time = "2025-06-21T13:39:12.283Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c7/21/705964c7812476f378728bdf590ca4b771ec72385c533964653c68e86bdc/pygments-2.19.2-py3-none-any.whl", hash = "sha256:86540386c03d588bb81d44bc3928634ff26449851e99741617ecb9037ee5ec0b", size = 1225217, upload-time = "2025-06-21T13:39:07.939Z" },
@@ -3154,7 +3156,7 @@ wheels = [
 [[package]]
 name = "pymupdf"
 version = "1.24.11"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
@@ -3173,7 +3175,7 @@ wheels = [
 [[package]]
 name = "pymupdf"
 version = "1.26.5"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version == '3.9.*'",
 ]
@@ -3191,7 +3193,7 @@ wheels = [
 [[package]]
 name = "pymupdf"
 version = "1.26.7"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
@@ -3210,7 +3212,7 @@ wheels = [
 [[package]]
 name = "pytest"
 version = "8.3.5"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
@@ -3218,9 +3220,9 @@ resolution-markers = [
 dependencies = [
     { name = "colorama", marker = "python_full_version < '3.9' and sys_platform == 'win32'" },
     { name = "exceptiongroup", marker = "python_full_version < '3.9'" },
-    { name = "iniconfig", version = "2.1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "iniconfig", version = "2.1.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
     { name = "packaging", marker = "python_full_version < '3.9'" },
-    { name = "pluggy", version = "1.5.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "pluggy", version = "1.5.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
     { name = "tomli", marker = "python_full_version < '3.9'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/ae/3c/c9d525a414d506893f0cd8a8d0de7706446213181570cdbd766691164e40/pytest-8.3.5.tar.gz", hash = "sha256:f4efe70cc14e511565ac476b57c279e12a855b11f48f212af1080ef2263d3845", size = 1450891, upload-time = "2025-03-02T12:54:54.503Z" }
@@ -3231,16 +3233,16 @@ wheels = [
 [[package]]
 name = "pytest"
 version = "8.4.2"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version == '3.9.*'",
 ]
 dependencies = [
     { name = "colorama", marker = "python_full_version == '3.9.*' and sys_platform == 'win32'" },
     { name = "exceptiongroup", marker = "python_full_version == '3.9.*'" },
-    { name = "iniconfig", version = "2.1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
+    { name = "iniconfig", version = "2.1.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version == '3.9.*'" },
     { name = "packaging", marker = "python_full_version == '3.9.*'" },
-    { name = "pluggy", version = "1.6.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
+    { name = "pluggy", version = "1.6.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version == '3.9.*'" },
     { name = "pygments", marker = "python_full_version == '3.9.*'" },
     { name = "tomli", marker = "python_full_version == '3.9.*'" },
 ]
@@ -3252,7 +3254,7 @@ wheels = [
 [[package]]
 name = "pytest"
 version = "9.0.2"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
@@ -3260,9 +3262,9 @@ resolution-markers = [
 dependencies = [
     { name = "colorama", marker = "python_full_version >= '3.10' and sys_platform == 'win32'" },
     { name = "exceptiongroup", marker = "python_full_version == '3.10.*'" },
-    { name = "iniconfig", version = "2.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "iniconfig", version = "2.3.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.10'" },
     { name = "packaging", marker = "python_full_version >= '3.10'" },
-    { name = "pluggy", version = "1.6.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "pluggy", version = "1.6.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.10'" },
     { name = "pygments", marker = "python_full_version >= '3.10'" },
     { name = "tomli", marker = "python_full_version == '3.10.*'" },
 ]
@@ -3274,11 +3276,11 @@ wheels = [
 [[package]]
 name = "pytest-timeout"
 version = "2.4.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 dependencies = [
-    { name = "pytest", version = "8.3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "pytest", version = "8.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
-    { name = "pytest", version = "9.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "pytest", version = "8.3.5", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
+    { name = "pytest", version = "8.4.2", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version == '3.9.*'" },
+    { name = "pytest", version = "9.0.2", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.10'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/ac/82/4c9ecabab13363e72d880f2fb504c5f750433b2b6f16e99f4ec21ada284c/pytest_timeout-2.4.0.tar.gz", hash = "sha256:7e68e90b01f9eff71332b25001f85c75495fc4e3a836701876183c4bcfd0540a", size = 17973, upload-time = "2025-05-05T19:44:34.99Z" }
 wheels = [
@@ -3288,7 +3290,7 @@ wheels = [
 [[package]]
 name = "python-dotenv"
 version = "1.0.1"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
@@ -3301,7 +3303,7 @@ wheels = [
 [[package]]
 name = "python-dotenv"
 version = "1.2.1"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
@@ -3315,7 +3317,7 @@ wheels = [
 [[package]]
 name = "pytokens"
 version = "0.3.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 sdist = { url = "https://files.pythonhosted.org/packages/4e/8d/a762be14dae1c3bf280202ba3172020b2b0b4c537f94427435f19c413b72/pytokens-0.3.0.tar.gz", hash = "sha256:2f932b14ed08de5fcf0b391ace2642f858f1394c0857202959000b68ed7a458a", size = 17644, upload-time = "2025-11-05T13:36:35.34Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/84/25/d9db8be44e205a124f6c98bc0324b2bb149b7431c53877fc6d1038dddaf5/pytokens-0.3.0-py3-none-any.whl", hash = "sha256:95b2b5eaf832e469d141a378872480ede3f251a5a5041b8ec6e581d3ac71bbf3", size = 12195, upload-time = "2025-11-05T13:36:33.183Z" },
@@ -3324,7 +3326,7 @@ wheels = [
 [[package]]
 name = "pyyaml"
 version = "6.0.3"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 sdist = { url = "https://files.pythonhosted.org/packages/05/8e/961c0007c59b8dd7729d542c61a4d537767a59645b82a0b521206e1e25c2/pyyaml-6.0.3.tar.gz", hash = "sha256:d76623373421df22fb4cf8817020cbb7ef15c725b9d5e45f17e189bfc384190f", size = 130960, upload-time = "2025-09-25T21:33:16.546Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/0d/a2/09f67a3589cb4320fb5ce90d3fd4c9752636b8b6ad8f34b54d76c5a54693/PyYAML-6.0.3-cp38-cp38-macosx_10_13_x86_64.whl", hash = "sha256:c2514fceb77bc5e7a2f7adfaa1feb2fb311607c9cb518dbc378688ec73d8292f", size = 186824, upload-time = "2025-09-29T20:27:35.918Z" },
@@ -3404,14 +3406,14 @@ wheels = [
 [[package]]
 name = "referencing"
 version = "0.35.1"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
 ]
 dependencies = [
-    { name = "attrs", version = "25.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "rpds-py", version = "0.20.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "attrs", version = "25.3.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
+    { name = "rpds-py", version = "0.20.1", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/99/5b/73ca1f8e72fff6fa52119dbd185f73a907b1989428917b24cff660129b6d/referencing-0.35.1.tar.gz", hash = "sha256:25b42124a6c8b632a425174f24087783efb348a6f1e0008e63cd4466fedf703c", size = 62991, upload-time = "2024-05-01T20:26:04.574Z" }
 wheels = [
@@ -3421,14 +3423,14 @@ wheels = [
 [[package]]
 name = "referencing"
 version = "0.36.2"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version == '3.9.*'",
 ]
 dependencies = [
-    { name = "attrs", version = "25.4.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
-    { name = "rpds-py", version = "0.27.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
-    { name = "typing-extensions", version = "4.15.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
+    { name = "attrs", version = "25.4.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version == '3.9.*'" },
+    { name = "rpds-py", version = "0.27.1", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version == '3.9.*'" },
+    { name = "typing-extensions", version = "4.15.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version == '3.9.*'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/2f/db/98b5c277be99dd18bfd91dd04e1b759cad18d1a338188c936e92f921c7e2/referencing-0.36.2.tar.gz", hash = "sha256:df2e89862cd09deabbdba16944cc3f10feb6b3e6f18e902f7cc25609a34775aa", size = 74744, upload-time = "2025-01-25T08:48:16.138Z" }
 wheels = [
@@ -3438,15 +3440,15 @@ wheels = [
 [[package]]
 name = "referencing"
 version = "0.37.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
 ]
 dependencies = [
-    { name = "attrs", version = "25.4.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
-    { name = "rpds-py", version = "0.30.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
-    { name = "typing-extensions", version = "4.15.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10' and python_full_version < '3.13'" },
+    { name = "attrs", version = "25.4.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.10'" },
+    { name = "rpds-py", version = "0.30.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.10'" },
+    { name = "typing-extensions", version = "4.15.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.10' and python_full_version < '3.13'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/22/f5/df4e9027acead3ecc63e50fe1e36aca1523e1719559c499951bb4b53188f/referencing-0.37.0.tar.gz", hash = "sha256:44aefc3142c5b842538163acb373e24cce6632bd54bdb01b21ad5863489f50d8", size = 78036, upload-time = "2025-10-13T15:30:48.871Z" }
 wheels = [
@@ -3456,7 +3458,7 @@ wheels = [
 [[package]]
 name = "regex"
 version = "2024.11.6"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
@@ -3561,7 +3563,7 @@ wheels = [
 [[package]]
 name = "regex"
 version = "2025.11.3"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
@@ -3688,7 +3690,7 @@ wheels = [
 [[package]]
 name = "requests"
 version = "2.32.4"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
@@ -3697,7 +3699,7 @@ dependencies = [
     { name = "certifi", marker = "python_full_version < '3.9'" },
     { name = "charset-normalizer", marker = "python_full_version < '3.9'" },
     { name = "idna", marker = "python_full_version < '3.9'" },
-    { name = "urllib3", version = "2.2.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "urllib3", version = "2.2.3", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/e1/0a/929373653770d8a0d7ea76c37de6e41f11eb07559b103b1c02cafb3f7cf8/requests-2.32.4.tar.gz", hash = "sha256:27d0316682c8a29834d3264820024b62a36942083d52caf2f14c0591336d3422", size = 135258, upload-time = "2025-06-09T16:43:07.34Z" }
 wheels = [
@@ -3707,7 +3709,7 @@ wheels = [
 [[package]]
 name = "requests"
 version = "2.32.5"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
@@ -3717,7 +3719,7 @@ dependencies = [
     { name = "certifi", marker = "python_full_version >= '3.9'" },
     { name = "charset-normalizer", marker = "python_full_version >= '3.9'" },
     { name = "idna", marker = "python_full_version >= '3.9'" },
-    { name = "urllib3", version = "2.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+    { name = "urllib3", version = "2.6.2", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/c9/74/b3ff8e6c8446842c3f5c837e9c3dfcfe2018ea6ecef224c710c85ef728f4/requests-2.32.5.tar.gz", hash = "sha256:dbba0bac56e100853db0ea71b82b4dfd5fe2bf6d3754a8893c3af500cec7d7cf", size = 134517, upload-time = "2025-08-18T20:46:02.573Z" }
 wheels = [
@@ -3727,7 +3729,7 @@ wheels = [
 [[package]]
 name = "rpds-py"
 version = "0.20.1"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
@@ -3841,7 +3843,7 @@ wheels = [
 [[package]]
 name = "rpds-py"
 version = "0.27.1"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version == '3.9.*'",
 ]
@@ -4006,7 +4008,7 @@ wheels = [
 [[package]]
 name = "rpds-py"
 version = "0.30.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
@@ -4132,7 +4134,7 @@ wheels = [
 [[package]]
 name = "rsa"
 version = "4.9.1"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 dependencies = [
     { name = "pyasn1" },
 ]
@@ -4144,7 +4146,7 @@ wheels = [
 [[package]]
 name = "ruff"
 version = "0.14.10"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 sdist = { url = "https://files.pythonhosted.org/packages/57/08/52232a877978dd8f9cf2aeddce3e611b40a63287dfca29b6b8da791f5e8d/ruff-0.14.10.tar.gz", hash = "sha256:9a2e830f075d1a42cd28420d7809ace390832a490ed0966fe373ba288e77aaf4", size = 5859763, upload-time = "2025-12-18T19:28:57.98Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/60/01/933704d69f3f05ee16ef11406b78881733c186fe14b6a46b05cfcaf6d3b2/ruff-0.14.10-py3-none-linux_armv6l.whl", hash = "sha256:7a3ce585f2ade3e1f29ec1b92df13e3da262178df8c8bdf876f48fa0e8316c49", size = 13527080, upload-time = "2025-12-18T19:29:25.642Z" },
@@ -4170,7 +4172,7 @@ wheels = [
 [[package]]
 name = "shellingham"
 version = "1.5.4"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 sdist = { url = "https://files.pythonhosted.org/packages/58/15/8b3609fd3830ef7b27b655beb4b4e9c62313a4e8da8c676e142cc210d58e/shellingham-1.5.4.tar.gz", hash = "sha256:8dbca0739d487e5bd35ab3ca4b36e11c4078f3a234bfce294b0a0291363404de", size = 10310, upload-time = "2023-10-24T04:13:40.426Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e0/f9/0595336914c5619e5f28a1fb793285925a8cd4b432c9da0a987836c7f822/shellingham-1.5.4-py2.py3-none-any.whl", hash = "sha256:7ecfff8f2fd72616f7481040475a65b2bf8af90a56c89140852d1120324e8686", size = 9755, upload-time = "2023-10-24T04:13:38.866Z" },
@@ -4179,7 +4181,7 @@ wheels = [
 [[package]]
 name = "sniffio"
 version = "1.3.1"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 sdist = { url = "https://files.pythonhosted.org/packages/a2/87/a6771e1546d97e7e041b6ae58d80074f81b7d5121207425c964ddf5cfdbd/sniffio-1.3.1.tar.gz", hash = "sha256:f4324edc670a0f49750a81b895f35c3adb843cca46f0530f79fc1babb23789dc", size = 20372, upload-time = "2024-02-25T23:20:04.057Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e9/44/75a9c9421471a6c4805dbf2356f7c181a29c1879239abab1ea2cc8f38b40/sniffio-1.3.1-py3-none-any.whl", hash = "sha256:2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2", size = 10235, upload-time = "2024-02-25T23:20:01.196Z" },
@@ -4188,25 +4190,25 @@ wheels = [
 [[package]]
 name = "sqlfluff"
 version = "3.3.1"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
 ]
 dependencies = [
     { name = "chardet", marker = "python_full_version < '3.9'" },
-    { name = "click", version = "8.1.8", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "click", version = "8.1.8", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
     { name = "colorama", marker = "python_full_version < '3.9'" },
-    { name = "diff-cover", version = "7.7.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.8.10'" },
-    { name = "diff-cover", version = "9.2.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.8.10' and python_full_version < '3.9'" },
+    { name = "diff-cover", version = "7.7.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.8.10'" },
+    { name = "diff-cover", version = "9.2.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.8.10' and python_full_version < '3.9'" },
     { name = "importlib-resources", marker = "python_full_version < '3.9'" },
     { name = "jinja2", marker = "python_full_version < '3.9'" },
     { name = "pathspec", marker = "python_full_version < '3.9'" },
-    { name = "platformdirs", version = "4.3.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "pytest", version = "8.3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "platformdirs", version = "4.3.6", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
+    { name = "pytest", version = "8.3.5", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
     { name = "pyyaml", marker = "python_full_version < '3.9'" },
-    { name = "regex", version = "2024.11.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "tblib", version = "3.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "regex", version = "2024.11.6", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
+    { name = "tblib", version = "3.0.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
     { name = "toml", marker = "python_full_version < '3.9'" },
     { name = "tqdm", marker = "python_full_version < '3.9'" },
 ]
@@ -4218,7 +4220,7 @@ wheels = [
 [[package]]
 name = "sqlfluff"
 version = "3.5.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
@@ -4226,20 +4228,20 @@ resolution-markers = [
 ]
 dependencies = [
     { name = "chardet", marker = "python_full_version >= '3.9'" },
-    { name = "click", version = "8.1.8", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
-    { name = "click", version = "8.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "click", version = "8.1.8", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version == '3.9.*'" },
+    { name = "click", version = "8.3.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.10'" },
     { name = "colorama", marker = "python_full_version >= '3.9'" },
-    { name = "diff-cover", version = "10.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
-    { name = "diff-cover", version = "10.1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "diff-cover", version = "10.0.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version == '3.9.*'" },
+    { name = "diff-cover", version = "10.1.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.10'" },
     { name = "jinja2", marker = "python_full_version >= '3.9'" },
     { name = "pathspec", marker = "python_full_version >= '3.9'" },
-    { name = "platformdirs", version = "4.4.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
-    { name = "platformdirs", version = "4.5.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
-    { name = "pytest", version = "8.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
-    { name = "pytest", version = "9.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "platformdirs", version = "4.4.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version == '3.9.*'" },
+    { name = "platformdirs", version = "4.5.1", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.10'" },
+    { name = "pytest", version = "8.4.2", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version == '3.9.*'" },
+    { name = "pytest", version = "9.0.2", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.10'" },
     { name = "pyyaml", marker = "python_full_version >= '3.9'" },
-    { name = "regex", version = "2025.11.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
-    { name = "tblib", version = "3.2.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+    { name = "regex", version = "2025.11.3", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
+    { name = "tblib", version = "3.2.2", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
     { name = "tomli", marker = "python_full_version >= '3.9' and python_full_version < '3.11'" },
     { name = "tqdm", marker = "python_full_version >= '3.9'" },
 ]
@@ -4251,7 +4253,7 @@ wheels = [
 [[package]]
 name = "sqlglot"
 version = "26.33.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
@@ -4264,7 +4266,7 @@ wheels = [
 [[package]]
 name = "sqlglot"
 version = "28.5.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
@@ -4278,7 +4280,7 @@ wheels = [
 [[package]]
 name = "tblib"
 version = "3.0.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
@@ -4291,7 +4293,7 @@ wheels = [
 [[package]]
 name = "tblib"
 version = "3.2.2"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
@@ -4305,14 +4307,14 @@ wheels = [
 [[package]]
 name = "tiktoken"
 version = "0.7.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
 ]
 dependencies = [
-    { name = "regex", version = "2024.11.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "requests", version = "2.32.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "regex", version = "2024.11.6", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
+    { name = "requests", version = "2.32.4", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/c4/4a/abaec53e93e3ef37224a4dd9e2fc6bb871e7a538c2b6b9d2a6397271daf4/tiktoken-0.7.0.tar.gz", hash = "sha256:1077266e949c24e0291f6c350433c6f0971365ece2b173a23bc3b9f9defef6b6", size = 33437, upload-time = "2024-05-13T18:03:28.793Z" }
 wheels = [
@@ -4356,15 +4358,15 @@ wheels = [
 [[package]]
 name = "tiktoken"
 version = "0.12.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
     "python_full_version == '3.9.*'",
 ]
 dependencies = [
-    { name = "regex", version = "2025.11.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
-    { name = "requests", version = "2.32.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+    { name = "regex", version = "2025.11.3", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
+    { name = "requests", version = "2.32.5", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/7d/ab/4d017d0f76ec3171d469d80fc03dfbb4e48a4bcaddaa831b31d526f05edc/tiktoken-0.12.0.tar.gz", hash = "sha256:b18ba7ee2b093863978fcb14f74b3707cdc8d4d4d3836853ce7ec60772139931", size = 37806, upload-time = "2025-10-06T20:22:45.419Z" }
 wheels = [
@@ -4429,13 +4431,13 @@ wheels = [
 [[package]]
 name = "tokenizers"
 version = "0.21.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
 ]
 dependencies = [
-    { name = "huggingface-hub", version = "0.36.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "huggingface-hub", version = "0.36.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/20/41/c2be10975ca37f6ec40d7abd7e98a5213bb04f284b869c1a24e6504fd94d/tokenizers-0.21.0.tar.gz", hash = "sha256:ee0894bf311b75b0c03079f33859ae4b2334d675d4e93f5a4132e1eae2834fe4", size = 343021, upload-time = "2024-11-27T13:11:23.89Z" }
 wheels = [
@@ -4458,14 +4460,14 @@ wheels = [
 [[package]]
 name = "tokenizers"
 version = "0.22.2"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
     "python_full_version == '3.9.*'",
 ]
 dependencies = [
-    { name = "huggingface-hub", version = "1.3.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+    { name = "huggingface-hub", version = "1.3.2", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/73/6f/f80cfef4a312e1fb34baf7d85c72d4411afde10978d4657f8cdd811d3ccc/tokenizers-0.22.2.tar.gz", hash = "sha256:473b83b915e547aa366d1eee11806deaf419e17be16310ac0a14077f1e28f917", size = 372115, upload-time = "2026-01-05T10:45:15.988Z" }
 wheels = [
@@ -4497,7 +4499,7 @@ wheels = [
 [[package]]
 name = "toml"
 version = "0.10.2"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 sdist = { url = "https://files.pythonhosted.org/packages/be/ba/1f744cdc819428fc6b5084ec34d9b30660f6f9daaf70eead706e3203ec3c/toml-0.10.2.tar.gz", hash = "sha256:b3bda1d108d5dd99f4a20d24d9c348e91c4db7ab1b749200bded2f839ccbe68f", size = 22253, upload-time = "2020-11-01T01:40:22.204Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/44/6f/7120676b6d73228c96e17f1f794d8ab046fc910d781c8d151120c3f1569e/toml-0.10.2-py2.py3-none-any.whl", hash = "sha256:806143ae5bfb6a3c6e736a764057db0e6a0e05e338b5630894a5f779cabb4f9b", size = 16588, upload-time = "2020-11-01T01:40:20.672Z" },
@@ -4506,7 +4508,7 @@ wheels = [
 [[package]]
 name = "tomli"
 version = "2.3.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 sdist = { url = "https://files.pythonhosted.org/packages/52/ed/3f73f72945444548f33eba9a87fc7a6e969915e7b1acc8260b30e1f76a2f/tomli-2.3.0.tar.gz", hash = "sha256:64be704a875d2a59753d80ee8a533c3fe183e3f06807ff7dc2232938ccb01549", size = 17392, upload-time = "2025-10-08T22:01:47.119Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b3/2e/299f62b401438d5fe1624119c723f5d877acc86a4c2492da405626665f12/tomli-2.3.0-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:88bd15eb972f3664f5ed4b57c1634a97153b4bac4479dcb6a495f41921eb7f45", size = 153236, upload-time = "2025-10-08T22:01:00.137Z" },
@@ -4555,7 +4557,7 @@ wheels = [
 [[package]]
 name = "tqdm"
 version = "4.67.1"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 dependencies = [
     { name = "colorama", marker = "sys_platform == 'win32'" },
 ]
@@ -4567,11 +4569,11 @@ wheels = [
 [[package]]
 name = "typer-slim"
 version = "0.21.1"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 dependencies = [
-    { name = "click", version = "8.1.8", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
-    { name = "click", version = "8.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
-    { name = "typing-extensions", version = "4.15.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+    { name = "click", version = "8.1.8", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version == '3.9.*'" },
+    { name = "click", version = "8.3.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.10'" },
+    { name = "typing-extensions", version = "4.15.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/17/d4/064570dec6358aa9049d4708e4a10407d74c99258f8b2136bb8702303f1a/typer_slim-0.21.1.tar.gz", hash = "sha256:73495dd08c2d0940d611c5a8c04e91c2a0a98600cbd4ee19192255a233b6dbfd", size = 110478, upload-time = "2026-01-06T11:21:11.176Z" }
 wheels = [
@@ -4581,7 +4583,7 @@ wheels = [
 [[package]]
 name = "typing-extensions"
 version = "4.13.2"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
@@ -4594,7 +4596,7 @@ wheels = [
 [[package]]
 name = "typing-extensions"
 version = "4.15.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
@@ -4608,9 +4610,9 @@ wheels = [
 [[package]]
 name = "typing-inspection"
 version = "0.4.2"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 dependencies = [
-    { name = "typing-extensions", version = "4.15.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+    { name = "typing-extensions", version = "4.15.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/55/e3/70399cb7dd41c10ac53367ae42139cf4b1ca5f36bb3dc6c9d33acdb43655/typing_inspection-0.4.2.tar.gz", hash = "sha256:ba561c48a67c5958007083d386c3295464928b01faa735ab8547c5692e87f464", size = 75949, upload-time = "2025-10-01T02:14:41.687Z" }
 wheels = [
@@ -4620,7 +4622,7 @@ wheels = [
 [[package]]
 name = "urllib3"
 version = "2.2.3"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
@@ -4633,7 +4635,7 @@ wheels = [
 [[package]]
 name = "urllib3"
 version = "2.6.2"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
@@ -4647,15 +4649,15 @@ wheels = [
 [[package]]
 name = "yarl"
 version = "1.15.2"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.8.10' and python_full_version < '3.9'",
     "python_full_version < '3.8.10'",
 ]
 dependencies = [
     { name = "idna", marker = "python_full_version < '3.9'" },
-    { name = "multidict", version = "6.1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
-    { name = "propcache", version = "0.2.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
+    { name = "multidict", version = "6.1.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
+    { name = "propcache", version = "0.2.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version < '3.9'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/06/e1/d5427a061819c9f885f58bb0467d02a523f1aec19f9e5f9c82ce950d90d3/yarl-1.15.2.tar.gz", hash = "sha256:a39c36f4218a5bb668b4f06874d676d35a035ee668e6e7e3538835c703634b84", size = 169318, upload-time = "2024-10-13T18:48:04.311Z" }
 wheels = [
@@ -4761,7 +4763,7 @@ wheels = [
 [[package]]
 name = "yarl"
 version = "1.22.0"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version >= '3.10' and python_full_version < '3.14'",
@@ -4769,8 +4771,8 @@ resolution-markers = [
 ]
 dependencies = [
     { name = "idna", marker = "python_full_version >= '3.9'" },
-    { name = "multidict", version = "6.7.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
-    { name = "propcache", version = "0.4.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
+    { name = "multidict", version = "6.7.0", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
+    { name = "propcache", version = "0.4.1", source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }, marker = "python_full_version >= '3.9'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/57/63/0c6ebca57330cd313f6102b16dd57ffaf3ec4c83403dcb45dbd15c6f3ea1/yarl-1.22.0.tar.gz", hash = "sha256:bebf8557577d4401ba8bd9ff33906f1376c877aa78d1fe216ad01b4d6745af71", size = 187169, upload-time = "2025-10-06T14:12:55.963Z" }
 wheels = [
@@ -4908,7 +4910,7 @@ wheels = [
 [[package]]
 name = "zipp"
 version = "3.20.2"
-source = { registry = "https://pypi.org/simple" }
+source = { registry = "https://pypi-proxy.dev.databricks.com/simple/" }
 sdist = { url = "https://files.pythonhosted.org/packages/54/bf/5c0000c44ebc80123ecbdddba1f5dcd94a5ada602a9c225d84b5aaa55e86/zipp-3.20.2.tar.gz", hash = "sha256:bc9eb26f4506fda01b81bcde0ca78103b6e62f991b381fec825435c836edbc29", size = 24199, upload-time = "2024-09-13T13:44:16.101Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/62/8b/5ba542fa83c90e09eac972fc9baca7a88e7e7ca4b221a89251954019308b/zipp-3.20.2-py3-none-any.whl", hash = "sha256:a817ac80d6cf4b23bf7f2828b7cabf326f15a001bea8b1f9b49631780ba28350", size = 9200, upload-time = "2024-09-13T13:44:14.38Z" },

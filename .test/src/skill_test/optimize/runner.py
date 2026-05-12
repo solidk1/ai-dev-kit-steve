@@ -330,7 +330,6 @@ def optimize_skill(
     max_metric_calls: int | None = None,
     token_budget: int | None = None,
     judge_model: str | None = None,
-    align: bool = False,
     run_dir: str | None = None,
     # Agent evaluation
     agent_eval: bool = False,
@@ -373,7 +372,6 @@ def optimize_skill(
         max_metric_calls: Override max metric calls per pass
         token_budget: Hard token ceiling
         judge_model: Override judge model (future use)
-        align: Use MemAlign alignment (future use)
         run_dir: Directory for GEPA checkpoints. Resumes from last state if dir exists.
         agent_eval: Use hybrid mode — proxy for GEPA iterations, real agent for
             baseline scoring and final validation.

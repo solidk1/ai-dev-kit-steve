@@ -94,10 +94,10 @@ def claim_operation_poll(op_id: str, min_interval_seconds: float = 5.0) -> tuple
             return None, 0.0
 
         now = time.time()
-        if op.last_polled_at is not None:
-            elapsed = now - op.last_polled_at
-            if elapsed < min_interval_seconds:
-                return op, round(min_interval_seconds - elapsed, 1)
+        poll_anchor = op.last_polled_at if op.last_polled_at is not None else op.started_at
+        elapsed = now - poll_anchor
+        if elapsed < min_interval_seconds:
+            return op, round(min_interval_seconds - elapsed, 1)
 
         op.last_polled_at = now
         return op, 0.0

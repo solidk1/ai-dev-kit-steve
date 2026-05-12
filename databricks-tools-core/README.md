@@ -336,8 +336,7 @@ databricks-tools-core/
 │   │   └── models.py                 # JobRunResult, JobError, enums
 │   ├── unity_catalog/                # Unity Catalog operations
 │   ├── compute/                      # Compute operations
-│   ├── spark_declarative_pipelines/  # SDP operations
-│   └── client.py                     # REST API client
+│   └── spark_declarative_pipelines/  # SDP operations
 └── tests/                            # Integration tests
 ```
 
