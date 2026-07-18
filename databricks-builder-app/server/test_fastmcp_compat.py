@@ -6,34 +6,13 @@ import pytest
 
 
 @pytest.mark.anyio
-async def test_get_registered_mcp_tools_uses_public_get_tools():
-    """Prefer the public get_tools API when it is available."""
+async def test_get_registered_mcp_tools_uses_public_list_tools():
+    """Map FastMCP 3 tools by their public names."""
     from server.mcp_registry import get_registered_mcp_tools
 
     class Tool:
         def __init__(self, name):
             self.name = name
-
-    class FakeMcp:
-        async def get_tools(self):
-            return {
-                'alpha': Tool('alpha'),
-                'beta': Tool('beta'),
-            }
-
-    tools = await get_registered_mcp_tools(FakeMcp())
-
-    assert list(tools.keys()) == ['alpha', 'beta']
-
-
-@pytest.mark.anyio
-async def test_get_registered_mcp_tools_accepts_list_from_public_api():
-    """Normalize list-shaped results from public registry APIs."""
-    from server.mcp_registry import get_registered_mcp_tools
-
-    class Tool:
-        def __init__(self, key):
-            self.key = key
 
     class FakeMcp:
         async def list_tools(self):
@@ -42,51 +21,6 @@ async def test_get_registered_mcp_tools_accepts_list_from_public_api():
     tools = await get_registered_mcp_tools(FakeMcp())
 
     assert list(tools.keys()) == ['alpha', 'beta']
-
-
-@pytest.mark.anyio
-async def test_get_registered_mcp_tools_falls_back_to_legacy_tool_manager():
-    """Support legacy FastMCP tool manager storage."""
-    from server.mcp_registry import get_registered_mcp_tools
-
-    class Tool:
-        def __init__(self, name):
-            self.name = name
-
-    class ToolManager:
-        def __init__(self):
-            self._tools = {
-                'legacy': Tool('legacy'),
-            }
-
-    class FakeMcp:
-        _tool_manager = ToolManager()
-
-    tools = await get_registered_mcp_tools(FakeMcp())
-
-    assert list(tools.keys()) == ['legacy']
-
-
-@pytest.mark.anyio
-async def test_get_registered_mcp_tools_scans_modules_as_last_resort():
-    """Find exported decorated tools when no registry API exists."""
-    from server.mcp_registry import get_registered_mcp_tools
-
-    class Tool:
-        def __init__(self, key):
-            self.key = key
-            self.fn = lambda: None
-            self.parameters = {}
-
-    class EmptyMcp:
-        pass
-
-    class FakeModule:
-        exported_tool = Tool('module_tool')
-
-    tools = await get_registered_mcp_tools(EmptyMcp(), tool_modules=[FakeModule])
-
-    assert list(tools.keys()) == ['module_tool']
 
 
 def test_invoke_mcp_tool_sync_accepts_sync_callable():

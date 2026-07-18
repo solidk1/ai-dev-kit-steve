@@ -48,6 +48,8 @@ import databricks_tools_core.auth as _dt_auth
 from databricks_tools_core.auth import set_databricks_auth, clear_databricks_auth
 
 from ..anthropic_endpoint import (
+  DEFAULT_ANTHROPIC_MINI_MODEL,
+  DEFAULT_ANTHROPIC_MODEL,
   build_databricks_anthropic_base_url,
   get_databricks_llm_provider,
   select_databricks_anthropic_model,
@@ -118,32 +120,32 @@ def _extract_image_paths(content: str) -> list[str]:
   return paths
 
 
-def _is_inline_image_tool(tool_name: str | None) -> bool:
-  """True for MCP tools whose output may include renderable image paths."""
+def _matches_tool_name(tool_name: str | None, expected: str) -> bool:
   if not tool_name:
     return False
   normalized = tool_name.strip()
-  return (
-    normalized == 'execute_code'
-    or normalized.endswith('__execute_code')
-    or normalized == 'execute_databricks_command'
-    or normalized.endswith('__execute_databricks_command')
-    or normalized == 'check_operation_status'
-    or normalized.endswith('__check_operation_status')
+  return normalized == expected or normalized.endswith(f'__{expected}')
+
+
+def _is_missing_resume_session(stderr_lines: list[str], session_id: str | None) -> bool:
+  """Return whether Claude CLI rejected the requested resume session."""
+  if not session_id:
+    return False
+  expected = f'No conversation found with session ID: {session_id}'
+  return any(expected in line for line in stderr_lines)
+
+
+def _is_inline_image_tool(tool_name: str | None) -> bool:
+  """True for MCP tools whose output may include renderable image paths."""
+  return any(
+    _matches_tool_name(tool_name, expected)
+    for expected in ('execute_code', 'check_operation_status')
   )
 
 
 def _is_command_execution_tool(tool_name: str | None) -> bool:
   """True only for Databricks command-execution MCP tool names."""
-  if not tool_name:
-    return False
-  normalized = tool_name.strip()
-  return (
-    normalized == 'execute_code'
-    or normalized.endswith('__execute_code')
-    or normalized == 'execute_databricks_command'
-    or normalized.endswith('__execute_databricks_command')
-  )
+  return _matches_tool_name(tool_name, 'execute_code')
 
 
 def _resolve_cluster_name(cluster_id: str | None) -> str | None:
@@ -344,8 +346,11 @@ def _get_mlflow_stop_hook(experiment_name: str | None = None):
           try:
             client = mlflow.MlflowClient()
             trace_id = trace.info.trace_id
-            requested_model = os.environ.get('ANTHROPIC_MODEL', 'databricks-claude-opus-4-5')
-            requested_model_mini = os.environ.get('ANTHROPIC_MODEL_MINI', 'databricks-claude-sonnet-4-5')
+            requested_model = os.environ.get('ANTHROPIC_MODEL', DEFAULT_ANTHROPIC_MODEL)
+            requested_model_mini = os.environ.get(
+              'ANTHROPIC_MODEL_MINI',
+              DEFAULT_ANTHROPIC_MINI_MODEL,
+            )
             base_url = build_databricks_anthropic_base_url(os.environ.get('DATABRICKS_HOST'))
             provider = get_databricks_llm_provider(base_url)
 
@@ -693,8 +698,10 @@ async def stream_agent_response(
         small_model=anthropic_model_mini,
       )
       claude_env['ANTHROPIC_MODEL'] = effective_model
-      if anthropic_model_mini:
-        claude_env['ANTHROPIC_SMALL_FAST_MODEL'] = anthropic_model_mini
+      claude_env['ANTHROPIC_SMALL_FAST_MODEL'] = (
+        anthropic_model_mini
+        or os.environ.get('ANTHROPIC_MODEL_MINI', DEFAULT_ANTHROPIC_MINI_MODEL)
+      )
 
       # Extra safety: disable experimental betas at the SDK level too
       claude_env['CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS'] = '1'
@@ -725,11 +732,16 @@ async def stream_agent_response(
     claude_env.setdefault('NO_COLOR', '1')
     claude_env.setdefault('CLICOLOR', '0')
 
-    # Stderr callback to capture Claude subprocess output for debugging
+    # Capture stderr so a stale resume ID can be distinguished from other
+    # subprocess failures. Databricks App snapshots do not preserve Claude's
+    # local session files, while Lakebase conversation records do persist.
+    stderr_lines: list[str] = []
+
     def stderr_callback(line: str):
       stripped = line.strip()
       if not stripped:
         return
+      stderr_lines.append(stripped)
       logger.warning(f'[Claude stderr] {stripped}')
       print(f'[Claude stderr] {stripped}', flush=True)
 
@@ -773,22 +785,33 @@ async def stream_agent_response(
       stderr=stderr_callback,  # Capture stderr for debugging
     )
 
-    # Run agent in fresh event loop to avoid subprocess transport issues (#462)
-    # Copy the context to preserve contextvars (Databricks auth) in the new thread
-    ctx = copy_context()
-    result_queue = queue.Queue()
     # Default to always-false if no cancellation function provided
     cancel_check = is_cancelled_fn if is_cancelled_fn else lambda: False
 
     # Get MLflow experiment name from request param, falling back to environment
     mlflow_experiment = mlflow_experiment_name or os.environ.get('MLFLOW_EXPERIMENT_NAME')
 
-    agent_thread = threading.Thread(
-      target=_run_agent_in_fresh_loop,
-      args=(message, options, result_queue, ctx, cancel_check, mlflow_experiment, images),
-      daemon=True
-    )
-    agent_thread.start()
+    def start_agent_run() -> queue.Queue:
+      """Start one Claude query in an isolated event loop and context."""
+      result_queue = queue.Queue()
+      agent_thread = threading.Thread(
+        target=_run_agent_in_fresh_loop,
+        args=(
+          message,
+          options,
+          result_queue,
+          copy_context(),
+          cancel_check,
+          mlflow_experiment,
+          images,
+        ),
+        daemon=True,
+      )
+      agent_thread.start()
+      return result_queue
+
+    result_queue = start_agent_run()
+    retried_without_resume = False
 
     # Process messages from the queue with keepalive for long operations
     KEEPALIVE_INTERVAL = 15  # seconds - send keepalive if no activity
@@ -835,6 +858,20 @@ async def stream_agent_response(
         yield {'type': 'cancelled'}
         break
       elif msg_type == 'error':
+        if (
+          not retried_without_resume
+          and _is_missing_resume_session(stderr_lines, session_id)
+        ):
+          logger.warning(
+            'Claude resume session %s is unavailable; retrying as a new session',
+            session_id,
+          )
+          options.resume = None
+          stderr_lines.clear()
+          retried_without_resume = True
+          last_activity = time.time()
+          result_queue = start_agent_run()
+          continue
         raise msg
       elif msg_type == 'message':
         # Handle different message types

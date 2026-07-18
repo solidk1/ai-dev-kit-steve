@@ -585,7 +585,17 @@ if [ "$NO_WAIT" = true ]; then
   echo -e "  App URL: ${GREEN}${APP_URL}${NC}"
   echo -e "  ${YELLOW}Check status:${NC} databricks apps get ${APP_NAME}"
   echo ""
-elif echo "$DEPLOY_OUTPUT" | grep -q '"state":"SUCCEEDED"'; then
+elif echo "$DEPLOY_OUTPUT" | python3 -c '
+import json
+import sys
+
+try:
+    deployment = json.load(sys.stdin)
+except (json.JSONDecodeError, TypeError):
+    raise SystemExit(1)
+
+raise SystemExit(deployment.get("status", {}).get("state") != "SUCCEEDED")
+'; then
   echo ""
   echo -e "${GREEN}╔════════════════════════════════════════════════════════════╗${NC}"
   echo -e "${GREEN}║                 Deployment Successful!                     ║${NC}"

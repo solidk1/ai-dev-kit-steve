@@ -14,7 +14,7 @@ from typing import Optional
 
 import anthropic
 
-from ..anthropic_endpoint import build_databricks_anthropic_base_url
+from ..anthropic_endpoint import DEFAULT_ANTHROPIC_MINI_MODEL, build_databricks_anthropic_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -23,11 +23,11 @@ def _get_model() -> str:
   """Get the model to use for title generation.
 
   Uses ANTHROPIC_MODEL_MINI for efficiency (title generation is a simple task).
-  Falls back to ANTHROPIC_MODEL if mini not set.
+  Falls back to the default mini model if the environment variable is not set.
   """
   return os.environ.get(
     'ANTHROPIC_MODEL_MINI',
-    os.environ.get('ANTHROPIC_MODEL', 'databricks-claude-sonnet-4-5')
+    DEFAULT_ANTHROPIC_MINI_MODEL,
   )
 
 

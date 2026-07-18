@@ -8,6 +8,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
+from ..anthropic_endpoint import DEFAULT_ANTHROPIC_MINI_MODEL, DEFAULT_ANTHROPIC_MODEL
 from ..db import is_postgres_configured, test_database_connection
 from ..services.system_prompt import get_system_prompt
 from ..services.user import get_current_user, get_workspace_url
@@ -66,8 +67,8 @@ async def get_user_info(request: Request):
     'lakebase_error': lakebase_error,
     'app_name': _get_app_name(request),
     'app_version': _APP_VERSION,
-    'model': os.environ.get('ANTHROPIC_MODEL', ''),
-    'model_mini': os.environ.get('ANTHROPIC_MODEL_MINI', ''),
+    'model': os.environ.get('ANTHROPIC_MODEL', DEFAULT_ANTHROPIC_MODEL),
+    'model_mini': os.environ.get('ANTHROPIC_MODEL_MINI', DEFAULT_ANTHROPIC_MINI_MODEL),
   }
 
 
@@ -90,8 +91,11 @@ async def get_settings(request: Request):
   return {
     'user': user_email,
     'workspace_url': get_workspace_url(),
-    'server_model': os.environ.get('ANTHROPIC_MODEL', ''),
-    'server_model_mini': os.environ.get('ANTHROPIC_MODEL_MINI', ''),
+    'server_model': os.environ.get('ANTHROPIC_MODEL', DEFAULT_ANTHROPIC_MODEL),
+    'server_model_mini': os.environ.get(
+      'ANTHROPIC_MODEL_MINI',
+      DEFAULT_ANTHROPIC_MINI_MODEL,
+    ),
     'databricks_pat': pat,
     **user_config,
   }

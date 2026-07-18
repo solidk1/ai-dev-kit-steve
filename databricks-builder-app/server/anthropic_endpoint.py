@@ -7,6 +7,8 @@ _AI_GATEWAY_ENV_VARS = (
     'DATABRICKS_AI_GATEWAY_BASE_URL',
     'AI_GATEWAY_BASE_URL',
 )
+DEFAULT_ANTHROPIC_MODEL = 'system.ai.claude-sonnet-5'
+DEFAULT_ANTHROPIC_MINI_MODEL = 'system.ai.claude-haiku-4-5'
 
 _AZURE_WORKSPACE_RE = re.compile(r'^adb-([^.]+)\.[^.]+\.azuredatabricks\.net$')
 _CLOUD_WORKSPACE_RE = re.compile(r'^([^.]+)\.cloud\.databricks\.com$')
@@ -62,11 +64,10 @@ def select_databricks_anthropic_model(
     principal. In that mode we prefer an app-safe fallback model so the app can
     keep working even if the default user model is not granted to the app SP.
     """
-    primary_model = model or os.getenv('ANTHROPIC_MODEL', 'databricks-claude-opus-4-6')
+    primary_model = model or os.getenv('ANTHROPIC_MODEL', DEFAULT_ANTHROPIC_MODEL)
     fallback_model = (
         os.getenv('ANTHROPIC_APP_AUTH_MODEL')
         or small_model
-        or os.getenv('ANTHROPIC_MODEL_MINI')
-        or primary_model
+        or os.getenv('ANTHROPIC_MODEL_MINI', DEFAULT_ANTHROPIC_MINI_MODEL)
     )
     return fallback_model if app_auth_only else primary_model

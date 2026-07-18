@@ -10,10 +10,8 @@ execution continues in background and returns an operation ID for polling.
 
 import asyncio
 import concurrent.futures
-import importlib
 import json
 import logging
-import pkgutil
 import re
 import threading
 import time
@@ -31,12 +29,6 @@ from .operation_tracker import (
 )
 
 logger = logging.getLogger(__name__)
-
-_COMPUTE_EXECUTION_TOOLS = {
-    'execute_code',
-    'execute_databricks_command',
-    'run_python_file_on_databricks',
-}
 
 # Seconds before switching to async mode to avoid connection timeout
 # Anthropic API has ~50s stream idle timeout, we switch early to keep messages flowing
@@ -144,64 +136,14 @@ def _sanitize_compute_like_result(result: Any) -> Any:
 
 def _sanitize_tool_result(tool_name: str, result: Any) -> Any:
     """Apply tool-specific sanitization before serializing to model-visible text."""
-    if tool_name in _COMPUTE_EXECUTION_TOOLS | {'check_operation_status'}:
+    if tool_name in {'execute_code', 'check_operation_status'}:
         return _sanitize_compute_like_result(result)
     return result
 
 
-def _format_direct_compute_result(result: dict[str, Any]) -> str:
-    """Render execute_databricks_command-like output in a compact readable form."""
-    lines: list[str] = []
-    success = result.get('success')
-    execution_mode = result.get('execution_mode')
-    cluster_name = result.get('cluster_name')
-    cluster_id = result.get('cluster_id')
-    context_id = result.get('context_id')
-    context_destroyed = result.get('context_destroyed')
-    run_url = result.get('run_url')
-    output = result.get('output')
-    error = result.get('error')
-
-    if success is True:
-        lines.append('Command executed successfully.')
-    elif success is False:
-        lines.append('Command failed.')
-
-    if execution_mode == 'serverless':
-        lines.append('Execution mode: serverless')
-    elif execution_mode == 'cluster':
-        lines.append('Execution mode: cluster')
-
-    if isinstance(cluster_name, str) and cluster_name:
-        lines.append(f'Cluster: {cluster_name}')
-    elif isinstance(cluster_id, str) and cluster_id:
-        lines.append(f'Cluster ID: {cluster_id}')
-
-    if isinstance(context_id, str) and context_id and context_destroyed is False:
-        lines.append(f'Context: reusable ({context_id})')
-
-    if isinstance(run_url, str) and run_url:
-        lines.append(f'Run URL: {run_url}')
-
-    if isinstance(error, str) and error.strip():
-        lines.append(f'Error: {error.strip()}')
-
-    if isinstance(output, str) and output.strip():
-        lines.append('')
-        lines.append('Output:')
-        lines.append(output.strip())
-    elif success is True and not error:
-        message = result.get('message')
-        if isinstance(message, str) and message.strip():
-            lines.append(message.strip())
-
-    return '\n'.join(lines).strip() or json.dumps(result, default=str)
-
-
-def _format_compute_like_result(tool_name: str, result: Any) -> str:
-    """Serialize compute results as sanitized JSON for model-visible text and UI display."""
-    sanitized = _sanitize_tool_result(tool_name, result)
-    return json.dumps(sanitized, default=str, ensure_ascii=False)
+def _serialize_compute_result(result: Any) -> str:
+    """Serialize a sanitized compute result for model-visible text and UI display."""
+    return json.dumps(result, default=str, ensure_ascii=False)
 
 
 def _infer_async_command_execution_metadata(
@@ -209,7 +151,7 @@ def _infer_async_command_execution_metadata(
     parsed_args: dict[str, Any],
 ) -> dict[str, str]:
     """Best-effort command execution metadata for async handoff responses."""
-    if tool_name not in _COMPUTE_EXECUTION_TOOLS:
+    if tool_name != 'execute_code':
         return {}
 
     cluster_id = parsed_args.get('cluster_id')
@@ -228,39 +170,18 @@ def _infer_async_command_execution_metadata(
         except Exception:
             logger.debug('Failed to resolve explicit cluster name for async handoff', exc_info=True)
 
-    if tool_name == 'execute_code':
-        compute_type = parsed_args.get('compute_type', 'auto')
-        language = str(parsed_args.get('language') or 'python').lower()
-        uses_serverless = compute_type == 'serverless' or (
-            compute_type == 'auto'
-            and not cluster_id
-            and not context_id
-            and language not in {'scala', 'r'}
-        )
-        if uses_serverless:
-            from databricks_tools_core.compute.execution import SERVERLESS_CLUSTER_NAME
+    compute_type = parsed_args.get('compute_type', 'auto')
+    language = str(parsed_args.get('language') or 'python').lower()
+    uses_serverless = compute_type == 'serverless' or (
+        compute_type == 'auto'
+        and not cluster_id
+        and not context_id
+        and language not in {'scala', 'r'}
+    )
+    if uses_serverless:
+        from databricks_tools_core.compute.execution import SERVERLESS_CLUSTER_NAME
 
-            cluster_name = SERVERLESS_CLUSTER_NAME
-
-    # Backward-compatible metadata inference for older MCP tool names. Do not
-    # apply this to execute_code: its default "auto" mode intentionally chooses
-    # serverless and must not be changed by injecting a classic cluster_id.
-    elif not cluster_id:
-        try:
-            from databricks_tools_core.compute.execution import (
-                SERVERLESS_CLUSTER_NAME,
-                _select_best_cluster,
-            )
-
-            selection = _select_best_cluster()
-            if selection.cluster_id:
-                cluster_id = selection.cluster_id
-                cluster_name = selection.cluster_name or cluster_name
-                parsed_args['cluster_id'] = selection.cluster_id
-            else:
-                cluster_name = SERVERLESS_CLUSTER_NAME
-        except Exception:
-            logger.debug('Failed to infer auto-selected cluster for async handoff', exc_info=True)
+        cluster_name = SERVERLESS_CLUSTER_NAME
 
     metadata: dict[str, str] = {}
     if isinstance(cluster_id, str) and cluster_id:
@@ -315,23 +236,12 @@ async def _get_all_sdk_tools():
 
     # Import triggers @mcp.tool registration
     from databricks_mcp_server.server import mcp
-    import databricks_mcp_server.tools as tools_pkg
-
-    loaded_tool_modules = []
-    for module_info in pkgutil.iter_modules(tools_pkg.__path__):
-        if module_info.ispkg:
-            continue
-        loaded_tool_modules.append(
-            importlib.import_module(f'databricks_mcp_server.tools.{module_info.name}')
-        )
 
     sdk_tools = []
     tool_names = []
 
     # Wrap all Databricks MCP tools
-    for name, mcp_tool in (
-        await get_registered_mcp_tools(mcp, tool_modules=loaded_tool_modules)
-    ).items():
+    for name, mcp_tool in (await get_registered_mcp_tools(mcp)).items():
         input_schema = _convert_schema(mcp_tool.parameters)
         sdk_tool = _make_wrapper(name, mcp_tool.description, input_schema, mcp_tool.fn)
         sdk_tools.append(sdk_tool)
@@ -340,13 +250,8 @@ async def _get_all_sdk_tools():
     # Add operation tracking tools (for async handoff pattern)
     sdk_tools.append(_create_check_operation_status_tool())
     tool_names.append('mcp__databricks__check_operation_status')
-    sdk_tools.append(_create_check_operation_status_tool('tool_check_operation_status'))
-    tool_names.append('mcp__databricks__tool_check_operation_status')
-
     sdk_tools.append(_create_list_operations_tool())
     tool_names.append('mcp__databricks__list_operations')
-    sdk_tools.append(_create_list_operations_tool('tool_list_operations'))
-    tool_names.append('mcp__databricks__tool_list_operations')
 
     _all_sdk_tools = sdk_tools
     _all_tool_names = tool_names
@@ -470,7 +375,7 @@ Returns:
             "content": [
                 {
                     "type": "text",
-                    "text": _format_compute_like_result("check_operation_status", result),
+                    "text": _serialize_compute_result(result),
                 }
             ]
         }
@@ -688,8 +593,8 @@ def _make_wrapper(name: str, description: str, schema: dict, fn):
 
             elapsed = time.time() - start_time
             result = _sanitize_tool_result(name, result)
-            if name in _COMPUTE_EXECUTION_TOOLS:
-                result_str = _format_compute_like_result(name, result)
+            if name == 'execute_code':
+                result_str = _serialize_compute_result(result)
             else:
                 result_str = json.dumps(result, default=str)
             print(f'[MCP TOOL] {name} completed in {elapsed:.2f}s, result length: {len(result_str)}', file=sys.stderr, flush=True)

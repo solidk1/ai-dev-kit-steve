@@ -1,11 +1,9 @@
 """Skills explorer and management API endpoints."""
 
 import json
-import importlib
 import logging
 import os
 from pathlib import Path
-import pkgutil
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
@@ -49,23 +47,8 @@ async def _discover_mcp_tools() -> list[dict]:
   # 1) Runtime tools from databricks_mcp_server (works in deployed app)
   try:
     from databricks_mcp_server.server import mcp
-    import databricks_mcp_server.tools as tools_pkg
 
-    # Import all tool modules so decorators register them with FastMCP
-    for module_info in pkgutil.iter_modules(tools_pkg.__path__):
-      if not module_info.ispkg:
-        importlib.import_module(f'databricks_mcp_server.tools.{module_info.name}')
-
-    loaded_tool_modules = []
-    for module_info in pkgutil.iter_modules(tools_pkg.__path__):
-      if not module_info.ispkg:
-        loaded_tool_modules.append(
-          importlib.import_module(f'databricks_mcp_server.tools.{module_info.name}')
-        )
-
-    for tool_name, mcp_tool in (
-      await get_registered_mcp_tools(mcp, tool_modules=loaded_tool_modules)
-    ).items():
+    for tool_name, mcp_tool in (await get_registered_mcp_tools(mcp)).items():
       dedupe_key = ('databricks', tool_name)
       if dedupe_key in seen_tools:
         continue

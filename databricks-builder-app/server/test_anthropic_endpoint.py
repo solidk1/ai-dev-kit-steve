@@ -41,6 +41,17 @@ def test_select_databricks_anthropic_model_prefers_primary_for_user_authorized_m
     assert select_databricks_anthropic_model(app_auth_only=False) == 'databricks-claude-opus-4-6'
 
 
+def test_select_databricks_anthropic_model_uses_ai_gateway_default(monkeypatch):
+    from server.anthropic_endpoint import select_databricks_anthropic_model
+
+    monkeypatch.delenv('ANTHROPIC_MODEL', raising=False)
+    monkeypatch.delenv('ANTHROPIC_MODEL_MINI', raising=False)
+    monkeypatch.delenv('ANTHROPIC_APP_AUTH_MODEL', raising=False)
+
+    assert select_databricks_anthropic_model(app_auth_only=False) == 'system.ai.claude-sonnet-5'
+    assert select_databricks_anthropic_model(app_auth_only=True) == 'system.ai.claude-haiku-4-5'
+
+
 def test_select_databricks_anthropic_model_prefers_app_auth_model_for_sp_fallback(monkeypatch):
     from server.anthropic_endpoint import select_databricks_anthropic_model
 

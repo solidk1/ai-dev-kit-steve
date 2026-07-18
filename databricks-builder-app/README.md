@@ -294,7 +294,8 @@ If you're routing Claude API calls through Databricks AI Gateway instead of dire
 ```json
 {
     "env": {
-        "ANTHROPIC_MODEL": "databricks-claude-sonnet-4-5",
+        "ANTHROPIC_MODEL": "system.ai.claude-sonnet-5",
+        "ANTHROPIC_MODEL_MINI": "system.ai.claude-haiku-4-5",
         "ANTHROPIC_BASE_URL": "https://7405612347557713.3.ai-gateway.azuredatabricks.net/anthropic",
         "ANTHROPIC_AUTH_TOKEN": "dapi...",
         "ANTHROPIC_DEFAULT_OPUS_MODEL": "databricks-claude-opus-4-5",

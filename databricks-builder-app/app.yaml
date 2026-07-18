@@ -33,7 +33,7 @@ env:
   # =============================================================================
   # Comma-separated list of skills to enable
   - name: ENABLED_SKILLS
-    value: "databricks-asset-bundles,databricks-agent-bricks,databricks-aibi-dashboards,databricks-app-apx,databricks-app-python,databricks-config,databricks-docs,databricks-jobs,databricks-python-sdk,databricks-unity-catalog,mlflow-evaluation,spark-declarative-pipelines,synthetic-data-generation,unstructured-pdf-generation"
+    value: "databricks-bundles,databricks-agent-bricks,databricks-aibi-dashboards,databricks-apps-python,databricks-config,databricks-docs,databricks-jobs,databricks-python-sdk,databricks-unity-catalog,databricks-mlflow-evaluation,databricks-spark-declarative-pipelines,databricks-synthetic-data-gen,databricks-unstructured-pdf-generation"
   - name: SKILLS_ONLY_MODE
     value: "false"
   
@@ -60,13 +60,13 @@ env:
   # the AI Gateway base URL explicitly.
   # Auto-derived from DATABRICKS_HOST when unset.
   - name: ANTHROPIC_MODEL
-    value: "databricks-claude-opus-4-6"
+    value: "system.ai.claude-sonnet-5"
   - name: ANTHROPIC_MODEL_MINI
-    value: "databricks-claude-sonnet-4-6"
+    value: "system.ai.claude-haiku-4-5"
   # Used when the app must call Claude with its own service principal instead of
   # a forwarded user token or saved PAT.
   - name: ANTHROPIC_APP_AUTH_MODEL
-    value: "databricks-claude-sonnet-4-6"
+    value: "system.ai.claude-haiku-4-5"
   - name: CLAUDE_CODE_STREAM_CLOSE_TIMEOUT
     value: "3600000"
 

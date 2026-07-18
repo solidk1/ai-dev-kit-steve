@@ -333,7 +333,7 @@ function getCodeFromToolInput(
       const { sql_content, ...params } = toolInput;
       return { code, language: 'sql', params: Object.keys(params).length > 0 ? params : undefined };
     }
-  } else if (name === 'execute_code' || name === 'execute_databricks_command') {
+  } else if (name === 'execute_code') {
     const code = toolInput.code as string;
     if (code) {
       const { code: _code, language: lang, ...params } = toolInput;
