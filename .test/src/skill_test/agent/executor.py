@@ -33,6 +33,25 @@ logger = logging.getLogger(__name__)
 _mlflow_env_lock = threading.Lock()
 _mlflow_env_configured = False
 
+# Serialize process_transcript calls across parallel agents to avoid
+# burst HTTP load on the MLflow tracking server when multiple agents
+# finish concurrently (e.g. --parallel-agents 3).
+# Lazy per-loop factory: asyncio.Semaphore binds to the running loop at
+# creation time. When _run_in_fresh_loop creates a new loop the module-level
+# semaphore would crash with "attached to a different loop". Instead we
+# cache one semaphore per event-loop id.
+_transcript_semaphores: dict[int, asyncio.Semaphore] = {}
+_transcript_semaphore_lock = threading.Lock()
+
+
+def _get_transcript_semaphore() -> asyncio.Semaphore:
+    """Return a Semaphore(1) bound to the current running event loop."""
+    loop_id = id(asyncio.get_running_loop())
+    with _transcript_semaphore_lock:
+        if loop_id not in _transcript_semaphores:
+            _transcript_semaphores[loop_id] = asyncio.Semaphore(1)
+        return _transcript_semaphores[loop_id]
+
 
 @dataclass
 class AgentEvent:
@@ -58,7 +77,6 @@ class AgentResult:
     duration_ms: int | None = None
     success: bool = True
     error: str | None = None
-    mlflow_trace: Any | None = None  # mlflow.entities.Trace if available
 
 
 def _build_trace_metrics(
@@ -312,7 +330,7 @@ def _get_mlflow_stop_hook(mlflow_experiment: str | None = None, skill_name: str 
     - The hook itself just calls setup_mlflow() then process_transcript()
     - No conditional gates — configure every time for reliability
 
-    Returns (hook_fn, result_holder) or (None, None) if MLflow is not available.
+    Returns hook_fn or None if MLflow is not available.
     """
     try:
         from mlflow.claude_code.tracing import process_transcript, setup_mlflow
@@ -321,10 +339,7 @@ def _get_mlflow_stop_hook(mlflow_experiment: str | None = None, skill_name: str 
         logger.warning(
             "mlflow.claude_code.tracing not available — traces will not be logged. Ensure mlflow>=3.10.1 is installed."
         )
-        return None, None
-
-    # Mutable dict so the hook can pass the trace out
-    result_holder: dict[str, Any] = {"trace": None}
+        return None
 
     # One-time environment and MLflow configuration (thread-safe).
     # All os.environ writes happen here, once, to avoid races in parallel runs.
@@ -372,46 +387,28 @@ def _get_mlflow_stop_hook(mlflow_experiment: str | None = None, skill_name: str 
                         experiment_name,
                         tracking_uri,
                     )
-                    return None, None
+                    return None
 
             print(f"    [MLflow] Tracing configured: uri={tracking_uri} experiment={experiment_name}")
             _mlflow_env_configured = True
 
-    async def mlflow_stop_hook(input_data, tool_use_id, context):
-        """Process transcript and create MLflow trace when agent stops."""
-        session_id = input_data.get("session_id")
-        transcript_path = input_data.get("transcript_path")
+    async def _upload_trace_background(session_id, transcript_path):
+        """Upload transcript to MLflow in the background (best-effort).
 
-        print(f"    [MLflow] Stop hook fired: session={session_id}, transcript={transcript_path}")
-
+        Judges are field-based and don't consume MLflow traces, so this is
+        purely for observability logging.  Fire-and-forget avoids blocking
+        the evaluation pipeline on slow HTTP I/O to the tracking server.
+        """
         try:
-            # Ensure MLflow is set up (matches builder app: call every time)
             setup_mlflow()
-
-            # Run process_transcript synchronously — it does HTTP I/O per span
-            # so can take 20-40s for large sessions. Use a generous timeout to
-            # prevent hangs from rate limits or network issues.
             loop = asyncio.get_running_loop()
-            try:
+            async with _get_transcript_semaphore():
                 trace = await asyncio.wait_for(
                     loop.run_in_executor(None, process_transcript, transcript_path, session_id),
-                    timeout=120.0,
+                    timeout=60.0,
                 )
-            except asyncio.TimeoutError:
-                print(
-                    f"    [MLflow] ERROR: process_transcript timed out after 120s "
-                    f"(session={session_id}). This may indicate rate limiting or "
-                    f"network issues. Continuing without trace."
-                )
-                result_holder["trace"] = None
-                return {"continue": True}
-
-            result_holder["trace"] = trace
-
             if trace:
-                print(f"    [MLflow] Trace created: {trace.info.trace_id}")
-
-                # Add model tags (same pattern as builder app)
+                print(f"    [MLflow] Trace uploaded (background): {trace.info.trace_id}")
                 try:
                     client = mlflow.MlflowClient()
                     trace_id = trace.info.trace_id
@@ -426,18 +423,27 @@ def _get_mlflow_stop_hook(mlflow_experiment: str | None = None, skill_name: str 
                         client.set_trace_tag(trace_id, "skill_name", skill_name)
                 except Exception as tag_err:
                     print(f"    [MLflow] Warning: could not add tags: {tag_err}")
-            else:
-                print("    [MLflow] Warning: process_transcript returned None (empty transcript?)")
-
+        except asyncio.TimeoutError:
+            print(f"    [MLflow] Warning: background trace upload timed out (session={session_id})")
         except Exception as e:
-            print(f"    [MLflow] Error processing transcript: {e}")
-            import traceback
+            print(f"    [MLflow] Warning: background trace upload failed: {e}")
 
-            traceback.print_exc()
+    async def mlflow_stop_hook(input_data, tool_use_id, context):
+        """Fire-and-forget transcript upload when agent stops.
 
+        Launches background task and returns immediately so the agent
+        result is available for scoring without waiting on MLflow I/O.
+        """
+        session_id = input_data.get("session_id")
+        transcript_path = input_data.get("transcript_path")
+
+        print(f"    [MLflow] Stop hook fired: session={session_id}, transcript={transcript_path}")
+
+        # Best-effort background upload — don't block scoring pipeline
+        asyncio.ensure_future(_upload_trace_background(session_id, transcript_path))
         return {"continue": True}
 
-    return mlflow_stop_hook, result_holder
+    return mlflow_stop_hook
 
 
 async def run_agent(
@@ -517,8 +523,8 @@ async def run_agent(
             if "env" not in server_cfg and mcp_env:
                 server_cfg["env"] = mcp_env
 
-    # Set up MLflow tracing via Stop hook
-    mlflow_hook, mlflow_result = _get_mlflow_stop_hook(mlflow_experiment=mlflow_experiment, skill_name=skill_name)
+    # Set up MLflow tracing via Stop hook (fire-and-forget for observability)
+    mlflow_hook = _get_mlflow_stop_hook(mlflow_experiment=mlflow_experiment, skill_name=skill_name)
     hooks = {}
     if mlflow_hook:
         hooks["Stop"] = [HookMatcher(hooks=[mlflow_hook])]
@@ -689,39 +695,6 @@ async def run_agent(
     response_text = "\n".join(response_parts)
     has_error = any(e.type == "error" for e in events)
 
-    # Extract MLflow trace from Stop hook result holder
-    mlflow_trace = mlflow_result.get("trace") if mlflow_result else None
-
-    # Flush MLflow async export queue so traces are uploaded before
-    # the event loop closes. Temporarily suppress MLflow's own ERROR log
-    # to avoid noisy "'NoneType' object has no attribute '_async_queue'"
-    # when async logging was never initialized.
-    # Use a thread timeout to prevent indefinite hangs if the tracking
-    # server is unresponsive.
-    if mlflow_result is not None:
-        try:
-            import mlflow
-            import logging as _logging
-            import concurrent.futures
-
-            _fluent_logger = _logging.getLogger("mlflow.tracking.fluent")
-            _prev_level = _fluent_logger.level
-            _fluent_logger.setLevel(_logging.CRITICAL)
-            _flush_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-            try:
-                _flush_fut = _flush_pool.submit(mlflow.flush_trace_async_logging, terminate=False)
-                _flush_fut.result(timeout=30)
-                _flush_pool.shutdown(wait=True)
-            except concurrent.futures.TimeoutError:
-                logger.warning("flush_trace_async_logging timed out after 30s")
-                _flush_pool.shutdown(wait=False)
-            except Exception:
-                _flush_pool.shutdown(wait=False)
-            finally:
-                _fluent_logger.setLevel(_prev_level)
-        except Exception as flush_err:
-            logger.debug("flush_trace_async_logging failed: %s", flush_err)
-
     return AgentResult(
         response_text=response_text,
         trace_metrics=trace_metrics,
@@ -730,7 +703,6 @@ async def run_agent(
         duration_ms=duration_ms,
         success=not has_error,
         error=next((e.data.get("message") for e in events if e.type == "error"), None),
-        mlflow_trace=mlflow_trace,
     )
 
 
@@ -760,11 +732,8 @@ def _run_in_fresh_loop(coro) -> Any:
                 if pending:
                     loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
                 loop.run_until_complete(loop.shutdown_asyncgens())
-                # Don't block on shutdown_default_executor() — it waits for
-                # all tasks submitted via run_in_executor(None, ...), including
-                # process_transcript which may be slow (rate limits, large traces).
-                # This avoids a deadlock where the default executor can't shut
-                # down because process_transcript is still running.
+                # Don't block on shutdown_default_executor() — background tasks
+                # (e.g. trace uploads) may still be running.
                 try:
                     loop.run_until_complete(asyncio.wait_for(loop.shutdown_default_executor(), timeout=5.0))
                 except (asyncio.TimeoutError, Exception):

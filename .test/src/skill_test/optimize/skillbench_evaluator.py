@@ -26,6 +26,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import threading
 import time
 from typing import Any, Callable
@@ -36,11 +37,12 @@ from ..scorers.universal import python_syntax, sql_syntax, no_hallucinated_apis
 from .assertions import run_all_assertions, summarize_failures
 from .judges import (
     JudgeFeedback,
-    _categorical_to_float,
+    _safe_parse_score,
     create_correctness_judge,
     create_completeness_judge,
     create_guideline_adherence_judge,
     create_regression_judge,
+    discover_skill_paths,
     run_judge_safe,
     completion_with_fallback,
 )
@@ -77,7 +79,11 @@ class _RateLimiter:
 
 
 # Module-level rate limiter shared across evaluator instances.
-_rate_limiter = _RateLimiter(max_concurrent=4, min_interval=0.2)
+# Configurable via env vars for workspaces with stricter rate limits.
+_rate_limiter = _RateLimiter(
+    max_concurrent=int(os.environ.get("GEPA_MAX_CONCURRENT_LLM", "4")),
+    min_interval=float(os.environ.get("GEPA_MIN_LLM_INTERVAL", "0.2")),
+)
 
 
 def _completion_with_backoff(*, max_retries: int = 3, **kwargs) -> Any:
@@ -141,7 +147,7 @@ class SkillBenchEvaluator:
     """GEPA-compatible evaluator using three focused judges for scoring + diagnostics.
 
     Uses correctness, completeness, and guideline adherence judges with
-    categorical ``Literal["excellent", "acceptable", "poor"]`` feedback types.
+    binary ``Literal["yes", "no"]`` feedback types.
     Produces decomposed signals for GEPA's reflection LM.
 
     Args:
@@ -176,10 +182,20 @@ class SkillBenchEvaluator:
         self._tool_context = tool_context or ""
         self._assessment_by_task = assessment_by_task or {}
 
+        # Cache WITH-skill evaluation results keyed on (prompt_hash, candidate_hash)
+        # to avoid re-evaluation when GEPA calls the evaluator multiple times on
+        # the same candidate-task pair.
+        self._with_skill_cache: dict[str, tuple[float, dict]] = {}
+
+        # Discover eval criteria skill paths (static spine + adaptive layer)
+        skill_paths = discover_skill_paths()
+
         # Create three focused judge instances
-        self._correctness_judge = create_correctness_judge(skill_guidelines, judge_model=judge_model)
-        self._completeness_judge = create_completeness_judge(judge_model=judge_model)
-        self._guideline_adherence_judge = create_guideline_adherence_judge(skill_guidelines, judge_model=judge_model)
+        self._correctness_judge = create_correctness_judge(skill_paths=skill_paths, judge_model=judge_model)
+        self._completeness_judge = create_completeness_judge(skill_paths=skill_paths, judge_model=judge_model)
+        self._guideline_adherence_judge = create_guideline_adherence_judge(
+            skill_paths=skill_paths, skill_guidelines=skill_guidelines, judge_model=judge_model
+        )
         self._regression_judge = create_regression_judge(judge_model=judge_model)
 
     def _generate_response(self, prompt: str, skill_context: str | None = None) -> str:
@@ -224,6 +240,13 @@ class SkillBenchEvaluator:
         """
         skill_md = candidate.get("skill_md", "")
 
+        # Check candidate-level cache
+        prompt = example.get("input", "")
+        candidate_hash = hashlib.sha256(json.dumps(candidate, sort_keys=True).encode()).hexdigest()[:16]
+        cache_key = f"{_prompt_hash(prompt)}:{candidate_hash}"
+        if cache_key in self._with_skill_cache:
+            return self._with_skill_cache[cache_key]
+
         # Build combined context: skill + read-only tool descriptions
         # During skill optimization, tools come from self._tool_context (read-only).
         # During tool optimization, tools come from candidate keys (optimizable).
@@ -237,8 +260,6 @@ class SkillBenchEvaluator:
             full_context += "\n\n## Available MCP Tools\n\n" + "\n\n".join(tool_parts)
         elif self._tool_context:
             full_context += "\n\n## Available MCP Tools\n\n" + self._tool_context
-
-        prompt = example.get("input", "")
 
         # Decode expectations
         expectations: dict[str, Any] = {}
@@ -330,11 +351,11 @@ class SkillBenchEvaluator:
         )
 
         # Convert categorical verdicts to float scores
-        correctness_with = _categorical_to_float(correctness_with_fb.value)
-        correctness_without = _categorical_to_float(correctness_without_fb.value)
-        completeness_with = _categorical_to_float(completeness_with_fb.value)
-        completeness_without = _categorical_to_float(completeness_without_fb.value)
-        guideline_adherence_score = _categorical_to_float(guideline_adherence_fb.value)
+        correctness_with = _safe_parse_score(correctness_with_fb.value)
+        correctness_without = _safe_parse_score(correctness_without_fb.value)
+        completeness_with = _safe_parse_score(completeness_with_fb.value)
+        completeness_without = _safe_parse_score(completeness_without_fb.value)
+        guideline_adherence_score = _safe_parse_score(guideline_adherence_fb.value)
 
         # Per-dimension effectiveness deltas
         correctness_delta = correctness_with - correctness_without
@@ -488,7 +509,13 @@ class SkillBenchEvaluator:
         if reference_answer:
             side_info["Expected"] = reference_answer[:2000]
         if with_response:
+            # Truncated for GEPA reflection context
             side_info["Actual"] = with_response[:2000]
+            # Full response for detailed run reports (persisted to disk)
+            side_info["Actual_Full"] = with_response
+        if without_response:
+            # Full baseline response for comparison in detailed reports
+            side_info["Without_Full"] = without_response
 
         # Score breakdown (scores dict feeds GEPA's Pareto frontier)
         side_info["scores"] = {
@@ -553,6 +580,9 @@ class SkillBenchEvaluator:
                 f"correctness={correctness_with:.2f}, completeness={completeness_with:.2f}, "
                 f"guideline_adherence={guideline_adherence_score:.2f}"
             )
+
+        # Store in candidate-level cache
+        self._with_skill_cache[cache_key] = (final_score, side_info)
 
         return final_score, side_info
 

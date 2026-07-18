@@ -2,8 +2,7 @@
 
 from unittest import mock
 
-import pytest
-from databricks.sdk.service.sql import State, StatementState
+from databricks.sdk.service.sql import QueryTag, State, StatementState
 
 from databricks_tools_core.sql import execute_sql, execute_sql_multi
 from databricks_tools_core.sql.sql_utils import SQLExecutor
@@ -95,13 +94,12 @@ class TestSQLExecutorQueryTags:
         )
 
         call_kwargs = mock_client.statement_execution.execute_statement.call_args.kwargs
-        query_tags = call_kwargs.get("query_tags")
-        assert isinstance(query_tags, list)
-        assert len(query_tags) == 2
-        assert query_tags[0].key == "team"
-        assert query_tags[0].value == "eng"
-        assert query_tags[1].key == "cost_center"
-        assert query_tags[1].value == "701"
+        # query_tags string is parsed into List[QueryTag] objects
+        expected_tags = [
+            QueryTag(key="team", value="eng"),
+            QueryTag(key="cost_center", value="701"),
+        ]
+        assert call_kwargs.get("query_tags") == expected_tags
 
     @mock.patch("databricks_tools_core.sql.sql_utils.executor.get_workspace_client")
     def test_executor_without_query_tags_omits_from_api(self, mock_get_client):

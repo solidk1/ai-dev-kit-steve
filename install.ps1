@@ -1,7 +1,7 @@
 #
 # Databricks AI Dev Kit - Unified Installer (Windows)
 #
-# Installs skills, MCP server, and configuration for Claude Code, Cursor, OpenAI Codex, GitHub Copilot, and Gemini CLI.
+# Installs skills, MCP server, and configuration for Claude Code, Cursor, OpenAI Codex, GitHub Copilot, Gemini CLI, Antigravity, Windsurf, OpenCode, and Kiro.
 #
 # Usage: irm https://raw.githubusercontent.com/databricks-solutions/ai-dev-kit/main/install.ps1 -OutFile install.ps1
 #        .\install.ps1 [OPTIONS]
@@ -76,11 +76,15 @@ $script:ProfileProvided = $false
 $script:SkillsProfile = ""
 $script:UserSkills   = ""
 $script:ListSkills   = $false
+$script:Uninstall    = $false
+$script:DryRun       = $false
+$script:AssumeYes    = $false
+$script:Channel      = if ($env:DEVKIT_CHANNEL) { $env:DEVKIT_CHANNEL } else { "stable" }  # stable or experimental
 
 # Databricks skills (bundled in repo)
 $script:Skills = @(
-    "databricks-agent-bricks", "databricks-aibi-dashboards", "databricks-app-python",
-    "databricks-asset-bundles", "databricks-config", "databricks-dbsql", "databricks-docs", "databricks-genie",
+    "databricks-agent-bricks", "databricks-aibi-dashboards", "databricks-apps-python",
+    "databricks-bundles", "databricks-config", "databricks-dbsql", "databricks-docs", "databricks-genie",
     "databricks-iceberg", "databricks-jobs", "databricks-lakebase-autoscale", "databricks-lakebase-provisioned",
     "databricks-metric-views", "databricks-mlflow-evaluation", "databricks-model-serving", "databricks-ai-functions",
     "databricks-python-sdk", "databricks-spark-declarative-pipelines", "databricks-spark-structured-streaming",
@@ -96,16 +100,17 @@ $script:MlflowSkills = @(
 )
 $MlflowRawUrl = "https://raw.githubusercontent.com/mlflow/skills/main"
 
-# APX skills (fetched from databricks-solutions/apx repo)
-$script:ApxSkills = @("databricks-app-apx")
-$ApxRawUrl = "https://raw.githubusercontent.com/databricks-solutions/apx/main/skills/apx"
+# Agent skills (fetched from databricks/databricks-agent-skills repo)
+$script:AgentSkills = @("databricks-core:databricks", "databricks-apps", "databricks-lakebase")
+$AgentSkillsRawUrl = "https://raw.githubusercontent.com/databricks/databricks-agent-skills/main/skills"
+$AgentSkillsApiUrl = "https://api.github.com/repos/databricks/databricks-agent-skills/git/trees/main?recursive=1"
 
 # ─── Skill profiles ──────────────────────────────────────────
 $script:CoreSkills = @("databricks-config", "databricks-docs", "databricks-python-sdk", "databricks-unity-catalog")
 
 $script:ProfileDataEngineer = @(
     "databricks-spark-declarative-pipelines", "databricks-spark-structured-streaming",
-    "databricks-jobs", "databricks-asset-bundles", "databricks-dbsql", "databricks-iceberg",
+    "databricks-jobs", "databricks-bundles", "databricks-dbsql", "databricks-iceberg",
     "databricks-zerobus-ingest", "spark-python-data-source", "databricks-metric-views",
     "databricks-synthetic-data-gen"
 )
@@ -123,15 +128,16 @@ $script:ProfileAiMlMlflow = @(
     "retrieving-mlflow-traces", "searching-mlflow-docs"
 )
 $script:ProfileAppDeveloper = @(
-    "databricks-app-python", "databricks-app-apx", "databricks-lakebase-autoscale",
+    "databricks-apps-python", "databricks-lakebase-autoscale",
     "databricks-lakebase-provisioned", "databricks-model-serving", "databricks-dbsql",
-    "databricks-jobs", "databricks-asset-bundles"
+    "databricks-jobs", "databricks-bundles"
 )
+$script:ProfileAppDeveloperAgent = @("databricks-core:databricks", "databricks-apps", "databricks-lakebase")
 
 # Selected skills (populated during profile selection)
 $script:SelectedSkills = @()
 $script:SelectedMlflowSkills = @()
-$script:SelectedApxSkills = @()
+$script:SelectedAgentSkills = @()
 
 # ─── --list-skills handler ────────────────────────────────────
 if ($script:ListSkills) {
@@ -139,11 +145,11 @@ if ($script:ListSkills) {
     Write-Host "Available Skill Profiles" -ForegroundColor White
     Write-Host "--------------------------------"
     Write-Host ""
-    Write-Host "  all              " -ForegroundColor White -NoNewline; Write-Host "All 34 skills (default)"
+    Write-Host "  all              " -ForegroundColor White -NoNewline; Write-Host "All 33 skills (default)"
     Write-Host "  data-engineer    " -ForegroundColor White -NoNewline; Write-Host "Pipelines, Spark, Jobs, Streaming (14 skills)"
     Write-Host "  analyst          " -ForegroundColor White -NoNewline; Write-Host "Dashboards, SQL, Genie, Metrics (8 skills)"
     Write-Host "  ai-ml-engineer   " -ForegroundColor White -NoNewline; Write-Host "Agents, RAG, Vector Search, MLflow (17 skills)"
-    Write-Host "  app-developer    " -ForegroundColor White -NoNewline; Write-Host "Apps, Lakebase, Deployment (10 skills)"
+    Write-Host "  app-developer    " -ForegroundColor White -NoNewline; Write-Host "Apps, Lakebase, Deployment (9 skills)"
     Write-Host ""
     Write-Host "Core Skills (always installed)" -ForegroundColor White
     Write-Host "--------------------------------"
@@ -171,9 +177,9 @@ if ($script:ListSkills) {
     Write-Host "--------------------------------"
     foreach ($s in $script:MlflowSkills) { Write-Host "    $s" }
     Write-Host ""
-    Write-Host "APX Skills (from databricks-solutions/apx repo)" -ForegroundColor White
+    Write-Host "Agent Skills (from databricks/databricks-agent-skills repo)" -ForegroundColor White
     Write-Host "--------------------------------"
-    foreach ($s in $script:ApxSkills) { Write-Host "    $s" }
+    foreach ($s in $script:AgentSkills) { Write-Host "    $($s -replace '^.*:', '')" }
     Write-Host ""
     Write-Host "Usage: .\install.ps1 --skills-profile data-engineer,ai-ml-engineer" -ForegroundColor DarkGray
     Write-Host "       .\install.ps1 --skills databricks-jobs,databricks-dbsql" -ForegroundColor DarkGray
@@ -205,6 +211,22 @@ function Write-Err  {
 }
 function Write-Step { param([string]$Text) if (-not $script:Silent) { Write-Host ""; Write-Host "$Text" -ForegroundColor White } }
 
+# Deprecation notice - shown on every install/upgrade while skills still ship
+# from this repo. The next major release installs skills via the Databricks CLI
+# from the official databricks/databricks-agent-skills set.
+function Show-DeprecationNotice {
+    if ($script:Silent) { return }
+    $bar = "  ------------------------------------------------------------"
+    Write-Host ""
+    Write-Host $bar -ForegroundColor Yellow
+    Write-Host "  !  Heads up: skills are moving" -ForegroundColor Yellow
+    Write-Host "  In the next release, the skills for AI Dev Kit will be" -ForegroundColor DarkGray
+    Write-Host "  promoted to a shared, engineering-supported repository." -ForegroundColor DarkGray
+    Write-Host "  In future releases, this installer will set up skills" -ForegroundColor DarkGray
+    Write-Host "  using the Databricks CLI." -ForegroundColor DarkGray
+    Write-Host $bar -ForegroundColor Yellow
+}
+
 # ─── Parse arguments ─────────────────────────────────────────
 $i = 0
 while ($i -lt $args.Count) {
@@ -219,7 +241,11 @@ while ($i -lt $args.Count) {
         { $_ -in "--skills-profile", "-SkillsProfile" } { $script:SkillsProfile = $args[$i + 1]; $i += 2 }
         { $_ -in "--skills", "-Skills" }       { $script:UserSkills = $args[$i + 1]; $i += 2 }
         { $_ -in "--list-skills", "-ListSkills" } { $script:ListSkills = $true; $i++ }
+        { $_ -in "--experimental", "-Experimental" } { $script:Channel = "experimental"; $i++ }
         { $_ -in "-f", "--force", "-Force" }   { $script:Force = $true; $i++ }
+        { $_ -in "--uninstall", "-Uninstall" } { $script:Uninstall = $true; $i++ }
+        { $_ -in "--dry-run", "-DryRun" }      { $script:DryRun = $true; $i++ }
+        { $_ -in "-y", "--yes", "-Yes" }       { $script:AssumeYes = $true; $i++ }
         { $_ -in "-h", "--help", "-Help" } {
             Write-Host "Databricks AI Dev Kit Installer (Windows)"
             Write-Host ""
@@ -233,16 +259,21 @@ while ($i -lt $args.Count) {
             Write-Host "  --mcp-only            Skip skills installation"
             Write-Host "  --mcp-path PATH       Path to MCP server installation"
             Write-Host "  --silent              Silent mode (no output except errors)"
-            Write-Host "  --tools LIST          Comma-separated: claude,cursor,copilot,codex,gemini"
+            Write-Host "  --tools LIST          Comma-separated: claude,cursor,copilot,codex,gemini,antigravity,windsurf,opencode,kiro"
             Write-Host "  --skills-profile LIST Comma-separated profiles: all,data-engineer,analyst,ai-ml-engineer,app-developer"
             Write-Host "  --skills LIST         Comma-separated skill names to install (overrides profile)"
             Write-Host "  --list-skills         List available skills and profiles, then exit"
+            Write-Host "  --experimental        Install from experimental branch (early access features)"
             Write-Host "  -f, --force           Force reinstall"
+            Write-Host "  --uninstall           Remove AI Dev Kit: skills, MCP server runtime, MCP config, and Claude Code plugin"
+            Write-Host "  --dry-run             With --uninstall: print what would be removed, change nothing"
+            Write-Host "  -y, --yes             With --uninstall: skip the confirmation prompt"
             Write-Host "  -h, --help            Show this help"
             Write-Host ""
             Write-Host "Environment Variables:"
             Write-Host "  AIDEVKIT_BRANCH       Branch or tag to install (default: latest release)"
             Write-Host "  AIDEVKIT_HOME         Installation directory (default: ~/.ai-dev-kit)"
+            Write-Host "  DEVKIT_CHANNEL        'stable' (default) or 'experimental'"
             Write-Host ""
             Write-Host "Examples:"
             Write-Host "  # Basic installation"
@@ -259,6 +290,382 @@ while ($i -lt $args.Count) {
         default { Write-Err "Unknown option: $($args[$i]) (use -h for help)"; $i++ }
     }
 }
+
+# ─── --uninstall ───────────────────────────────────────────────
+# Every skill directory name ever shipped (current + historical renames/removals),
+# so old installs — e.g. the removed databricks-lakebase-provisioned or renamed
+# databricks-app-python — are swept, not just the current release's skills.
+$script:UninstallSkillNames = @(
+    "databricks-agent-bricks","databricks-ai-functions","databricks-aibi-dashboards",
+    "databricks-bundles","databricks-asset-bundles","databricks-apps-python","databricks-app-python",
+    "databricks-app-apx","databricks-config","databricks-dbsql","databricks-docs",
+    "databricks-execution-compute","databricks-genie","databricks-iceberg","databricks-jobs",
+    "databricks-lakebase-autoscale","databricks-lakebase-provisioned","databricks-metric-views",
+    "databricks-ml-training-serving","databricks-model-serving","databricks-mlflow-evaluation",
+    "databricks-parsing","databricks-python-sdk","databricks-spark-declarative-pipelines",
+    "databricks-spark-structured-streaming","databricks-synthetic-data-gen","databricks-synthetic-data-generation",
+    "databricks-unity-catalog","databricks-unstructured-pdf-generation","databricks-vector-search",
+    "databricks-zerobus-ingest","spark-python-data-source",
+    "databricks","databricks-apps","databricks-lakebase",
+    "agent-evaluation","analyze-mlflow-chat-session","analyze-mlflow-trace",
+    "instrumenting-with-mlflow-tracing","mlflow-onboarding","querying-mlflow-metrics",
+    "retrieving-mlflow-traces","searching-mlflow-docs"
+)
+
+# The Claude Code plugin (installed via a marketplace, separate from the skills
+# this script drops directly). Its on-disk state lives across several shared files
+# (installed_plugins.json, enabledPlugins in settings.json, known_marketplaces.json,
+# the cache dir) shared with the user's OTHER plugins — so we never hand-edit them.
+# Detection is read-only; removal is delegated to the official `claude` CLI.
+#
+# The plugin can be installed from ANY marketplace, so we match by plugin name and
+# discover the actual "name@marketplace" key(s) rather than assuming a marketplace.
+$script:PluginName = "databricks-ai-dev-kit"
+
+# Read-only detection of the plugin per scope. The scope is recorded by which
+# settings.json enables it: user scope in ~/.claude/settings.json, project scope in
+# the project's .claude/settings.json(.local). (installed_plugins.json is user-level
+# and lists ALL scopes together, so it can't distinguish them.) Returns the enabled
+# "name@marketplace" key(s) — any marketplace is matched.
+function Get-PluginKeys {
+    param([string[]]$Files)
+    $pattern = '"' + [regex]::Escape($script:PluginName) + '@[A-Za-z0-9._-]+"'
+    $keys = @()
+    foreach ($f in $Files) {
+        if (Test-Path $f) {
+            foreach ($m in [regex]::Matches((Get-Content $f -Raw), $pattern)) { $keys += $m.Value.Trim('"') }
+        }
+    }
+    return @($keys | Sort-Object -Unique)
+}
+function Get-PluginKeysGlobal { Get-PluginKeys -Files @((Join-Path $env:USERPROFILE ".claude\settings.json")) }
+function Get-PluginKeysProject { param([string]$Dir) Get-PluginKeys -Files @((Join-Path $Dir ".claude\settings.json"), (Join-Path $Dir ".claude\settings.local.json")) }
+
+# Count skill folders + 'databricks' MCP entries under the given roots/targets, plus
+# hook/state/plugin, returning one "  - ..." summary line each. Shared by the project-
+# and global-scope summaries below. Read-only.
+function Get-LeftoversSummary {
+    param([string]$Hook, [string]$StateDir, [string]$StateLabel, [string[]]$PluginKeys, [string[]]$SkillRoots, [hashtable[]]$McpTargets)
+    $lines = @()
+    $n = 0
+    foreach ($root in $SkillRoots) {
+        if (Test-Path $root) { foreach ($name in $script:UninstallSkillNames) { if (Test-Path (Join-Path $root $name)) { $n++ } } }
+    }
+    if ($n -gt 0) { $lines += "  - $n skill folder(s)" }
+    $n = 0
+    foreach ($t in $McpTargets) {
+        if (-not (Test-Path $t.Path)) { continue }
+        if ($t.Kind -eq "json" -and (Test-McpJsonHasDatabricks -Path $t.Path -Top $t.Top)) { $n++ }
+        elseif ($t.Kind -eq "toml" -and (Select-String -Path $t.Path -Pattern 'mcp_servers\.databricks' -Quiet)) { $n++ }
+    }
+    if ($n -gt 0) { $lines += "  - $n MCP config file(s) with the 'databricks' server" }
+    if ($Hook -and (Test-Path $Hook) -and (Select-String -Path $Hook -Pattern 'check_update' -Quiet)) { $lines += "  - Claude update hook" }
+    if ($StateDir -and (Test-Path $StateDir)) { $lines += "  - $StateLabel" }
+    if ($PluginKeys.Count -gt 0) { $lines += "  - Claude Code plugin: $($PluginKeys -join ' ')" }
+    return @($lines)
+}
+
+# Project-scope artifacts under $Dir (what a project uninstall from that dir removes).
+function Get-ProjectLeftoversSummary {
+    param([string]$Dir)
+    $skillRoots = @("\.claude\skills","\.cursor\skills","\.github\skills","\.agents\skills","\.gemini\skills","\.windsurf\skills","\.opencode\skills","\.kiro\skills") | ForEach-Object { Join-Path $Dir $_.TrimStart('\') }
+    $mcpTargets = @(
+        @{ Path=(Join-Path $Dir ".mcp.json"); Kind="json"; Top="mcpServers" }, @{ Path=(Join-Path $Dir ".cursor\mcp.json"); Kind="json"; Top="mcpServers" }, @{ Path=(Join-Path $Dir ".vscode\mcp.json"); Kind="json"; Top="servers" },
+        @{ Path=(Join-Path $Dir ".codex\config.toml"); Kind="toml" }, @{ Path=(Join-Path $Dir ".gemini\settings.json"); Kind="json"; Top="mcpServers" },
+        @{ Path=(Join-Path $Dir "opencode.json"); Kind="json"; Top="mcp" }, @{ Path=(Join-Path $Dir ".kiro\settings\mcp.json"); Kind="json"; Top="mcpServers" }
+    )
+    Get-LeftoversSummary -Hook (Join-Path $Dir ".claude\settings.json") -StateDir (Join-Path $Dir ".ai-dev-kit") -StateLabel "state files (.ai-dev-kit/)" `
+        -PluginKeys (Get-PluginKeysProject -Dir $Dir) -SkillRoots $skillRoots -McpTargets $mcpTargets
+}
+
+# Global/user-scope artifacts (what a --global uninstall removes).
+function Get-GlobalLeftoversSummary {
+    $h = $env:USERPROFILE
+    $installDir = if ($script:UserMcpPath) { $script:UserMcpPath } elseif ($env:AIDEVKIT_HOME) { $env:AIDEVKIT_HOME } else { Join-Path $h ".ai-dev-kit" }
+    $skillRoots = @(".claude\skills",".cursor\skills",".github\skills",".agents\skills",".gemini\skills",".gemini\antigravity\skills",".codeium\windsurf\skills",".config\opencode\skills",".kiro\skills") | ForEach-Object { Join-Path $h $_ }
+    $mcpTargets = @(
+        @{ Path=(Join-Path $h ".claude.json"); Kind="json"; Top="mcpServers" }, @{ Path=(Join-Path $h ".codex\config.toml"); Kind="toml" }, @{ Path=(Join-Path $h ".gemini\settings.json"); Kind="json"; Top="mcpServers" },
+        @{ Path=(Join-Path $h ".gemini\antigravity\mcp_config.json"); Kind="json"; Top="mcpServers" }, @{ Path=(Join-Path $h ".codeium\windsurf\mcp_config.json"); Kind="json"; Top="mcpServers" },
+        @{ Path=(Join-Path $h ".config\opencode\opencode.json"); Kind="json"; Top="mcp" }, @{ Path=(Join-Path $h ".kiro\settings\mcp.json"); Kind="json"; Top="mcpServers" }
+    )
+    Get-LeftoversSummary -Hook (Join-Path $h ".claude\settings.json") -StateDir $installDir -StateLabel "MCP server runtime / state ($installDir)" `
+        -PluginKeys (Get-PluginKeysGlobal) -SkillRoots $skillRoots -McpTargets $mcpTargets
+}
+
+# Very noticeable end-of-run box warning that files remain in the OTHER scope.
+function Show-LeftoversBox {
+    param([string]$Headline, [string]$Detail, [string[]]$Summary, [string]$Action)
+    $bar = "  ------------------------------------------------------------"
+    Write-Host ""
+    Write-Host $bar -ForegroundColor Yellow
+    Write-Host "  $Headline" -ForegroundColor Yellow
+    Write-Host $bar -ForegroundColor Yellow
+    Write-Host "  $Detail" -ForegroundColor DarkGray
+    foreach ($l in $Summary) { Write-Host $l }
+    Write-Host "  $Action" -ForegroundColor Yellow
+    Write-Host $bar -ForegroundColor Yellow
+}
+function Show-ProjectLeftoversWarning {
+    param([string]$Dir, [string[]]$Summary)
+    Show-LeftoversBox -Headline "!  PROJECT-LEVEL AI DEV KIT FILES STILL REMAIN" `
+        -Detail "This global uninstall did not touch project-scoped files in: $Dir" `
+        -Summary $Summary -Action "Re-run the uninstaller from that folder WITHOUT --global to remove them."
+}
+function Show-GlobalLeftoversWarning {
+    param([string[]]$Summary)
+    Show-LeftoversBox -Headline "!  GLOBAL AI DEV KIT FILES STILL REMAIN" `
+        -Detail "This project uninstall did not touch global (user-level) files:" `
+        -Summary $Summary -Action "Re-run the uninstaller with --global to remove them."
+}
+
+# Remove the plugin from the CURRENT uninstall scope via the official CLI (atomic
+# across the shared plugin state - we never hand-edit it). Removes every detected
+# "name@marketplace" key (the plugin may come from any marketplace). A project
+# install can be 'project' (.claude/settings.json) or 'local' (settings.local.json),
+# so a project uninstall tries both CLI scopes. If nothing could be removed this is a
+# hard error that reports whether the rest of the uninstall completed and prints the
+# exact command to run manually. $OthersRemoved = other artifacts removed this run.
+function Remove-ClaudePlugin {
+    param([int]$OthersRemoved, [string[]]$Keys)
+    if ($script:Scope -eq "project") { $scopes = @("project","local"); $cmdScope = "project" }
+    else { $scopes = @("user"); $cmdScope = "user" }
+    if (Get-Command claude -ErrorAction SilentlyContinue) {
+        $removed = $false
+        foreach ($k in $Keys) {
+            foreach ($sc in $scopes) {
+                # Subcommand name has varied across versions (uninstall vs remove) — try both.
+                & claude plugin uninstall $k -y --scope $sc *>$null
+                if ($LASTEXITCODE -ne 0) { & claude plugin remove $k -y --scope $sc *>$null }
+                if ($LASTEXITCODE -eq 0) { Write-Msg "removed Claude Code plugin $k ($sc scope)"; $removed = $true }
+            }
+        }
+        if ($removed) { return }
+    }
+    $partial = ""; $alt = ""
+    if ($OthersRemoved -gt 0) { $partial = "Skills, MCP server, and config WERE removed (partial uninstall). " }
+    if ($script:Scope -eq "project") { $alt = " (or --scope local)" }
+    $manual = (($Keys | ForEach-Object { "claude plugin uninstall $_ --scope $cmdScope" }) -join "; ")
+    Write-Err "Could not remove the Claude Code plugin. ${partial}Finish it manually: $manual$alt"
+}
+
+# Read-only: true only if the EXACT top-level server key ($Top) contains a
+# 'databricks' entry - the same thing removal targets. Does NOT match nested
+# occurrences (e.g. ~/.claude.json's projects.<path>.mcpServers.databricks, a
+# project-scoped server we never touch) that a plain match would flag.
+function Test-McpJsonHasDatabricks {
+    param([string]$Path, [string]$Top)
+    if (-not (Test-Path $Path)) { return $false }
+    try { $cfg = Get-Content $Path -Raw | ConvertFrom-Json } catch { return $false }
+    return ($cfg.$Top -and $cfg.$Top.PSObject.Properties.Name -contains 'databricks')
+}
+
+function Remove-McpJsonKey {
+    param([string]$Path, [string]$Top)
+    if (-not (Test-Path $Path)) { return $false }
+    if (-not (Select-String -Path $Path -Pattern '"databricks"' -Quiet)) { return $false }
+    if ($script:DryRun) { return $true }
+    try { $cfg = Get-Content $Path -Raw | ConvertFrom-Json } catch { return $false }
+    # Only rewrite (and back up) when the exact top-level 'databricks' key is
+    # present. Otherwise a stray '"databricks"' elsewhere (a foreign server's
+    # path, a project named 'databricks') would trigger a lossy no-op rewrite —
+    # and ConvertTo-Json's -Depth would truncate deep configs like ~/.claude.json.
+    if (-not ($cfg.$Top -and $cfg.$Top.PSObject.Properties.Name -contains 'databricks')) {
+        return $false
+    }
+    Copy-Item $Path "$Path.bak" -Force
+    $cfg.$Top.PSObject.Properties.Remove('databricks')
+    if (-not $cfg.$Top.PSObject.Properties.Name) { $cfg.PSObject.Properties.Remove($Top) }
+    $cfg | ConvertTo-Json -Depth 100 | Set-Content $Path -Encoding UTF8
+    return $true
+}
+
+function Remove-McpTomlBlock {
+    param([string]$Path)
+    if (-not (Test-Path $Path)) { return $false }
+    if (-not (Select-String -Path $Path -Pattern 'mcp_servers\.databricks' -Quiet)) { return $false }
+    if ($script:DryRun) { return $true }
+    Copy-Item $Path "$Path.bak" -Force
+    $out = New-Object System.Collections.Generic.List[string]
+    $skip = $false
+    foreach ($line in Get-Content "$Path.bak") {
+        # Consume the databricks table AND its dotted subtables (e.g. .env);
+        # any other section header ends the skip.
+        if ($line -match '^\[mcp_servers\.databricks(\.|\])') { $skip = $true; continue }
+        if ($line -match '^\[') { $skip = $false }
+        if (-not $skip) { $out.Add($line) }
+    }
+    $out | Set-Content $Path -Encoding UTF8
+    return $true
+}
+
+function Remove-ClaudeHook {
+    param([string]$Path)
+    if (-not (Test-Path $Path)) { return $false }
+    if (-not (Select-String -Path $Path -Pattern 'check_update' -Quiet)) { return $false }
+    if ($script:DryRun) { return $true }
+    try { $cfg = Get-Content $Path -Raw | ConvertFrom-Json } catch { return $false }
+    $ss = $cfg.hooks.SessionStart
+    if (-not $ss) { return $false }   # nothing to change — don't rewrite/back up
+    foreach ($group in $ss) {
+        $group.hooks = @($group.hooks | Where-Object { $_.command -notmatch 'check_update' })
+    }
+    $cfg.hooks.SessionStart = @($ss | Where-Object { $_.hooks -and $_.hooks.Count -gt 0 })
+    if (-not $cfg.hooks.SessionStart -or $cfg.hooks.SessionStart.Count -eq 0) {
+        $cfg.hooks.PSObject.Properties.Remove('SessionStart')
+    }
+    Copy-Item $Path "$Path.bak" -Force
+    $cfg | ConvertTo-Json -Depth 100 | Set-Content $Path -Encoding UTF8
+    return $true
+}
+
+function Invoke-Uninstall {
+    $home_ = $env:USERPROFILE
+    if ($script:Scope -eq "global") { $baseDir = $home_ } else { $baseDir = (Get-Location).Path }
+    $installDir = if ($script:UserMcpPath) { $script:UserMcpPath }
+                  elseif ($env:AIDEVKIT_HOME) { $env:AIDEVKIT_HOME }
+                  else { Join-Path $home_ ".ai-dev-kit" }
+    if ($script:Scope -eq "global") { $stateDir = $installDir } else { $stateDir = Join-Path $baseDir ".ai-dev-kit" }
+
+    # Scope strictly gates locations (mirror of install.sh).
+    if ($script:Scope -eq "global") {
+        $skillRoots = @(
+            (Join-Path $home_ ".claude\skills"), (Join-Path $home_ ".cursor\skills"),
+            (Join-Path $home_ ".github\skills"), (Join-Path $home_ ".agents\skills"),
+            (Join-Path $home_ ".gemini\skills"), (Join-Path $home_ ".gemini\antigravity\skills"),
+            (Join-Path $home_ ".codeium\windsurf\skills"), (Join-Path $home_ ".config\opencode\skills"),
+            (Join-Path $home_ ".kiro\skills")
+        )
+        $mcpTargets = @(
+            @{ Path=(Join-Path $home_ ".claude\mcp.json"); Kind="json"; Top="mcpServers" },
+            @{ Path=(Join-Path $home_ ".codex\config.toml"); Kind="toml" },
+            @{ Path=(Join-Path $home_ ".gemini\settings.json"); Kind="json"; Top="mcpServers" },
+            @{ Path=(Join-Path $home_ ".gemini\antigravity\mcp_config.json"); Kind="json"; Top="mcpServers" },
+            @{ Path=(Join-Path $home_ ".codeium\windsurf\mcp_config.json"); Kind="json"; Top="mcpServers" },
+            @{ Path=(Join-Path $home_ ".config\opencode\opencode.json"); Kind="json"; Top="mcp" },
+            @{ Path=(Join-Path $home_ ".kiro\settings\mcp.json"); Kind="json"; Top="mcpServers" }
+        )
+        $hookTargets = @( (Join-Path $home_ ".claude\settings.json") )
+    } else {
+        $skillRoots = @(
+            (Join-Path $baseDir ".claude\skills"), (Join-Path $baseDir ".cursor\skills"),
+            (Join-Path $baseDir ".github\skills"), (Join-Path $baseDir ".agents\skills"),
+            (Join-Path $baseDir ".gemini\skills"), (Join-Path $baseDir ".windsurf\skills"),
+            (Join-Path $baseDir ".opencode\skills"), (Join-Path $baseDir ".kiro\skills")
+        )
+        $mcpTargets = @(
+            @{ Path=(Join-Path $baseDir ".mcp.json"); Kind="json"; Top="mcpServers" },
+            @{ Path=(Join-Path $baseDir ".cursor\mcp.json"); Kind="json"; Top="mcpServers" },
+            @{ Path=(Join-Path $baseDir ".vscode\mcp.json"); Kind="json"; Top="servers" },
+            @{ Path=(Join-Path $baseDir ".codex\config.toml"); Kind="toml" },
+            @{ Path=(Join-Path $baseDir ".gemini\settings.json"); Kind="json"; Top="mcpServers" },
+            @{ Path=(Join-Path $baseDir "opencode.json"); Kind="json"; Top="mcp" },
+            @{ Path=(Join-Path $baseDir ".kiro\settings\mcp.json"); Kind="json"; Top="mcpServers" }
+        )
+        $hookTargets = @( (Join-Path $baseDir ".claude\settings.json") )
+    }
+
+    # Build plan
+    $planSkills = @(); $planMcp = @(); $planHooks = @(); $planRuntime = @(); $planState = @()
+    foreach ($root in $skillRoots) {
+        if (-not (Test-Path $root)) { continue }
+        foreach ($name in $script:UninstallSkillNames) {
+            $p = Join-Path $root $name
+            if (Test-Path $p) { $planSkills += $p }
+        }
+    }
+    foreach ($t in $mcpTargets) {
+        if (-not (Test-Path $t.Path)) { continue }
+        if ($t.Kind -eq "json" -and (Test-McpJsonHasDatabricks -Path $t.Path -Top $t.Top)) { $planMcp += $t }
+        elseif ($t.Kind -eq "toml" -and (Select-String -Path $t.Path -Pattern 'mcp_servers\.databricks' -Quiet)) { $planMcp += $t }
+    }
+    foreach ($h in $hookTargets) {
+        if ((Test-Path $h) -and (Select-String -Path $h -Pattern 'check_update' -Quiet)) { $planHooks += $h }
+    }
+    if ($script:Scope -eq "global" -or $script:UserMcpPath) {
+        if (Test-Path $installDir) { $planRuntime += $installDir }
+    }
+    # On a global uninstall $stateDir IS the runtime dir; when that dir is already in
+    # $planRuntime the state files inside it are removed along with it - planning them
+    # separately would make Remove-Item fail on the already-deleted paths.
+    if ($planRuntime -notcontains $stateDir) {
+        foreach ($s in @((Join-Path $stateDir ".installed-skills"), (Join-Path $stateDir ".skills-profile"), (Join-Path $stateDir "version"))) {
+            if (Test-Path $s) { $planState += $s }
+        }
+    }
+    $projMarker = Join-Path $baseDir ".ai-dev-kit"
+    if ($script:Scope -eq "project" -and (Test-Path $projMarker)) { $planState += $projMarker }
+
+    # Claude Code plugin at the CURRENT scope — collect the enabled "name@marketplace"
+    # key(s) so any marketplace is matched; these are what we remove.
+    if ($script:Scope -eq "global") { $pluginKeys = Get-PluginKeysGlobal } else { $pluginKeys = Get-PluginKeysProject -Dir $baseDir }
+    $planPlugin = ($pluginKeys.Count -gt 0)
+
+    # Warn about artifacts left behind in the OTHER scope. A global uninstall looks
+    # for project-scope files in the current folder; a project uninstall looks for
+    # global/user-level files. Skip the $cwd scan when it is $HOME (there project and
+    # global paths coincide and are already handled by the global side).
+    $projectLeftovers = @(); $globalLeftovers = @()
+    $cwd = (Get-Location).Path
+    if ($script:Scope -eq "global") {
+        if ($cwd -ne $env:USERPROFILE) { $projectLeftovers = Get-ProjectLeftoversSummary -Dir $cwd }
+    } else {
+        if ($baseDir -ne $env:USERPROFILE) { $globalLeftovers = Get-GlobalLeftoversSummary }
+    }
+
+    $total = $planSkills.Count + $planMcp.Count + $planHooks.Count + $planRuntime.Count + $planState.Count + $pluginKeys.Count
+    if ($total -eq 0) {
+        Write-Ok "Nothing to uninstall for $($script:Scope) scope at $baseDir - no AI Dev Kit artifacts found."
+        if ($script:Scope -eq "project" -and -not $globalLeftovers.Count) { Write-Msg "Tip: pass --global to remove a global install." }
+        if ($projectLeftovers.Count) { Show-ProjectLeftoversWarning -Dir $cwd -Summary $projectLeftovers }
+        if ($globalLeftovers.Count)  { Show-GlobalLeftoversWarning -Summary $globalLeftovers }
+        return
+    }
+
+    Write-Step "Uninstall plan ($($script:Scope) scope)"
+    if ($planSkills.Count) { Write-Host "  Skill folders ($($planSkills.Count)):" -ForegroundColor White; $planSkills | ForEach-Object { Write-Host "    $_" } }
+    if ($planMcp.Count)    { Write-Host "  MCP config - remove 'databricks' entry ($($planMcp.Count)):" -ForegroundColor White; $planMcp | ForEach-Object { Write-Host "    $($_.Path)" } }
+    if ($planHooks.Count)  { Write-Host "  Claude update hook ($($planHooks.Count)):" -ForegroundColor White; $planHooks | ForEach-Object { Write-Host "    $_" } }
+    if ($planRuntime.Count){ Write-Host "  MCP server runtime:" -ForegroundColor White; $planRuntime | ForEach-Object { Write-Host "    $_" } }
+    if ($planState.Count)  { Write-Host "  State files:" -ForegroundColor White; $planState | ForEach-Object { Write-Host "    $_" } }
+    if ($planPlugin) {
+        Write-Host "  Claude Code plugin:" -ForegroundColor White
+        foreach ($k in $pluginKeys) { Write-Host "    $k (removed via the claude CLI, $($script:Scope) scope)" -ForegroundColor DarkGray }
+        Write-Host "  !  Heads up: the AI Dev Kit Claude Code plugin will also be removed." -ForegroundColor Yellow
+    }
+    Write-Host ""
+    Write-Msg "Config files are backed up to <file>.bak before editing."
+
+    if ($script:DryRun) {
+        if ($projectLeftovers.Count) { Show-ProjectLeftoversWarning -Dir $cwd -Summary $projectLeftovers }
+        if ($globalLeftovers.Count)  { Show-GlobalLeftoversWarning -Summary $globalLeftovers }
+        Write-Ok "Dry run - nothing was changed. Re-run without --dry-run to apply."
+        return
+    }
+
+    if (-not $script:AssumeYes) {
+        $reply = Read-Host "  Remove these $total item(s)? [y/N]"
+        if ($reply -notmatch '^(y|yes)$') { Write-Warn "Aborted - nothing removed."; return }
+    }
+
+    Write-Step "Removing"
+    foreach ($p in $planSkills)  { Remove-Item -Recurse -Force $p; Write-Msg "removed $p" }
+    foreach ($t in $planMcp) {
+        if ($t.Kind -eq "json") { if (Remove-McpJsonKey -Path $t.Path -Top $t.Top) { Write-Msg "cleaned $($t.Path)" } }
+        else { if (Remove-McpTomlBlock -Path $t.Path) { Write-Msg "cleaned $($t.Path)" } }
+    }
+    foreach ($p in $planHooks)   { if (Remove-ClaudeHook -Path $p) { Write-Msg "cleaned hook in $p" } }
+    foreach ($p in $planRuntime) { Remove-Item -Recurse -Force $p; Write-Msg "removed $p" }
+    foreach ($p in $planState)   { Remove-Item -Recurse -Force $p; Write-Msg "removed $p" }
+    if ($planPlugin) { Remove-ClaudePlugin -OthersRemoved ($total - $pluginKeys.Count) -Keys $pluginKeys }
+
+    Write-Host ""
+    Write-Ok "AI Dev Kit uninstalled ($($script:Scope) scope)."
+    Write-Msg "Other scopes and per-editor .bak backups were left untouched."
+    if ($projectLeftovers.Count) { Show-ProjectLeftoversWarning -Dir $cwd -Summary $projectLeftovers }
+    if ($globalLeftovers.Count)  { Show-GlobalLeftoversWarning -Summary $globalLeftovers }
+}
+
+if ($script:Uninstall) { Invoke-Uninstall; return }
 
 # ─── Interactive helpers ──────────────────────────────────────
 
@@ -567,15 +974,26 @@ function Invoke-DetectTools {
     $hasCopilot = ($null -ne (Get-Command code -ErrorAction SilentlyContinue)) -or
                   (Test-Path "$env:LOCALAPPDATA\Programs\Microsoft VS Code\Code.exe")
     $hasGemini  = $null -ne (Get-Command gemini -ErrorAction SilentlyContinue)
+    $hasAntigravity = ($null -ne (Get-Command antigravity -ErrorAction SilentlyContinue)) -or
+                      (Test-Path "$env:LOCALAPPDATA\Programs\Antigravity\Antigravity.exe")
+    $hasWindsurf = ($null -ne (Get-Command windsurf -ErrorAction SilentlyContinue)) -or
+                   (Test-Path "$env:LOCALAPPDATA\Programs\Windsurf\Windsurf.exe")
+    $hasOpencode = $null -ne (Get-Command opencode -ErrorAction SilentlyContinue)
+    $hasKiro    = ($null -ne (Get-Command kiro -ErrorAction SilentlyContinue)) -or
+                  (Test-Path "$env:LOCALAPPDATA\Programs\Kiro\Kiro.exe")
 
     $claudeState  = $hasClaude;  $claudeHint  = if ($hasClaude)  { "detected" } else { "not found" }
     $cursorState  = $hasCursor;  $cursorHint  = if ($hasCursor)  { "detected" } else { "not found" }
     $codexState   = $hasCodex;   $codexHint   = if ($hasCodex)   { "detected" } else { "not found" }
     $copilotState = $hasCopilot; $copilotHint = if ($hasCopilot) { "detected" } else { "not found" }
     $geminiState  = $hasGemini;  $geminiHint  = if ($hasGemini)  { "detected" } else { "not found" }
+    $antigravityState = $hasAntigravity; $antigravityHint = if ($hasAntigravity) { "detected" } else { "not found" }
+    $windsurfState = $hasWindsurf; $windsurfHint = if ($hasWindsurf) { "detected" } else { "not found" }
+    $opencodeState = $hasOpencode; $opencodeHint = if ($hasOpencode) { "detected" } else { "not found" }
+    $kiroState    = $hasKiro;    $kiroHint    = if ($hasKiro)    { "detected" } else { "not found" }
 
     # If nothing detected, default to claude
-    if (-not $hasClaude -and -not $hasCursor -and -not $hasCodex -and -not $hasCopilot -and -not $hasGemini) {
+    if (-not $hasClaude -and -not $hasCursor -and -not $hasCodex -and -not $hasCopilot -and -not $hasGemini -and -not $hasAntigravity -and -not $hasWindsurf -and -not $hasOpencode -and -not $hasKiro) {
         $claudeState = $true
         $claudeHint  = "default"
     }
@@ -586,11 +1004,15 @@ function Invoke-DetectTools {
     }
 
     $items = @(
-        @{ Label = "Claude Code";    Value = "claude";  State = $claudeState;  Hint = $claudeHint }
-        @{ Label = "Cursor";         Value = "cursor";  State = $cursorState;  Hint = $cursorHint }
-        @{ Label = "GitHub Copilot"; Value = "copilot"; State = $copilotState; Hint = $copilotHint }
-        @{ Label = "OpenAI Codex";   Value = "codex";   State = $codexState;   Hint = $codexHint }
-        @{ Label = "Gemini CLI";     Value = "gemini";  State = $geminiState;  Hint = $geminiHint }
+        @{ Label = "Claude Code";    Value = "claude";       State = $claudeState;       Hint = $claudeHint }
+        @{ Label = "Cursor";         Value = "cursor";       State = $cursorState;       Hint = $cursorHint }
+        @{ Label = "GitHub Copilot"; Value = "copilot";      State = $copilotState;      Hint = $copilotHint }
+        @{ Label = "OpenAI Codex";   Value = "codex";        State = $codexState;        Hint = $codexHint }
+        @{ Label = "Gemini CLI";     Value = "gemini";       State = $geminiState;       Hint = $geminiHint }
+        @{ Label = "Antigravity";    Value = "antigravity";  State = $antigravityState;  Hint = $antigravityHint }
+        @{ Label = "Windsurf";       Value = "windsurf";     State = $windsurfState;     Hint = $windsurfHint }
+        @{ Label = "OpenCode";       Value = "opencode";     State = $opencodeState;     Hint = $opencodeHint }
+        @{ Label = "Kiro";           Value = "kiro";         State = $kiroState;         Hint = $kiroHint }
     )
 
     $result = Select-Checkbox -Items $items
@@ -844,20 +1266,20 @@ function Resolve-Skills {
         $userList = $script:UserSkills -split ','
         $dbSkills = @() + $script:CoreSkills
         $mlflowSkills = @()
-        $apxSkills = @()
+        $agentSkills = @()
         foreach ($skill in $userList) {
             $skill = $skill.Trim()
             if ($script:MlflowSkills -contains $skill) {
                 $mlflowSkills += $skill
-            } elseif ($script:ApxSkills -contains $skill) {
-                $apxSkills += $skill
+            } elseif ($script:AgentSkills | ForEach-Object { $_ -replace '^.*:', '' } | Where-Object { $_ -eq $skill }) {
+                $agentSkills += ($script:AgentSkills | Where-Object { ($_ -replace '^.*:', '') -eq $skill })
             } else {
                 $dbSkills += $skill
             }
         }
         $script:SelectedSkills = $dbSkills | Select-Object -Unique
         $script:SelectedMlflowSkills = $mlflowSkills | Select-Object -Unique
-        $script:SelectedApxSkills = $apxSkills | Select-Object -Unique
+        $script:SelectedAgentSkills = $agentSkills | Select-Object -Unique
         return
     }
 
@@ -865,14 +1287,14 @@ function Resolve-Skills {
     if ([string]::IsNullOrWhiteSpace($script:SkillsProfile) -or $script:SkillsProfile -eq "all") {
         $script:SelectedSkills = $script:Skills
         $script:SelectedMlflowSkills = $script:MlflowSkills
-        $script:SelectedApxSkills = $script:ApxSkills
+        $script:SelectedAgentSkills = $script:AgentSkills
         return
     }
 
     # Build union of selected profiles
     $dbSkills = @() + $script:CoreSkills
     $mlflowSkills = @()
-    $apxSkills = @()
+    $agentSkills = @()
 
     foreach ($profile in ($script:SkillsProfile -split ',')) {
         $profile = $profile.Trim()
@@ -880,7 +1302,7 @@ function Resolve-Skills {
             "all" {
                 $script:SelectedSkills = $script:Skills
                 $script:SelectedMlflowSkills = $script:MlflowSkills
-                $script:SelectedApxSkills = $script:ApxSkills
+                $script:SelectedAgentSkills = $script:AgentSkills
                 return
             }
             "data-engineer"  { $dbSkills += $script:ProfileDataEngineer }
@@ -891,7 +1313,7 @@ function Resolve-Skills {
             }
             "app-developer" {
                 $dbSkills += $script:ProfileAppDeveloper
-                $apxSkills += $script:ApxSkills
+                $agentSkills += $script:ProfileAppDeveloperAgent
             }
             default { Write-Warn "Unknown skill profile: $profile (ignored)" }
         }
@@ -899,7 +1321,7 @@ function Resolve-Skills {
 
     $script:SelectedSkills = $dbSkills | Select-Object -Unique
     $script:SelectedMlflowSkills = $mlflowSkills | Select-Object -Unique
-    $script:SelectedApxSkills = $apxSkills | Select-Object -Unique
+    $script:SelectedAgentSkills = $agentSkills | Select-Object -Unique
 }
 
 function Invoke-PromptSkillsProfile {
@@ -1090,9 +1512,12 @@ function Invoke-PromptCustomSkills {
             "data-engineer"  { $preselected += $script:ProfileDataEngineer }
             "analyst"        { $preselected += $script:ProfileAnalyst }
             "ai-ml-engineer" { $preselected += $script:ProfileAiMlEngineer + $script:ProfileAiMlMlflow }
-            "app-developer"  { $preselected += $script:ProfileAppDeveloper + $script:ApxSkills }
+            "app-developer"  { $preselected += $script:ProfileAppDeveloper + $script:ProfileAppDeveloperAgent }
         }
     }
+    # Normalize "source:install-name" entries (e.g. "databricks-core:databricks") to install-name only,
+    # so `-contains` exact-equality checks below match against the same names used in the menu.
+    $preselected = @($preselected | ForEach-Object { $_ -replace '^[^:]+:', '' })
 
     Write-Host ""
     Write-Host "  Select individual skills" -ForegroundColor White
@@ -1102,7 +1527,7 @@ function Invoke-PromptCustomSkills {
         @{ Label = "Spark Pipelines";      Value = "databricks-spark-declarative-pipelines"; State = ($preselected -contains "databricks-spark-declarative-pipelines"); Hint = "SDP/LDP, CDC, SCD Type 2" }
         @{ Label = "Streaming";            Value = "databricks-spark-structured-streaming";  State = ($preselected -contains "databricks-spark-structured-streaming");  Hint = "Real-time streaming" }
         @{ Label = "Jobs & Workflows";     Value = "databricks-jobs";                        State = ($preselected -contains "databricks-jobs");                        Hint = "Multi-task orchestration" }
-        @{ Label = "Asset Bundles";        Value = "databricks-asset-bundles";               State = ($preselected -contains "databricks-asset-bundles");               Hint = "DABs deployment" }
+        @{ Label = "Asset Bundles";        Value = "databricks-bundles";               State = ($preselected -contains "databricks-bundles");               Hint = "DABs deployment" }
         @{ Label = "Databricks SQL";       Value = "databricks-dbsql";                       State = ($preselected -contains "databricks-dbsql");                       Hint = "SQL warehouse queries" }
         @{ Label = "Iceberg";              Value = "databricks-iceberg";                     State = ($preselected -contains "databricks-iceberg");                     Hint = "Apache Iceberg tables" }
         @{ Label = "Zerobus Ingest";       Value = "databricks-zerobus-ingest";              State = ($preselected -contains "databricks-zerobus-ingest");              Hint = "Streaming ingestion" }
@@ -1119,8 +1544,10 @@ function Invoke-PromptCustomSkills {
         @{ Label = "Synthetic Data";       Value = "databricks-synthetic-data-gen";          State = ($preselected -contains "databricks-synthetic-data-gen");          Hint = "Generate test data" }
         @{ Label = "Lakebase Autoscale";   Value = "databricks-lakebase-autoscale";          State = ($preselected -contains "databricks-lakebase-autoscale");          Hint = "Managed PostgreSQL" }
         @{ Label = "Lakebase Provisioned"; Value = "databricks-lakebase-provisioned";        State = ($preselected -contains "databricks-lakebase-provisioned");        Hint = "Provisioned PostgreSQL" }
-        @{ Label = "App Python";           Value = "databricks-app-python";                  State = ($preselected -contains "databricks-app-python");                  Hint = "Dash, Streamlit, Flask" }
-        @{ Label = "App APX";              Value = "databricks-app-apx";                     State = ($preselected -contains "databricks-app-apx");                     Hint = "FastAPI + React" }
+        @{ Label = "App (AppKit + Python)"; Value = "databricks-apps-python";                 State = ($preselected -contains "databricks-apps-python");                 Hint = "AppKit, Dash, Streamlit, Flask" }
+        @{ Label = "Agent: Databricks";    Value = "databricks";                             State = ($preselected -contains "databricks");                             Hint = "CLI auth, data exploration" }
+        @{ Label = "Agent: Apps";          Value = "databricks-apps";                        State = ($preselected -contains "databricks-apps");                        Hint = "AppKit + all frameworks" }
+        @{ Label = "Agent: Lakebase";      Value = "databricks-lakebase";                    State = ($preselected -contains "databricks-lakebase");                    Hint = "Lakebase OLTP" }
         @{ Label = "MLflow Onboarding";    Value = "mlflow-onboarding";                      State = ($preselected -contains "mlflow-onboarding");                      Hint = "Getting started" }
         @{ Label = "Agent Evaluation";     Value = "agent-evaluation";                       State = ($preselected -contains "agent-evaluation");                       Hint = "Evaluate AI agents" }
         @{ Label = "MLflow Tracing";       Value = "instrumenting-with-mlflow-tracing";      State = ($preselected -contains "instrumenting-with-mlflow-tracing");      Hint = "Instrument with tracing" }
@@ -1153,6 +1580,34 @@ function Install-Skills {
             "copilot" { $dirs += Join-Path $BaseDir ".github\skills" }
             "codex"   { $dirs += Join-Path $BaseDir ".agents\skills" }
             "gemini"  { $dirs += Join-Path $BaseDir ".gemini\skills" }
+            "antigravity" {
+                if ($script:Scope -eq "global") {
+                    $dirs += Join-Path $env:USERPROFILE ".gemini\antigravity\skills"
+                } else {
+                    $dirs += Join-Path $BaseDir ".agents\skills"
+                }
+            }
+            "windsurf" {
+                if ($script:Scope -eq "global") {
+                    $dirs += Join-Path $env:USERPROFILE ".codeium\windsurf\skills"
+                } else {
+                    $dirs += Join-Path $BaseDir ".windsurf\skills"
+                }
+            }
+            "opencode" {
+                if ($script:Scope -eq "global") {
+                    $dirs += Join-Path $env:USERPROFILE ".config\opencode\skills"
+                } else {
+                    $dirs += Join-Path $BaseDir ".opencode\skills"
+                }
+            }
+            "kiro" {
+                if ($script:Scope -eq "global") {
+                    $dirs += Join-Path $env:USERPROFILE ".kiro\skills"
+                } else {
+                    $dirs += Join-Path $BaseDir ".kiro\skills"
+                }
+            }
         }
     }
     $dirs = $dirs | Select-Object -Unique
@@ -1160,15 +1615,15 @@ function Install-Skills {
     # Count selected skills for display
     $dbCount = $script:SelectedSkills.Count
     $mlflowCount = $script:SelectedMlflowSkills.Count
-    $apxCount = $script:SelectedApxSkills.Count
-    $totalCount = $dbCount + $mlflowCount + $apxCount
+    $agentCount = $script:SelectedAgentSkills.Count
+    $totalCount = $dbCount + $mlflowCount + $agentCount
     Write-Msg "Installing $totalCount skills"
 
     # Build set of all skills being installed now
     $allNewSkills = @()
     $allNewSkills += $script:SelectedSkills
     $allNewSkills += $script:SelectedMlflowSkills
-    $allNewSkills += $script:SelectedApxSkills
+    $allNewSkills += $script:SelectedAgentSkills | ForEach-Object { $_ -replace '^.*:', '' }
 
     # Clean up previously installed skills that are no longer selected
     # Check scope-local manifest first, fall back to global for upgrades from older versions
@@ -1238,30 +1693,72 @@ function Install-Skills {
             Write-Ok "MLflow skills ($mlflowCount) -> $shortDir"
         }
 
-        # Install APX skills from databricks-solutions/apx repo
-        if ($script:SelectedApxSkills.Count -gt 0) {
-            $prevEAP2 = $ErrorActionPreference; $ErrorActionPreference = "Continue"
-            foreach ($skill in $script:SelectedApxSkills) {
-                $destDir = Join-Path $dir $skill
-                if (-not (Test-Path $destDir)) {
-                    New-Item -ItemType Directory -Path $destDir -Force | Out-Null
-                }
-                $url = "$ApxRawUrl/SKILL.md"
-                try {
-                    Invoke-WebRequest -Uri $url -OutFile (Join-Path $destDir "SKILL.md") -UseBasicParsing -ErrorAction Stop
-                    foreach ($ref in @("backend-patterns.md", "frontend-patterns.md")) {
-                        try {
-                            Invoke-WebRequest -Uri "$ApxRawUrl/$ref" -OutFile (Join-Path $destDir $ref) -UseBasicParsing -ErrorAction Stop
-                        } catch {}
-                    }
-                    $manifestEntries += "$dir|$skill"
-                } catch {
-                    Remove-Item $destDir -ErrorAction SilentlyContinue
-                    Write-Warning "Could not install APX skill '$skill' - consider removing $destDir if it is no longer needed"
-                }
+        # Install Agent skills from databricks/databricks-agent-skills repo
+        if ($script:SelectedAgentSkills.Count -gt 0) {
+            # Fetch the full repo tree once (single API call) for all skills.
+            # Collapse pretty-printed JSON whitespace so the path/mode/type fields
+            # land adjacent for the per-entry regex below.
+            $agentTree = $null
+            $agentSuccess = 0
+            try {
+                $rawTree = Invoke-WebRequest -Uri $AgentSkillsApiUrl -UseBasicParsing -ErrorAction Stop | Select-Object -ExpandProperty Content
+                $agentTree = ($rawTree -replace '\s+', ' ')
+            } catch {
+                Write-Warn "Could not fetch agent skills tree from GitHub API"
             }
-            $ErrorActionPreference = $prevEAP2
-            Write-Ok "APX skills ($apxCount) -> $shortDir"
+            if ($agentTree) {
+                $prevEAP3 = $ErrorActionPreference; $ErrorActionPreference = "Continue"
+                foreach ($entry in $script:SelectedAgentSkills) {
+                    $srcName = ($entry -split ':')[0]
+                    $installName = ($entry -replace '^.*:', '')
+                    $destDir = Join-Path $dir $installName
+                    # Wipe any prior install so upstream-deleted files don't persist
+                    if (Test-Path $destDir) {
+                        Remove-Item -Recurse -Force $destDir -ErrorAction SilentlyContinue
+                    }
+                    New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+                    # Extract file paths under skills/<srcName>/ — match only entries whose
+                    # next JSON fields are `"mode": "...", "type": "blob"`, so directory
+                    # entries (type=tree) are skipped. agentTree has been whitespace-collapsed
+                    # above; the GitHub tree API returns fields in order path → mode → type.
+                    $filePaths = [regex]::Matches($agentTree, '"path": *"(skills/' + [regex]::Escape($srcName) + '/[^"]+)", *"mode": *"[^"]+", *"type": *"blob"') |
+                        ForEach-Object { $_.Groups[1].Value }
+                    if (-not $filePaths) {
+                        Remove-Item $destDir -ErrorAction SilentlyContinue
+                        Write-Warn "Could not fetch agent skill '$srcName'"
+                        continue
+                    }
+                    $okFlag = $true
+                    foreach ($filePath in $filePaths) {
+                        $rel = $filePath.Substring("skills/$srcName/".Length)
+                        $dest = Join-Path $destDir ($rel -replace '/', '\')
+                        $destParent = Split-Path $dest -Parent
+                        if (-not (Test-Path $destParent)) {
+                            New-Item -ItemType Directory -Path $destParent -Force | Out-Null
+                        }
+                        try {
+                            Invoke-WebRequest -Uri "$AgentSkillsRawUrl/$srcName/$rel" -OutFile $dest -UseBasicParsing -ErrorAction Stop
+                        } catch {
+                            $okFlag = $false
+                        }
+                    }
+                    if ($okFlag) {
+                        $manifestEntries += "$dir|$installName"
+                        $agentSuccess++
+                    } else {
+                        Remove-Item -Recurse -Force $destDir -ErrorAction SilentlyContinue
+                        Write-Warn "Could not install agent skill '$srcName'"
+                    }
+                }
+                $ErrorActionPreference = $prevEAP3
+            }
+            if ($agentSuccess -eq $agentCount) {
+                Write-Ok "Agent skills ($agentCount) -> $shortDir"
+            } elseif ($agentSuccess -gt 0) {
+                Write-Warn "Agent skills (only $agentSuccess of $agentCount installed) -> $shortDir"
+            } else {
+                Write-Warn "Agent skills (0 of $agentCount installed) -> $shortDir"
+            }
         }
     }
 
@@ -1467,6 +1964,65 @@ function Write-GeminiMcpJson {
     }
 }
 
+function Write-OpenCodeJson {
+    param([string]$Path)
+
+    $dir = Split-Path $Path -Parent
+    if (-not (Test-Path $dir)) {
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    }
+
+    # Backup existing
+    if (Test-Path $Path) {
+        Copy-Item $Path "$Path.bak" -Force
+        Write-Msg "Backed up $(Split-Path $Path -Leaf) -> $(Split-Path $Path -Leaf).bak"
+    }
+
+    # Try to merge with existing config
+    $existing = $null
+    if ((Test-Path $Path) -and (Test-Path $script:VenvPython)) {
+        try {
+            $existing = Get-Content $Path -Raw | ConvertFrom-Json
+        } catch {
+            $existing = $null
+        }
+    }
+
+    if ($existing) {
+        if (-not $existing.'$schema') {
+            $existing | Add-Member -NotePropertyName '$schema' -NotePropertyValue 'https://opencode.ai/config.json' -Force
+        }
+        if (-not $existing.mcp) {
+            $existing | Add-Member -NotePropertyName "mcp" -NotePropertyValue ([PSCustomObject]@{}) -Force
+        }
+        $dbEntry = [PSCustomObject]@{
+            type        = "local"
+            command     = @($script:VenvPython -replace '\\', '/', $script:McpEntry -replace '\\', '/')
+            environment = [PSCustomObject]@{ DATABRICKS_CONFIG_PROFILE = $script:Profile_ }
+            enabled     = $true
+        }
+        $existing.mcp | Add-Member -NotePropertyName "databricks" -NotePropertyValue $dbEntry -Force
+        $existing | ConvertTo-Json -Depth 10 | Set-Content $Path -Encoding UTF8
+    } else {
+        $pythonPath = $script:VenvPython -replace '\\', '/'
+        $entryPath  = $script:McpEntry -replace '\\', '/'
+        $json = @"
+{
+  "`$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "databricks": {
+      "type": "local",
+      "command": ["$pythonPath", "$entryPath"],
+      "environment": {"DATABRICKS_CONFIG_PROFILE": "$($script:Profile_)"},
+      "enabled": true
+    }
+  }
+}
+"@
+        Set-Content -Path $Path -Value $json -Encoding UTF8
+    }
+}
+
 function Write-GeminiMd {
     param([string]$Path)
 
@@ -1495,7 +2051,7 @@ Skills are installed in ``.gemini/skills/`` and provide patterns and best practi
 - Unity Catalog, SQL, Genie
 - MLflow evaluation and tracing
 - Model Serving, Vector Search
-- Databricks Apps (Python and APX)
+- Databricks Apps (Python)
 - And more
 
 ## Getting Started
@@ -1523,8 +2079,19 @@ function Write-McpConfigs {
             }
             "cursor" {
                 if ($script:Scope -eq "global") {
-                    Write-Warn "Cursor global: configure in Settings > MCP"
-                    Write-Msg "  Command: $($script:VenvPython) | Args: $($script:McpEntry)"
+                    Write-Warn "Cursor global: manual MCP configuration required"
+                    Write-Msg "  1. Open Cursor -> Settings -> Cursor Settings -> Tools & MCP"
+                    Write-Msg "  2. Click New MCP Server"
+                    Write-Msg "  3. Add the following JSON config:"
+                    Write-Msg "     {"
+                    Write-Msg "       `"mcpServers`": {"
+                    Write-Msg "         `"databricks`": {"
+                    Write-Msg "           `"command`": `"$($script:VenvPython)`","
+                    Write-Msg "           `"args`": [`"$($script:McpEntry)`"],"
+                    Write-Msg "           `"env`": {`"DATABRICKS_CONFIG_PROFILE`": `"$($script:Profile)`"}"
+                    Write-Msg "         }"
+                    Write-Msg "       }"
+                    Write-Msg "     }"
                 } else {
                     Write-McpJson (Join-Path $BaseDir ".cursor\mcp.json")
                     Write-Ok "Cursor MCP config"
@@ -1559,6 +2126,40 @@ function Write-McpConfigs {
                 }
                 Write-Ok "Gemini CLI MCP config"
             }
+            "antigravity" {
+                if ($script:Scope -eq "project") {
+                    Write-Warn "Antigravity only supports global MCP configuration."
+                    Write-Msg "  Config written to ~/.gemini/antigravity/mcp_config.json"
+                }
+                Write-GeminiMcpJson (Join-Path $env:USERPROFILE ".gemini\antigravity\mcp_config.json")
+                Write-Ok "Antigravity MCP config"
+            }
+            "windsurf" {
+                if ($script:Scope -eq "project") {
+                    Write-Warn "Windsurf only supports global MCP configuration."
+                    Write-Msg "  Config written to ~/.codeium/windsurf/mcp_config.json"
+                }
+                Write-McpJson (Join-Path $env:USERPROFILE ".codeium\windsurf\mcp_config.json")
+                Write-Ok "Windsurf MCP config"
+            }
+            "opencode" {
+                if ($script:Scope -eq "global") {
+                    Write-OpenCodeJson (Join-Path $env:USERPROFILE ".config\opencode\opencode.json")
+                } else {
+                    Write-OpenCodeJson (Join-Path $BaseDir "opencode.json")
+                }
+                Write-Ok "OpenCode MCP config"
+            }
+            "kiro" {
+                if ($script:Scope -eq "global") {
+                    $kiroSettings = Join-Path $env:USERPROFILE ".kiro\settings"
+                } else {
+                    $kiroSettings = Join-Path $BaseDir ".kiro\settings"
+                }
+                if (-not (Test-Path $kiroSettings)) { New-Item -ItemType Directory -Path $kiroSettings -Force | Out-Null }
+                Write-McpJson (Join-Path $kiroSettings "mcp.json")
+                Write-Ok "Kiro MCP config"
+            }
         }
     }
 }
@@ -1590,6 +2191,9 @@ function Show-Summary {
     Write-Host ""
     Write-Host "Installation complete!" -ForegroundColor Green
     Write-Host "--------------------------------"
+    if ($script:Channel -eq "experimental") {
+        Write-Msg "Channel:  experimental 🧪"
+    }
     Write-Msg "Location: $($script:InstallDir)"
     Write-Msg "Scope:    $($script:Scope)"
     Write-Msg "Tools:    $(($script:Tools -split ' ') -join ', ')"
@@ -1610,10 +2214,35 @@ function Show-Summary {
         Write-Msg "$step. Launch Gemini CLI in your project: gemini"
         $step++
     }
+    if ($script:Tools -match 'antigravity') {
+        Write-Msg "$step. Open your project in Antigravity to use Databricks skills and MCP tools"
+        $step++
+    }
+    if ($script:Tools -match 'windsurf') {
+        Write-Msg "$step. Restart Windsurf to pick up the databricks MCP server (Windsurf -> Settings -> Windsurf Settings -> MCP)"
+        $step++
+    }
+    if ($script:Tools -match 'opencode') {
+        Write-Msg "$step. Launch OpenCode in your project: opencode"
+        $step++
+    }
+    if ($script:Tools -match 'kiro') {
+        Write-Msg "$step. Open your project in Kiro to use Databricks skills and MCP tools"
+        $step++
+    }
     Write-Msg "$step. Open your project in your tool of choice"
     $step++
     Write-Msg "$step. Try: `"List my SQL warehouses`""
     Write-Host ""
+    if ($script:Channel -eq "experimental") {
+        Write-Host "  ============================================================" -ForegroundColor Yellow
+        Write-Host "  🧪 You're using the experimental channel" -ForegroundColor White
+        Write-Host "  ============================================================" -ForegroundColor Yellow
+        Write-Host ""
+        Write-Msg "Thank you for testing early features! Your feedback helps us improve."
+        Write-Msg "Report issues: https://github.com/databricks-solutions/ai-dev-kit/issues"
+        Write-Host ""
+    }
 }
 
 # ─── Scope prompt ─────────────────────────────────────────────
@@ -1712,6 +2341,71 @@ function Invoke-PromptScope {
     $script:Scope = $values[$selected]
 }
 
+# ─── Release channel prompt ───────────────────────────────────
+function Invoke-PromptChannel {
+    # Skip if already set via --experimental flag or env var
+    if ($script:Channel -eq "experimental") { return }
+
+    # Skip in silent mode or non-interactive
+    if ($script:Silent) { return }
+    if (-not (Test-Interactive)) { return }
+
+    Write-Host ""
+    Write-Host "  Select release channel" -ForegroundColor White
+
+    $items = @(
+        @{ Label = "Stable";       Value = "stable";       Selected = $true;  Hint = "Latest stable release (recommended)" }
+        @{ Label = "Experimental"; Value = "experimental"; Selected = $false; Hint = "Early access to new features -- help us test!" }
+    )
+
+    $script:Channel = Select-Radio -Items $items
+
+    # If experimental was selected, re-download and re-exec from experimental branch
+    if ($script:Channel -eq "experimental") {
+        Write-Host ""
+        Write-Host "  ============================================================" -ForegroundColor Yellow
+        Write-Host "  🧪 Experimental Channel" -ForegroundColor White
+        Write-Host "  ============================================================" -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "  You're about to install the " -NoNewline
+        Write-Host "experimental" -ForegroundColor White -NoNewline
+        Write-Host " version of AI Dev Kit."
+        Write-Host "  This includes early access features that may change or break."
+        Write-Host ""
+        Write-Host "  We'd love your feedback!" -ForegroundColor White
+        Write-Host "  Report issues: https://github.com/databricks-solutions/ai-dev-kit/issues" -ForegroundColor Blue
+        Write-Host "  Discussions:   https://github.com/databricks-solutions/ai-dev-kit/discussions" -ForegroundColor Blue
+        Write-Host ""
+        Write-Host "  Downloading installer from experimental branch..." -ForegroundColor DarkGray
+        Write-Host ""
+
+        # Build argument list preserving current flags
+        $newArgs = @("--experimental")
+        if ($script:Force)               { $newArgs += "--force" }
+        if ($script:UserTools)           { $newArgs += "--tools"; $newArgs += $script:UserTools }
+        if ($script:UserMcpPath)         { $newArgs += "--mcp-path"; $newArgs += $script:UserMcpPath }
+        if ($script:SkillsProfile)       { $newArgs += "--skills-profile"; $newArgs += $script:SkillsProfile }
+        if ($script:UserSkills)          { $newArgs += "--skills"; $newArgs += $script:UserSkills }
+        if ($script:ScopeExplicit -and $script:Scope -eq "global") { $newArgs += "--global" }
+        if ($script:Profile_ -ne "DEFAULT") { $newArgs += "--profile"; $newArgs += $script:Profile_ }
+        if (-not $script:InstallMcp)     { $newArgs += "--skills-only" }
+        if (-not $script:InstallSkills)  { $newArgs += "--mcp-only" }
+
+        # Download experimental installer to a temp file and execute
+        $expUrl = "https://raw.githubusercontent.com/databricks-solutions/ai-dev-kit/experimental/install.ps1"
+        $tempScript = Join-Path $env:TEMP "ai-dev-kit-install-experimental.ps1"
+        try {
+            Invoke-WebRequest -Uri $expUrl -OutFile $tempScript -UseBasicParsing -ErrorAction Stop
+        } catch {
+            Write-Err "Failed to download experimental installer from ${expUrl}: $($_.Exception.Message)"
+        }
+
+        # Execute the experimental installer with preserved args, then exit
+        & $tempScript @newArgs
+        exit $LASTEXITCODE
+    }
+}
+
 # ─── Auth prompt ──────────────────────────────────────────────
 function Invoke-PromptAuth {
     if ($script:Silent) { return }
@@ -1763,6 +2457,13 @@ function Invoke-Main {
         Write-Host "--------------------------------"
     }
 
+    # Deprecation notice: this is the last line of releases that installs skills
+    # from this repo's skill files. Shown on every install and upgrade.
+    Show-DeprecationNotice
+
+    # ── Step 1: Release channel selection (may re-exec from experimental branch) ──
+    Invoke-PromptChannel
+
     # Check dependencies
     Write-Step "Checking prerequisites"
     Test-Dependencies
@@ -1795,7 +2496,7 @@ function Invoke-Main {
         Write-Step "Skill profiles"
         Invoke-PromptSkillsProfile
         Resolve-Skills
-        $skCount = $script:SelectedSkills.Count + $script:SelectedMlflowSkills.Count + $script:SelectedApxSkills.Count
+        $skCount = $script:SelectedSkills.Count + $script:SelectedMlflowSkills.Count
         if (-not [string]::IsNullOrWhiteSpace($script:UserSkills)) {
             Write-Ok "Custom selection ($skCount skills)"
         } else {
@@ -1815,6 +2516,9 @@ function Invoke-Main {
         Write-Host ""
         Write-Host "  Summary" -ForegroundColor White
         Write-Host "  ------------------------------------"
+        if ($script:Channel -eq "experimental") {
+            Write-Host "  Channel:     " -NoNewline; Write-Host "experimental 🧪" -ForegroundColor Yellow
+        }
         Write-Host "  Tools:       " -NoNewline; Write-Host "$(($script:Tools -split ' ') -join ', ')" -ForegroundColor Green
         Write-Host "  Profile:     " -NoNewline; Write-Host $script:Profile_ -ForegroundColor Green
         Write-Host "  Scope:       " -NoNewline; Write-Host $script:Scope -ForegroundColor Green
@@ -1822,12 +2526,16 @@ function Invoke-Main {
             Write-Host "  MCP server:  " -NoNewline; Write-Host $script:InstallDir -ForegroundColor Green
         }
         if ($script:InstallSkills) {
-            $skTotal = $script:SelectedSkills.Count + $script:SelectedMlflowSkills.Count + $script:SelectedApxSkills.Count
+            $skTotal = $script:SelectedSkills.Count + $script:SelectedMlflowSkills.Count + $script:SelectedAgentSkills.Count
             if (-not [string]::IsNullOrWhiteSpace($script:UserSkills)) {
-                Write-Host "  Skills:      " -NoNewline; Write-Host "custom selection ($skTotal skills)" -ForegroundColor Green
+                Write-Host "  Skills:      " -NoNewline
+                Write-Host "custom selection ($skTotal skills)" -ForegroundColor Green -NoNewline
+                Write-Host " (will be overwritten, backup your changes first)" -ForegroundColor Yellow
             } else {
                 $profileDisplay = if ([string]::IsNullOrWhiteSpace($script:SkillsProfile)) { "all" } else { $script:SkillsProfile }
-                Write-Host "  Skills:      " -NoNewline; Write-Host "$profileDisplay ($skTotal skills)" -ForegroundColor Green
+                Write-Host "  Skills:      " -NoNewline
+                Write-Host "$profileDisplay ($skTotal skills)" -ForegroundColor Green -NoNewline
+                Write-Host " (will be overwritten, backup your changes first)" -ForegroundColor Yellow
             }
         }
         if ($script:InstallMcp) {

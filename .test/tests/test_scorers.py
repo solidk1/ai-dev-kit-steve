@@ -34,16 +34,16 @@ class TestDetectSkillsFromPrompt:
         assert "databricks-python-sdk" in skills
 
     def test_detect_asset_bundles(self):
-        """Test detection of databricks-asset-bundles skill."""
+        """Test detection of databricks-bundles skill."""
         prompt = "Create a databricks asset bundle for deployment"
         skills = detect_skills_from_prompt(prompt)
-        assert "databricks-asset-bundles" in skills
+        assert "databricks-bundles" in skills
 
     def test_detect_dabs(self):
         """Test detection via DABs keyword."""
         prompt = "Set up DABs for my pipeline"
         skills = detect_skills_from_prompt(prompt)
-        assert "databricks-asset-bundles" in skills
+        assert "databricks-bundles" in skills
 
     def test_detect_mlflow_evaluation(self):
         """Test detection of databricks-mlflow-evaluation skill."""
@@ -70,52 +70,44 @@ class TestDetectSkillsFromPrompt:
         assert "databricks-agent-bricks" in skills
 
     def test_detect_app_python_streamlit(self):
-        """Test detection of databricks-app-python via Streamlit."""
+        """Test detection of databricks-apps-python via Streamlit."""
         prompt = "Create a Streamlit app that shows sales data"
         skills = detect_skills_from_prompt(prompt)
-        assert "databricks-app-python" in skills
+        assert "databricks-apps-python" in skills
 
     def test_detect_app_python_dash(self):
-        """Test detection of databricks-app-python via Dash."""
+        """Test detection of databricks-apps-python via Dash."""
         prompt = "Build a Dash app with interactive charts"
         skills = detect_skills_from_prompt(prompt)
-        assert "databricks-app-python" in skills
+        assert "databricks-apps-python" in skills
 
     def test_detect_app_python_gradio(self):
-        """Test detection of databricks-app-python via Gradio."""
+        """Test detection of databricks-apps-python via Gradio."""
         prompt = "Create a Gradio app for testing my ML model"
         skills = detect_skills_from_prompt(prompt)
-        assert "databricks-app-python" in skills
+        assert "databricks-apps-python" in skills
 
     def test_detect_app_python_fastapi(self):
-        """Test detection of databricks-app-python via FastAPI."""
+        """Test detection of databricks-apps-python via FastAPI."""
         prompt = "Build a FastAPI app that serves data from a warehouse"
         skills = detect_skills_from_prompt(prompt)
-        assert "databricks-app-python" in skills
+        assert "databricks-apps-python" in skills
 
     def test_detect_app_python_reflex(self):
-        """Test detection of databricks-app-python via Reflex."""
+        """Test detection of databricks-apps-python via Reflex."""
         prompt = "Create a Reflex app for managing inventory"
         skills = detect_skills_from_prompt(prompt)
-        assert "databricks-app-python" in skills
+        assert "databricks-apps-python" in skills
 
-    def test_detect_app_apx(self):
-        """Test detection of databricks-app-apx."""
-        prompt = "Create a full-stack app with APX"
-        skills = detect_skills_from_prompt(prompt)
-        assert "databricks-app-apx" in skills
+    def test_detect_fastapi_react_matches_python(self):
+        """Test that a 'FastAPI React' prompt matches the Python app skill.
 
-    def test_detect_fastapi_react_matches_both(self):
-        """Test that 'FastAPI React' matches both APX and Python app skills.
-
-        'fastapi react' triggers APX, while bare 'fastapi' also triggers
-        databricks-app-python. This is intentional — the router sees both
-        and picks the best fit.
+        Bare 'fastapi' triggers databricks-apps-python, which covers the
+        Python app frameworks (Dash, Streamlit, Flask, FastAPI).
         """
         prompt = "Create a FastAPI React app for my dashboard"
         skills = detect_skills_from_prompt(prompt)
-        assert "databricks-app-apx" in skills
-        assert "databricks-app-python" in skills
+        assert "databricks-apps-python" in skills
 
     def test_detect_lakebase(self):
         """Test detection of databricks-lakebase-provisioned skill."""
@@ -134,20 +126,20 @@ class TestDetectSkillsFromPrompt:
         prompt = "Create streaming tables and deploy with DABs"
         skills = detect_skills_from_prompt(prompt)
         assert "databricks-spark-declarative-pipelines" in skills
-        assert "databricks-asset-bundles" in skills
+        assert "databricks-bundles" in skills
 
     def test_detect_multi_app_lakebase(self):
         """Test detection of app + lakebase."""
         prompt = "Create a Streamlit app that stores data in Lakebase"
         skills = detect_skills_from_prompt(prompt)
-        assert "databricks-app-python" in skills
+        assert "databricks-apps-python" in skills
         assert "databricks-lakebase-provisioned" in skills
 
     def test_detect_multi_app_serving(self):
         """Test detection of app + model serving."""
         prompt = "Build a Gradio app that queries a model serving endpoint"
         skills = detect_skills_from_prompt(prompt)
-        assert "databricks-app-python" in skills
+        assert "databricks-apps-python" in skills
         assert "databricks-model-serving" in skills
 
     def test_detect_no_match(self):
@@ -170,9 +162,8 @@ class TestSkillTriggers:
         """Verify all expected skills have trigger keywords."""
         expected_skills = [
             "databricks-spark-declarative-pipelines",
-            "databricks-app-apx",
-            "databricks-app-python",
-            "databricks-asset-bundles",
+            "databricks-apps-python",
+            "databricks-bundles",
             "databricks-python-sdk",
             "databricks-jobs",
             "databricks-synthetic-data-gen",

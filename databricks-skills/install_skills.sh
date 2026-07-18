@@ -6,17 +6,19 @@
 # These skills teach Claude how to work with Databricks using MCP tools.
 #
 # Usage:
-#   # Install all skills (Databricks + MLflow + APX)
+#   # Install all skills (Databricks + MLflow)
 #   curl -sSL https://raw.githubusercontent.com/databricks-solutions/ai-dev-kit/main/databricks-skills/install_skills.sh | bash
 #
 #   # Install specific skills (can mix Databricks and MLflow skills)
-#   curl -sSL https://raw.githubusercontent.com/databricks-solutions/ai-dev-kit/main/databricks-skills/install_skills.sh | bash -s -- databricks-asset-bundles agent-evaluation
+#   curl -sSL https://raw.githubusercontent.com/databricks-solutions/ai-dev-kit/main/databricks-skills/install_skills.sh | bash -s -- databricks-bundles agent-evaluation
 #
 #   # Or run locally
 #   ./install_skills.sh                              # Install all skills
-#   ./install_skills.sh databricks-asset-bundles agent-evaluation  # Install specific skills
+#   ./install_skills.sh databricks-bundles agent-evaluation  # Install specific skills
 #   ./install_skills.sh --mlflow-version v1.0.0      # Pin MLflow skills version
 #   ./install_skills.sh --local                      # Install Databricks skills from local directory
+#   ./install_skills.sh --install-to-genie           # Install then upload ./.claude/skills to workspace (Genie Code / Assistant)
+#   ./install_skills.sh --install-to-genie --profile prod --local
 #   ./install_skills.sh --list                       # List available skills
 #   ./install_skills.sh --help                       # Show help
 #
@@ -35,6 +37,9 @@ REPO_URL="https://github.com/databricks-solutions/ai-dev-kit"
 REPO_RAW_URL="https://raw.githubusercontent.com/databricks-solutions/ai-dev-kit/main"
 SKILLS_DIR=".claude/skills"
 INSTALL_FROM_LOCAL=false
+INSTALL_TO_GENIE=false
+# Databricks CLI profile for workspace upload (only used with --install-to-genie)
+DB_PROFILE="${DATABRICKS_CONFIG_PROFILE:-DEFAULT}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # MLflow skills configuration
@@ -42,21 +47,13 @@ MLFLOW_REPO_RAW_URL="https://raw.githubusercontent.com/mlflow/skills"
 MLFLOW_REPO_REF="main"
 
 # Databricks skills (hosted in this repo)
-DATABRICKS_SKILLS="databricks-agent-bricks databricks-ai-functions databricks-aibi-dashboards databricks-asset-bundles databricks-app-python databricks-config databricks-dbsql databricks-docs databricks-genie databricks-iceberg databricks-jobs databricks-lakebase-autoscale databricks-lakebase-provisioned databricks-metric-views databricks-mlflow-evaluation databricks-model-serving databricks-python-sdk databricks-spark-declarative-pipelines databricks-spark-structured-streaming databricks-synthetic-data-gen databricks-unity-catalog databricks-unstructured-pdf-generation databricks-vector-search databricks-zerobus-ingest spark-python-data-source"
+DATABRICKS_SKILLS="databricks-agent-bricks databricks-ai-functions databricks-aibi-dashboards databricks-bundles databricks-apps-python databricks-config databricks-dbsql databricks-docs databricks-genie databricks-iceberg databricks-jobs databricks-lakebase-autoscale databricks-lakebase-provisioned databricks-metric-views databricks-mlflow-evaluation databricks-model-serving databricks-python-sdk databricks-execution-compute databricks-spark-declarative-pipelines databricks-spark-structured-streaming databricks-synthetic-data-gen databricks-unity-catalog databricks-unstructured-pdf-generation databricks-vector-search databricks-zerobus-ingest spark-python-data-source"
 
 # MLflow skills (fetched from mlflow/skills repo)
 MLFLOW_SKILLS="agent-evaluation analyze-mlflow-chat-session analyze-mlflow-trace instrumenting-with-mlflow-tracing mlflow-onboarding querying-mlflow-metrics retrieving-mlflow-traces searching-mlflow-docs"
 
-# APX skills configuration (fetched from databricks-solutions/apx repo)
-APX_REPO_RAW_URL="https://raw.githubusercontent.com/databricks-solutions/apx"
-APX_REPO_REF="main"
-APX_REPO_SKILL_PATH="skills/apx"
-
-# APX skills
-APX_SKILLS="databricks-app-apx"
-
 # All available skills
-ALL_SKILLS="$DATABRICKS_SKILLS $MLFLOW_SKILLS $APX_SKILLS"
+ALL_SKILLS="$DATABRICKS_SKILLS $MLFLOW_SKILLS"
 
 # Get skill description
 get_skill_description() {
@@ -65,8 +62,8 @@ get_skill_description() {
         "databricks-agent-bricks") echo "Knowledge Assistants, Genie Spaces, Supervisor Agents" ;;
         "databricks-ai-functions") echo "Built-in AI Functions (classify, extract, query, forecast, parse, etc.), doc processing & custom RAG" ;;
         "databricks-aibi-dashboards") echo "Databricks AI/BI Dashboards - create and manage dashboards" ;;
-        "databricks-asset-bundles") echo "Databricks Asset Bundles - deployment and configuration" ;;
-        "databricks-app-python") echo "Databricks Apps with Python (Dash, Streamlit)" ;;
+        "databricks-bundles") echo "Databricks Asset Bundles - deployment and configuration" ;;
+        "databricks-apps-python") echo "Databricks Apps with Python (Dash, Streamlit) and foundation model integration" ;;
         "databricks-config") echo "Profile authentication setup for Databricks" ;;
         "databricks-dbsql") echo "Databricks SQL - SQL scripting, MVs, geospatial, AI functions, federation" ;;
         "databricks-docs") echo "Documentation reference via llms.txt" ;;
@@ -74,6 +71,7 @@ get_skill_description() {
         "databricks-iceberg") echo "Apache Iceberg - managed tables, UniForm, IRC, Snowflake interop, migration" ;;
         "databricks-jobs") echo "Databricks Lakeflow Jobs - workflow orchestration" ;;
         "databricks-python-sdk") echo "Databricks Python SDK, Connect, and REST API" ;;
+        "databricks-execution-compute") echo "Execute code and manage compute on Databricks - serverless, clusters, and SQL warehouses" ;;
         "databricks-unity-catalog") echo "System tables for lineage, audit, billing" ;;
         "databricks-lakebase-autoscale") echo "Lakebase Autoscale - managed PostgreSQL with autoscaling" ;;
         "databricks-lakebase-provisioned") echo "Lakebase Provisioned - data connections and reverse ETL" ;;
@@ -96,8 +94,6 @@ get_skill_description() {
         "querying-mlflow-metrics") echo "Aggregated metrics and time-series analysis" ;;
         "retrieving-mlflow-traces") echo "Trace search and filtering" ;;
         "searching-mlflow-docs") echo "Search MLflow documentation" ;;
-        # APX skills (from databricks-solutions/apx repo)
-        "databricks-app-apx") echo "Databricks Apps with React/Next.js (APX framework)" ;;
         *) echo "Unknown skill" ;;
     esac
 }
@@ -106,12 +102,12 @@ get_skill_description() {
 get_skill_extra_files() {
     case "$1" in
         "databricks-agent-bricks") echo "1-knowledge-assistants.md 2-supervisor-agents.md" ;;
-        "databricks-ai-functions") echo "1-task-functions.md 2-ai-query.md 3-ai-forecast.md 4-document-processing-pipeline.md" ;;
-        "databricks-aibi-dashboards") echo "widget-reference.md sql-patterns.md" ;;
+        "databricks-ai-functions") echo "1-task-functions.md 2-ai-query.md 3-ai-forecast.md" ;;
+        "databricks-aibi-dashboards") echo "1-widget-specifications.md 2-advanced-widget-specifications.md 3-examples.md 3-filters.md 4-examples.md 5-troubleshooting.md" ;;
         "databricks-genie") echo "spaces.md conversation.md" ;;
-        "databricks-asset-bundles") echo "alerts_guidance.md SDP_guidance.md" ;;
+        "databricks-bundles") echo "alerts_guidance.md SDP_guidance.md" ;;
         "databricks-iceberg") echo "1-managed-iceberg-tables.md 2-uniform-and-compatibility.md 3-iceberg-rest-catalog.md 4-snowflake-interop.md 5-external-engine-interop.md" ;;
-        "databricks-app-python") echo "dash.md streamlit.md README.md" ;;
+        "databricks-apps-python") echo "1-authorization.md 2-app-resources.md 3-frameworks.md 4-deployment.md 5-lakebase.md 6-mcp-approach.md examples/llm_config.py examples/fm-minimal-chat.py examples/fm-parallel-calls.py examples/fm-structured-outputs.py" ;;
         "databricks-jobs") echo "task-types.md triggers-schedules.md notifications-monitoring.md examples.md" ;;
         "databricks-python-sdk") echo "doc-index.md examples/1-authentication.py examples/2-clusters-and-jobs.py examples/3-sql-and-warehouses.py examples/4-unity-catalog.py examples/5-serving-and-vector-search.py" ;;
         "databricks-unity-catalog") echo "5-system-tables.md" ;;
@@ -133,17 +129,6 @@ is_mlflow_skill() {
     local skill=$1
     for mlflow_skill in $MLFLOW_SKILLS; do
         if [ "$skill" = "$mlflow_skill" ]; then
-            return 0
-        fi
-    done
-    return 1
-}
-
-# Check if a skill is from APX repo
-is_apx_skill() {
-    local skill=$1
-    for apx_skill in $APX_SKILLS; do
-        if [ "$skill" = "$apx_skill" ]; then
             return 0
         fi
     done
@@ -177,17 +162,20 @@ show_help() {
     echo "  --list, -l              List all available skills"
     echo "  --all, -a               Install all skills (default if no skills specified)"
     echo "  --local                 Install from local files instead of downloading"
+    echo "  --install-to-genie      After install, upload ./.claude/skills to workspace"
+    echo "                          /Users/<you>/.assistant/skills for Genie Code (uses cwd; requires databricks CLI)"
+    echo "  --profile <name>        Databricks config profile for workspace upload (default: DEFAULT or \$DATABRICKS_CONFIG_PROFILE)"
     echo "  --mlflow-version <ref>  Pin MLflow skills to specific version/branch/tag (default: main)"
-    echo "  --apx-version <ref>    Pin APX skills to specific version/branch/tag (default: main)"
     echo ""
     echo "Examples:"
     echo "  ./install_skills.sh                          # Install all skills"
     echo "  ./install_skills.sh databricks-spark-declarative-pipelines  # Install specific Databricks skill"
     echo "  ./install_skills.sh agent-evaluation         # Install specific MLflow skill"
-    echo "  ./install_skills.sh databricks-asset-bundles agent-evaluation  # Mix of both sources"
+    echo "  ./install_skills.sh databricks-bundles agent-evaluation  # Mix of both sources"
     echo "  ./install_skills.sh --mlflow-version v1.0.0  # Pin MLflow skills version"
-    echo "  ./install_skills.sh --apx-version v1.0.0    # Pin APX skills version"
     echo "  ./install_skills.sh --local                  # Install all from local directory"
+    echo "  ./install_skills.sh --install-to-genie       # Install all, then upload to workspace for Genie Code"
+    echo "  ./install_skills.sh --install-to-genie --profile prod  # Same with explicit Databricks CLI profile"
     echo "  ./install_skills.sh --list                   # List available skills"
     echo ""
     echo -e "${GREEN}Databricks Skills:${NC}"
@@ -197,11 +185,6 @@ show_help() {
     echo ""
     echo -e "${GREEN}MLflow Skills (from github.com/mlflow/skills):${NC}"
     for skill in $MLFLOW_SKILLS; do
-        echo "  - $skill: $(get_skill_description "$skill")"
-    done
-    echo ""
-    echo -e "${GREEN}APX Skills (from github.com/databricks-solutions/apx):${NC}"
-    for skill in $APX_SKILLS; do
         echo "  - $skill: $(get_skill_description "$skill")"
     done
     echo ""
@@ -223,12 +206,6 @@ list_skills() {
         echo -e "    $(get_skill_description "$skill")"
     done
     echo ""
-    echo -e "${GREEN}APX Skills (from github.com/databricks-solutions/apx):${NC}"
-    for skill in $APX_SKILLS; do
-        echo -e "  ${GREEN}$skill${NC}"
-        echo -e "    $(get_skill_description "$skill")"
-    done
-    echo ""
 }
 
 # Validate skill name
@@ -240,6 +217,93 @@ is_valid_skill() {
         fi
     done
     return 1
+}
+
+# Upload one skill folder to workspace /Users/<user>/.assistant/skills/<skill>/
+upload_skill_to_genie_workspace() {
+    local skill_dir="$1"
+    local skills_path="$2"
+    local db_profile="$3"
+
+    skill_dir="${skill_dir%/}"
+    local skill_name
+    skill_name=$(basename "$skill_dir")
+
+    if [[ "$skill_name" == "."* ]] || [[ "$skill_name" == "TEMPLATE" ]] || [[ ! -d "$skill_dir" ]]; then
+        return 0
+    fi
+    if [[ ! -f "$skill_dir/SKILL.md" ]]; then
+        return 0
+    fi
+
+    echo -e "  ${GREEN}Uploading${NC} $skill_name"
+    databricks workspace mkdirs "$skills_path/$skill_name" --profile "$db_profile" 2>/dev/null || true
+
+    while IFS= read -r -d '' file; do
+        rel_path="${file#$skill_dir/}"
+        dest_path="$skills_path/$skill_name/$rel_path"
+        parent_dir=$(dirname "$dest_path")
+        if [[ "$parent_dir" != "$skills_path/$skill_name" ]]; then
+            databricks workspace mkdirs "$parent_dir" --profile "$db_profile" 2>/dev/null || true
+        fi
+        databricks workspace import "$dest_path" --file "$file" --profile "$db_profile" --format AUTO --overwrite 2>/dev/null || true
+    done < <(find "$skill_dir" -type f \( -name "*.md" -o -name "*.py" -o -name "*.yaml" -o -name "*.yml" -o -name "*.sh" \) -print0)
+}
+
+# Upload all skills under SKILLS_DIR to workspace for Genie Code / Assistant agent mode
+install_skills_to_genie_workspace() {
+    if ! command -v databricks >/dev/null 2>&1; then
+        echo -e "${RED}Error: databricks CLI not found. Install it to use --install-to-genie.${NC}"
+        return 1
+    fi
+
+    local abs_skills_dir
+    if [ ! -d "$SKILLS_DIR" ]; then
+        echo -e "${RED}Error: Skills directory not found: ${SKILLS_DIR} (run from the directory where skills were installed).${NC}"
+        return 1
+    fi
+    abs_skills_dir="$(cd "$SKILLS_DIR" && pwd)"
+
+    echo ""
+    echo -e "${BLUE}════════════════════════════════════════════════════════════${NC}"
+    echo -e "${BLUE}  Uploading skills to workspace (Genie Code)${NC}"
+    echo -e "${BLUE}════════════════════════════════════════════════════════════${NC}"
+    echo -e "Databricks profile: ${DB_PROFILE}"
+    echo -e "Local skills (cwd-relative): ${SKILLS_DIR}/ → ${abs_skills_dir}"
+    echo ""
+
+    local user_name
+    user_name=$(databricks current-user me --profile "$DB_PROFILE" --output json 2>/dev/null | python3 -c "import sys, json; d=json.load(sys.stdin); print(d.get('userName', ''))" 2>/dev/null || echo "")
+    if [ -z "$user_name" ]; then
+        echo -e "${RED}Error: Could not determine workspace user. Check authentication and --profile.${NC}"
+        return 1
+    fi
+
+    local skills_path="/Users/$user_name/.assistant/skills"
+    echo -e "Workspace user: ${user_name}"
+    echo -e "Workspace path: ${skills_path}"
+    echo ""
+
+    echo -e "${GREEN}Creating workspace skills directory...${NC}"
+    databricks workspace mkdirs "$skills_path" --profile "$DB_PROFILE" 2>/dev/null || true
+
+    echo -e "${GREEN}Uploading skills...${NC}"
+    local skill_dir
+    for skill_dir in "$abs_skills_dir"/*/; do
+        [ -d "$skill_dir" ] || continue
+        upload_skill_to_genie_workspace "$skill_dir" "$skills_path" "$DB_PROFILE"
+    done
+
+    echo ""
+    echo -e "${GREEN}Workspace listing:${NC}"
+    databricks workspace list "$skills_path" --profile "$DB_PROFILE" 2>/dev/null || echo -e "  ${YELLOW}(Could not list workspace path)${NC}"
+
+    local skills_count
+    skills_count=$(find "$abs_skills_dir" -maxdepth 1 -type d -exec test -f {}/SKILL.md \; -print 2>/dev/null | wc -l | tr -d ' ')
+    echo ""
+    echo -e "${GREEN}Genie Code upload complete.${NC} ${skills_count} skills under ${skills_path}"
+    echo ""
+    return 0
 }
 
 # Function to download a Databricks skill
@@ -350,46 +414,6 @@ download_mlflow_skill() {
     return 0
 }
 
-# Get extra files for an APX skill (besides SKILL.md)
-get_apx_skill_extra_files() {
-    case "$1" in
-        "databricks-app-apx") echo "backend-patterns.md frontend-patterns.md" ;;
-        *) echo "" ;;
-    esac
-}
-
-# Function to download an APX skill
-download_apx_skill() {
-    local skill_name=$1
-    local skill_dir="$SKILLS_DIR/$skill_name"
-    local base_url="${APX_REPO_RAW_URL}/${APX_REPO_REF}/${APX_REPO_SKILL_PATH}"
-
-    echo -e "  Downloading from APX repo (${APX_REPO_REF})..."
-
-    # Download SKILL.md (required)
-    if curl -sSL -f "${base_url}/SKILL.md" -o "$skill_dir/SKILL.md" 2>/dev/null; then
-        echo -e "  ${GREEN}✓${NC} Downloaded SKILL.md"
-    else
-        echo -e "  ${RED}✗${NC} Failed to download SKILL.md from APX repo"
-        rm -rf "$skill_dir"
-        return 1
-    fi
-
-    # Download skill-specific extra files
-    local extra_files=$(get_apx_skill_extra_files "$skill_name")
-    if [ -n "$extra_files" ]; then
-        for extra_file in $extra_files; do
-            if curl -sSL -f "${base_url}/${extra_file}" -o "$skill_dir/${extra_file}" 2>/dev/null; then
-                echo -e "  ${GREEN}✓${NC} Downloaded ${extra_file}"
-            else
-                echo -e "  ${YELLOW}○${NC} Optional file ${extra_file} not found"
-            fi
-        done
-    fi
-
-    return 0
-}
-
 # Function to download a skill (routes to appropriate download function)
 download_skill() {
     local skill_name=$1
@@ -413,13 +437,6 @@ download_skill() {
             return 1
         fi
         download_mlflow_skill "$skill_name"
-    elif is_apx_skill "$skill_name"; then
-        if [ "$INSTALL_FROM_LOCAL" = true ]; then
-            echo -e "  ${RED}✗${NC} APX skills cannot be installed from local (they are fetched from github.com/databricks-solutions/apx)"
-            rm -rf "$skill_dir"
-            return 1
-        fi
-        download_apx_skill "$skill_name"
     else
         download_databricks_skill "$skill_name"
     fi
@@ -452,20 +469,24 @@ while [ $# -gt 0 ]; do
             INSTALL_FROM_LOCAL=true
             shift
             ;;
+        --install-to-genie|--deploy-to-assistant)
+            INSTALL_TO_GENIE=true
+            shift
+            ;;
+        --profile)
+            if [ -z "$2" ] || [ "${2:0:1}" = "-" ]; then
+                echo -e "${RED}Error: --profile requires a profile name${NC}"
+                exit 1
+            fi
+            DB_PROFILE="$2"
+            shift 2
+            ;;
         --mlflow-version)
             if [ -z "$2" ] || [ "${2:0:1}" = "-" ]; then
                 echo -e "${RED}Error: --mlflow-version requires a version/ref argument${NC}"
                 exit 1
             fi
             MLFLOW_REPO_REF="$2"
-            shift 2
-            ;;
-        --apx-version)
-            if [ -z "$2" ] || [ "${2:0:1}" = "-" ]; then
-                echo -e "${RED}Error: --apx-version requires a version/ref argument${NC}"
-                exit 1
-            fi
-            APX_REPO_REF="$2"
             shift 2
             ;;
         -*)
@@ -563,4 +584,8 @@ for skill in $SKILLS_TO_INSTALL; do
         echo -e "  ${GREEN}✓${NC} $skill"
     fi
 done
+
+if [ "$INSTALL_TO_GENIE" = true ]; then
+    install_skills_to_genie_workspace || exit 1
+fi
 

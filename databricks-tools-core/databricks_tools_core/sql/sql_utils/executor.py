@@ -2,13 +2,12 @@
 SQL Executor - Internal class for executing SQL queries on Databricks.
 """
 
-import inspect
 import time
 import logging
 from typing import Any, Dict, List, Optional
 
 from databricks.sdk import WorkspaceClient
-from databricks.sdk.service.sql import EndpointTagPair, StatementState
+from databricks.sdk.service.sql import StatementState
 
 from ...auth import get_workspace_client
 
@@ -87,52 +86,40 @@ class SQLExecutor:
         if row_limit is not None:
             exec_params["row_limit"] = row_limit
         if query_tags:
-            # query_tags support and expected shape vary by databricks-sdk version.
-            # Newer SDKs may accept this field as an SDK dataclass, while older
-            # SDKs do not expose it at all.
-            if self._supports_query_tags():
-                exec_params["query_tags"] = self._build_query_tags_payload(query_tags)
-            else:
-                logger.warning(
-                    "Ignoring query_tags: current databricks-sdk does not support query_tags in execute_statement()"
-                )
+            from databricks.sdk.service.sql import QueryTag
+
+            exec_params["query_tags"] = [
+                QueryTag(key=k.strip(), value=v.strip())
+                for pair in query_tags.split(",")
+                for k, v in [pair.split(":", 1)]
+                if ":" in pair
+            ]
 
         # Submit the statement
         try:
             response = self.client.statement_execution.execute_statement(**exec_params)
         except Exception as e:
-            # Backward-compatible fallback: if query_tags serialization fails,
-            # retry once without query_tags so the query can still execute.
-            if "query_tags" in exec_params and (
-                "as_dict" in str(e) or "not iterable" in str(e) or "query_tags" in str(e)
-            ):
-                logger.warning(
-                    "Retrying execute_statement without query_tags due to SDK serialization mismatch: %s",
-                    e,
-                )
-                fallback_params = dict(exec_params)
-                fallback_params.pop("query_tags", None)
-                try:
-                    response = self.client.statement_execution.execute_statement(**fallback_params)
-                except Exception:
-                    raise SQLExecutionError(
-                        f"Failed to submit SQL query to warehouse '{self.warehouse_id}': {str(e)}. "
-                        f"Check that the warehouse exists and is accessible."
-                    )
-            else:
-                raise SQLExecutionError(
-                    f"Failed to submit SQL query to warehouse '{self.warehouse_id}': {str(e)}. "
-                    f"Check that the warehouse exists and is accessible."
-                )
+            raise SQLExecutionError(
+                f"Failed to submit SQL query to warehouse '{self.warehouse_id}': {str(e)}. "
+                f"Check that the warehouse exists and is accessible."
+            )
 
         statement_id = response.statement_id
         logger.debug(f"Statement submitted with ID: {statement_id}")
 
-        # Poll for completion
+        # Poll for completion.
+        #
+        # Use time.monotonic() for the timeout boundary instead of incrementing
+        # a counter by poll_interval each iteration. The counter approach
+        # tracks only sleep time and ignores how long each get_statement RPC
+        # takes — under warehouse load, get_statement can take several seconds
+        # per call, so the counter undercounts wall clock and the configured
+        # timeout fires much later than intended (or, for very slow RPCs,
+        # never fires before the statement completes naturally).
         poll_interval = 2
-        elapsed = 0
+        start_time = time.monotonic()
 
-        while elapsed < timeout:
+        while time.monotonic() - start_time < timeout:
             try:
                 status = self.client.statement_execution.get_statement(statement_id=statement_id)
             except Exception as e:
@@ -157,12 +144,12 @@ class SQLExecutor:
 
             # Still running, wait and poll again
             time.sleep(poll_interval)
-            elapsed += poll_interval
 
         # Timeout reached - cancel the statement
         self._cancel_statement(statement_id)
+        elapsed_wall = time.monotonic() - start_time
         raise SQLExecutionError(
-            f"SQL query timed out after {timeout} seconds and was canceled. "
+            f"SQL query timed out after {elapsed_wall:.1f} seconds (limit: {timeout}s) and was canceled. "
             f"Consider increasing the timeout or optimizing the query. "
             f"Statement ID: {statement_id}"
         )
@@ -206,25 +193,3 @@ class SQLExecutor:
             logger.debug(f"Canceled statement {statement_id}")
         except Exception as e:
             logger.warning(f"Failed to cancel statement {statement_id}: {e}")
-
-    def _supports_query_tags(self) -> bool:
-        """Return True when execute_statement() supports a query_tags parameter."""
-        try:
-            sig = inspect.signature(self.client.statement_execution.execute_statement)
-            return "query_tags" in sig.parameters
-        except Exception:
-            return False
-
-    def _build_query_tags_payload(self, query_tags: str) -> List[EndpointTagPair]:
-        """Parse 'k:v,k2:v2' into a list of SDK EndpointTagPair objects."""
-        tags: List[EndpointTagPair] = []
-        for raw in query_tags.split(","):
-            part = raw.strip()
-            if not part:
-                continue
-            if ":" not in part:
-                tags.append(EndpointTagPair(key=part, value=""))
-                continue
-            key, value = part.split(":", 1)
-            tags.append(EndpointTagPair(key=key.strip(), value=value.strip()))
-        return tags
