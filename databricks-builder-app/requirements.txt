@@ -30,9 +30,12 @@ mlflow>=3.9.0
 
 # MCP
 mcp>=1.0.0
-fastmcp>=0.1.0
+fastmcp>=3.2.4,<4
+websockets>=15.0.1,<16
 
 # Dependencies for databricks-tools-core (only runtime-needed packages)
 requests>=2.31.0
+pyyaml>=6.0
 sqlglot>=20.0.0
 sqlfluff>=3.0.0
+plutoprint==0.19.0

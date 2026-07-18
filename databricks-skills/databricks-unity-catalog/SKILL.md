@@ -33,11 +33,11 @@ Use this skill when:
 
 | Tool | Usage |
 |------|-------|
-| `list_volume_files` | `list_volume_files(volume_path="/Volumes/catalog/schema/volume/path/")` |
+| `manage_volume_files` | `manage_volume_files(action="list", volume_path="/Volumes/catalog/schema/volume/path/")` |
 | `get_volume_folder_details` | `get_volume_folder_details(volume_path="catalog/schema/volume/path", format="parquet")` - schema, row counts, stats |
-| `upload_to_volume` | `upload_to_volume(local_path="/tmp/data/*", volume_path="/Volumes/.../dest")` |
-| `download_from_volume` | `download_from_volume(volume_path="/Volumes/.../file.csv", local_path="/tmp/file.csv")` |
-| `create_volume_directory` | `create_volume_directory(volume_path="/Volumes/.../new_folder")` |
+| `manage_volume_files` | `manage_volume_files(action="upload", local_path="/tmp/data/*", volume_path="/Volumes/.../dest")` |
+| `manage_volume_files` | `manage_volume_files(action="download", volume_path="/Volumes/.../file.csv", local_destination="/tmp/file.csv")` |
+| `manage_volume_files` | `manage_volume_files(action="mkdir", volume_path="/Volumes/.../new_folder")` |
 
 ### Enable System Tables Access
 

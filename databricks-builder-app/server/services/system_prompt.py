@@ -88,7 +88,7 @@ Use the `Skill` tool to load skills. Available skills:
 3. **Use MCP tools** for all Databricks operations
 4. **Grant permissions** after creating any resource (see Permission Grants section)
 5. **Complete workflows automatically** - Don't stop halfway or ask users to do manual steps
-6. **Verify results** - Use `get_table_details` to confirm data was written correctly
+6. **Verify results** - Use `get_table_stats_and_schema` to confirm data was written correctly
 7. **Provide resource links** - Always include clickable URLs for created resources
 {skill_guide}"""
   else:
@@ -100,7 +100,7 @@ Use the `Skill` tool to load skills. Available skills:
 2. **Use MCP tools** for all Databricks operations
 3. **Grant permissions** after creating any resource (see Permission Grants section)
 4. **Complete workflows automatically** - Don't stop halfway or ask users to do manual steps
-5. **Verify results** - Use `get_table_details` to confirm data was written correctly
+5. **Verify results** - Use `get_table_stats_and_schema` to confirm data was written correctly
 6. **Provide resource links** - Always include clickable URLs for created resources
 
 **NOTE: No skills are enabled for this project. Do NOT use the Skill tool.**
@@ -113,10 +113,10 @@ Use the `Skill` tool to load skills. Available skills:
 
 You are configured to use **Databricks Serverless Compute** for code execution.
 
-When using `execute_databricks_command` or `run_python_file_on_databricks`:
-- **Do NOT pass a cluster_id parameter**.
-- The tool will first auto-select the best accessible classic cluster and will report which cluster it actually used.
-- If no classic cluster is available, Python and SQL execution automatically fall back to a Jobs-backed serverless run.
+When using `execute_code`:
+- Set `compute_type="serverless"`.
+- **Do NOT pass `cluster_id` or `context_id`**.
+- Serverless execution is stateless; pass the complete code or local `file_path` on every call.
 """
   elif cluster_id:
     cluster_section = f"""
@@ -125,7 +125,7 @@ When using `execute_databricks_command` or `run_python_file_on_databricks`:
 You have a Databricks cluster selected for code execution:
 - **Cluster ID:** `{cluster_id}`
 
-When using `execute_databricks_command` or `run_python_file_on_databricks`, use this cluster_id by default.
+When using `execute_code`, set `compute_type="cluster"` and use this cluster_id by default.
 """
 
   warehouse_section = ''
@@ -149,12 +149,12 @@ When using `execute_sql` or other SQL tools, use this warehouse_id by default.
 - **Workspace Folder (Databricks):** `{workspace_folder}`
 
 Use this path ONLY for:
-- `upload_folder` / `upload_file` tools (uploading TO Databricks Workspace)
+- `manage_workspace_files(action="upload", ...)` (uploading TO Databricks Workspace)
 - Creating pipelines (as the root_path parameter)
 
 **DO NOT use this path for:**
 - Local file operations (Read, Write, Edit, Bash)
-- `run_python_file_on_databricks` (always use local project paths like `scripts/generate_data.py`)
+- `execute_code(file_path=...)` (always use local project paths like `scripts/generate_data.py`)
 - Any file tool that operates on the local filesystem
 
 **Your local working directory is the project folder. All local file paths are relative to your current working directory.**
@@ -243,8 +243,8 @@ Use it as storage to track all the resources created in the project, and be able
 
 - **Always use MCP tools** - never use CLI commands, curl, or SDK code when an MCP tool exists
 - MCP tool names use the format `mcp__databricks__<tool_name>` (e.g., `mcp__databricks__execute_sql`)
-- Use `upload_folder`/`upload_file` for file uploads, never manual steps
-- Use `create_or_update_pipeline` for pipelines, never SDK code
+- Use `manage_workspace_files(action="upload", ...)` for file uploads, never manual steps
+- Use `manage_pipeline(action="create_or_update", ...)` for pipelines, never SDK code
 - **Do NOT use the AskUserQuestion tool.** If you need clarifying information, ask your questions directly in your text response as a normal conversation turn. The user will reply naturally.
 - To parse a PDF, upload it to a Unity Catalog volume, load it with `read_files(..., format => 'binaryFile')`, and call `ai_parse_document(content)`. The result is a VARIANT; inspect `parsed:document.elements` for extracted text, titles, tables, figures, and other elements. Tables come back as HTML. `ai_parse_document` requires a SQL warehouse or DBR 17.1+ and must receive binary file content, not a file path.
 

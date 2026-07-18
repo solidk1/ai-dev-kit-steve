@@ -1,5 +1,6 @@
 """Compatibility helpers for runtime MCP tool discovery."""
 
+import asyncio
 import inspect
 from types import ModuleType
 from typing import Any, Iterable
@@ -8,12 +9,20 @@ from typing import Any, Iterable
 def _normalize_tool_mapping(raw_tools: Any) -> dict[str, Any]:
     """Convert several common FastMCP tool collection shapes into a dict."""
     if isinstance(raw_tools, dict):
-        return raw_tools
+        normalized: dict[str, Any] = {}
+        for fallback_key, tool in raw_tools.items():
+            key = getattr(tool, 'name', None) or fallback_key
+            if key:
+                normalized[str(key)] = tool
+        return normalized
 
     if isinstance(raw_tools, (list, tuple, set)):
         normalized: dict[str, Any] = {}
         for tool in raw_tools:
-            key = getattr(tool, 'key', None) or getattr(tool, 'name', None)
+            # FastMCP 3 ``key`` values are versioned registry identifiers such
+            # as ``tool:execute_sql@``. The public tool name is stable and is
+            # what Claude Agent SDK exposes to the model.
+            key = getattr(tool, 'name', None) or getattr(tool, 'key', None)
             if key:
                 normalized[str(key)] = tool
         if normalized:
@@ -30,6 +39,20 @@ async def _call_maybe_async(value: Any) -> Any:
     return result
 
 
+def invoke_mcp_tool_sync(fn: Any, kwargs: dict[str, Any]) -> Any:
+    """Invoke a registered MCP function from a worker thread.
+
+    FastMCP 3 may expose an async wrapper even when the underlying tool was
+    defined as a synchronous function. The Builder App deliberately invokes
+    tools in a worker thread so long-running calls can outlive an agent event
+    loop. Resolve either callable shape to its final value in that thread.
+    """
+    result = fn(**kwargs)
+    if inspect.isawaitable(result):
+        return asyncio.run(result)
+    return result
+
+
 def _scan_tool_modules(tool_modules: Iterable[ModuleType] | None) -> dict[str, Any]:
     """Fallback: collect decorated tool objects directly from imported modules."""
     if not tool_modules:
@@ -40,7 +63,7 @@ def _scan_tool_modules(tool_modules: Iterable[ModuleType] | None) -> dict[str, A
         for candidate in vars(module).values():
             if not hasattr(candidate, 'fn') or not hasattr(candidate, 'parameters'):
                 continue
-            key = getattr(candidate, 'key', None) or getattr(candidate, 'name', None)
+            key = getattr(candidate, 'name', None) or getattr(candidate, 'key', None)
             if key:
                 normalized[str(key)] = candidate
     return normalized

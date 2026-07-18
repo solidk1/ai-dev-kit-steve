@@ -41,14 +41,13 @@ All volume operations use the path format:
 
 | Tool | Usage |
 |------|-------|
-| `list_volume_files` | `list_volume_files(volume_path="/Volumes/catalog/schema/volume/path/")` |
+| `manage_volume_files` | `manage_volume_files(action="list", volume_path="/Volumes/catalog/schema/volume/path/")` |
 | `get_volume_folder_details` | `get_volume_folder_details(volume_path="catalog/schema/volume/path", format="parquet")` - schema, row counts, stats |
-| `upload_to_volume` | `upload_to_volume(local_path="/tmp/data/*", volume_path="/Volumes/.../dest")` - supports files, folders, globs |
-| `download_from_volume` | `download_from_volume(volume_path="/Volumes/.../file.csv", local_path="/tmp/file.csv")` |
-| `create_volume_directory` | `create_volume_directory(volume_path="/Volumes/.../new_folder")` - creates parents like `mkdir -p` |
-| `delete_volume_file` | `delete_volume_file(volume_path="/Volumes/.../file.csv")` |
-| `delete_volume_directory` | `delete_volume_directory(volume_path="/Volumes/.../folder")` - directory must be empty |
-| `get_volume_file_info` | `get_volume_file_info(volume_path="/Volumes/.../file.csv")` - returns size, modified date |
+| `manage_volume_files` | `manage_volume_files(action="upload", local_path="/tmp/data/*", volume_path="/Volumes/.../dest")` - supports files, folders, globs |
+| `manage_volume_files` | `manage_volume_files(action="download", volume_path="/Volumes/.../file.csv", local_destination="/tmp/file.csv")` |
+| `manage_volume_files` | `manage_volume_files(action="mkdir", volume_path="/Volumes/.../new_folder")` - creates parents like `mkdir -p` |
+| `manage_volume_files` | `manage_volume_files(action="delete", volume_path="/Volumes/.../path", recursive=true)` |
+| `manage_volume_files` | `manage_volume_files(action="get_info", volume_path="/Volumes/.../file.csv")` - returns size and modified date |
 
 ---
 

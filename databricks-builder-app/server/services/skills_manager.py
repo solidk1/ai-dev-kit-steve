@@ -18,41 +18,33 @@ logger = logging.getLogger(__name__)
 # available regardless of which skills are enabled.
 # ---------------------------------------------------------------------------
 SKILL_TOOL_MAPPING: dict[str, list[str]] = {
-  'databricks-agent-bricks': ['manage_ka', 'manage_mas'],
-  'databricks-aibi-dashboards': [
-    'create_or_update_dashboard', 'get_dashboard',
-    'delete_dashboard', 'publish_dashboard',
-  ],
-  'databricks-genie': [
-    'create_or_update_genie', 'get_genie', 'delete_genie', 'ask_genie',
-  ],
-  'databricks-spark-declarative-pipelines': [
-    'create_or_update_pipeline', 'get_pipeline',
-    'delete_pipeline', 'run_pipeline',
-  ],
+  'databricks-agent-bricks': ['manage_ka', 'manage_mas', 'manage_genie'],
+  'databricks-aibi-dashboards': ['manage_dashboard'],
+  'databricks-genie': ['manage_genie', 'ask_genie'],
+  'databricks-spark-declarative-pipelines': ['manage_pipeline', 'manage_pipeline_run'],
   'databricks-model-serving': [
-    'get_serving_endpoint_status', 'query_serving_endpoint', 'list_serving_endpoints',
+    'manage_serving_endpoint', 'manage_jobs', 'manage_job_runs',
   ],
-  'databricks-jobs': [
-    'list_jobs', 'get_job', 'find_job_by_name', 'create_job', 'update_job',
-    'delete_job', 'run_job_now', 'get_run', 'get_run_output', 'cancel_run',
-    'list_runs', 'wait_for_run',
-  ],
+  'databricks-jobs': ['manage_jobs', 'manage_job_runs'],
   'databricks-unity-catalog': [
     'manage_uc_objects', 'manage_uc_grants', 'manage_uc_storage',
     'manage_uc_connections', 'manage_uc_tags', 'manage_uc_security_policies',
     'manage_uc_monitors', 'manage_uc_sharing',
-    'list_volume_files', 'upload_to_volume', 'download_from_volume',
-    'delete_volume_file', 'delete_volume_directory', 'create_volume_directory',
-    'get_volume_file_info',
+    'manage_volume_files',
   ],
-  # APX (FastAPI+React) and Python (Dash/Streamlit/etc.) share the same
-  # app lifecycle tools — the skill content differs, not the MCP operations.
-  'databricks-app-apx': [
-    'create_or_update_app', 'get_app', 'delete_app',
+  'databricks-apps-python': ['manage_app'],
+  'databricks-lakebase-autoscale': [
+    'manage_lakebase_database', 'manage_lakebase_branch',
+    'manage_lakebase_sync', 'generate_lakebase_credential',
   ],
-  'databricks-app-python': [
-    'create_or_update_app', 'get_app', 'delete_app',
+  'databricks-lakebase-provisioned': [
+    'manage_lakebase_database', 'manage_lakebase_sync',
+    'generate_lakebase_credential',
+  ],
+  'databricks-metric-views': ['manage_metric_views'],
+  'databricks-unstructured-pdf-generation': ['generate_and_upload_pdf'],
+  'databricks-vector-search': [
+    'manage_vs_endpoint', 'manage_vs_index', 'manage_vs_data', 'query_vs_index',
   ],
 }
 

@@ -22,7 +22,6 @@ import logging
 import os
 import queue
 import re
-import sys
 import threading
 import time
 import traceback
@@ -125,7 +124,9 @@ def _is_inline_image_tool(tool_name: str | None) -> bool:
     return False
   normalized = tool_name.strip()
   return (
-    normalized == 'execute_databricks_command'
+    normalized == 'execute_code'
+    or normalized.endswith('__execute_code')
+    or normalized == 'execute_databricks_command'
     or normalized.endswith('__execute_databricks_command')
     or normalized == 'check_operation_status'
     or normalized.endswith('__check_operation_status')
@@ -138,7 +139,9 @@ def _is_command_execution_tool(tool_name: str | None) -> bool:
     return False
   normalized = tool_name.strip()
   return (
-    normalized == 'execute_databricks_command'
+    normalized == 'execute_code'
+    or normalized.endswith('__execute_code')
+    or normalized == 'execute_databricks_command'
     or normalized.endswith('__execute_databricks_command')
   )
 
@@ -975,7 +978,7 @@ async def stream_agent_response(
       print(f'Claude CLI stderr: {e.stderr}')
       logger.error(f'Claude CLI stderr: {e.stderr}')
     if hasattr(e, 'message') and 'Check stderr' in str(e):
-      print(f'NOTE: Claude CLI exited with error. Check stderr_callback output above.')
+      print('NOTE: Claude CLI exited with error. Check stderr_callback output above.')
 
     logger.error(error_msg)
     logger.error(full_traceback)

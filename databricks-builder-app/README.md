@@ -33,9 +33,9 @@ A web application that provides a Claude Code agent interface with integrated Da
 │  Built-in Tools:              MCP Tools (Databricks):         Skills:       │
 │  ┌──────────────────┐         ┌─────────────────────────┐    ┌───────────┐  │
 │  │ Read, Write, Edit│         │ execute_sql             │    │ sdp       │  │
-│  │ Glob, Grep, Skill│         │ create_or_update_pipeline    │ dabs      │  │
-│  └──────────────────┘         │ upload_folder           │    │ sdk       │  │
-│                               │ run_python_file         │    │ ...       │  │
+│  │ Glob, Grep, Skill│         │ manage_pipeline         │    │ dabs      │  │
+│  └──────────────────┘         │ manage_workspace_files  │    │ sdk       │  │
+│                               │ execute_code            │    │ ...       │  │
 │                               │ ...                     │    └───────────┘  │
 │                               └─────────────────────────┘                   │
 │                                          │                                  │
@@ -158,10 +158,10 @@ options = ClaudeAgentOptions(
 
 Tools are exposed as `mcp__databricks__<tool_name>` and include:
 - SQL execution (`execute_sql`, `execute_sql_multi`)
-- Warehouse management (`list_warehouses`, `get_best_warehouse`)
-- Cluster execution (`execute_databricks_command`, `run_python_file_on_databricks`)
-- Pipeline management (`create_or_update_pipeline`, `start_update`, etc.)
-- File operations (`upload_file`, `upload_folder`)
+- Warehouse management (`manage_warehouse`, `manage_sql_warehouse`)
+- Compute execution (`execute_code`, `manage_cluster`, `list_compute`)
+- Pipeline management (`manage_pipeline`, `manage_pipeline_run`)
+- File operations (`manage_workspace_files`)
 
 ### 4. Skills System
 

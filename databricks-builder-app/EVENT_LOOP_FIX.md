@@ -101,7 +101,7 @@ Convert empty strings to `None` in MCP tool wrappers (in `databricks-mcp-server/
 
 ```python
 @mcp.tool
-def execute_databricks_command(
+def execute_code(
     code: str,
     cluster_id: Optional[str] = None,
     context_id: Optional[str] = None,
@@ -149,4 +149,3 @@ To verify the fix works:
 - Original Issue: https://github.com/anthropics/claude-agent-sdk-python/issues/462
 - Python contextvars: https://docs.python.org/3/library/contextvars.html
 - Threading and contextvars: https://peps.python.org/pep-0567/#implementation-notes
-

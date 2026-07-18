@@ -131,11 +131,11 @@ The agent streams these event types:
 
 The agent has access to Databricks tools via MCP:
 
-- **SQL**: `execute_sql`, `execute_sql_multi`, `list_warehouses`, `get_table_details`
-- **Compute**: `list_clusters`, `execute_databricks_command`, `run_python_file_on_databricks`
-- **Jobs**: `create_job`, `run_job_now`, `wait_for_run`, `list_runs`
-- **Pipelines**: `create_or_update_pipeline`, `start_update`, `get_update`
-- **Files**: `upload_file`, `upload_folder`
+- **SQL**: `execute_sql`, `execute_sql_multi`, `manage_warehouse`, `get_table_stats_and_schema`
+- **Compute**: `execute_code`, `manage_cluster`, `list_compute`
+- **Jobs**: `manage_jobs`, `manage_job_runs`
+- **Pipelines**: `manage_pipeline`, `manage_pipeline_run`
+- **Files**: `manage_workspace_files`
 - **Unity Catalog**: Catalog, schema, table, volume operations
 
 ### Configuring Context
